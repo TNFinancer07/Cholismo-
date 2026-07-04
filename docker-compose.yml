@@ -1,0 +1,58 @@
+version: "3.9"
+
+# Cholismo Terminal — stack complet (TASKS 0.4)
+# `docker compose up` démarre FastAPI + Redis + n8n ensemble ; SQLite est un volume du backend.
+
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  backend:
+    build: ./backend
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      EVENT_DB_PATH: /data/events.db
+      MACRO_CALIBRATED: "false"
+      # Clés IA optionnelles — absentes = fail-closed advisory/skip (CLAUDE §2.2, D-014)
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+    volumes:
+      - event-store:/data
+    ports:
+      - "8000:8000"
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  frontend:
+    build: ./frontend
+    environment:
+      VITE_API_BASE: http://localhost:8000
+    ports:
+      - "5173:5173"
+    depends_on:
+      - backend
+
+  n8n:
+    image: n8nio/n8n:latest
+    environment:
+      N8N_BASIC_AUTH_ACTIVE: "false"
+      N8N_DIAGNOSTICS_ENABLED: "false"
+      WEBHOOK_URL: http://n8n:5678/
+    ports:
+      - "5678:5678"
+    volumes:
+      - n8n-data:/home/node/.n8n
+      - ./orchestration/n8n/workflows:/workflows:ro
+
+volumes:
+  event-store:
+  n8n-data:
