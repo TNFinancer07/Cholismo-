@@ -21,3 +21,6 @@ backend/data/*.sqlite*
 .DS_Store
 .idea/
 .vscode/
+backend/dump.rdb
+dump.rdb
+*.tsbuildinfo

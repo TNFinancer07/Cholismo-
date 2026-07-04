@@ -100,9 +100,10 @@ sous-sources (spread anormal + flag), NaN (rendu ABSENT, jamais 0), désync d'ho
 vérifier STALE/ABSENT (TASKS 2.4).
 
 ## D-013 · Sharpe (`PLACEHOLDER` de calcul, gate AUTORITÉ)
-Sharpe = mean(r_multiples)/stdev(r_multiples) × √N par session, calculé **uniquement** sur
-les `OutcomeEvent` référençant un `DecisionEvent` réconcilié (`matched=true`). Result score
-affiché seulement à 20+ trades (`CLAUDE §2.7`), sinon `N/A (< 20 trades)`.
+Sharpe par trade = mean(r_multiples)/stdev(r_multiples) (écart-type échantillon, sans
+annualisation), calculé **uniquement** sur les `OutcomeEvent` référençant un
+`DecisionEvent` réconcilié (`matched=true`). Result score affiché seulement à 20+ trades
+(`CLAUDE §2.7`), sinon `N/A (< 20 trades)`.
 
 ## D-014 · IA hors hot path — stubs câblés, clés absentes = fail-closed
 Groq/Claude/Gemini : clients async isolés (`backend/app/ai/`), jamais appelés dans le
