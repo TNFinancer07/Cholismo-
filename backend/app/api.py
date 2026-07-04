@@ -153,6 +153,8 @@ class ArmBody(BaseModel):
 @router.post("/decisions/arm")
 async def arm_decision(body: ArmBody, request: Request) -> dict[str, Any]:
     redis = request.app.state.redis
+    if await redis.mode() != "LIVE":
+        raise HTTPException(409, "fenêtre de décision uniquement en mode LIVE (D-008)")
     if await redis.decision_window():
         raise HTTPException(409, "une décision est déjà pendante")
     now = time.time()

@@ -109,7 +109,7 @@ class Engine:
     # ---------- C3 decision window (PRD §C3, D-008) ----------
 
     async def _manage_decision_window(self, phase0_open: bool, score: Optional[float],
-                                      now: float) -> DecisionWindow:
+                                      now: float, mode: str) -> DecisionWindow:
         window = await self.state.decision_window()
         if window:
             if now > window["deadline_ts"]:
@@ -122,7 +122,9 @@ class Engine:
                 return DecisionWindow(open=True, opened_ts=window["opened_ts"],
                                       deadline_ts=window["deadline_ts"],
                                       instrument=window.get("instrument"))
-        if (phase0_open and score is not None and score >= config.DECISION_ARM_THRESHOLD
+        # Windows only arm in LIVE mode (D-008) — pre/post-session never opens a decision.
+        if (mode == "LIVE" and phase0_open and score is not None
+                and score >= config.DECISION_ARM_THRESHOLD
                 and not await self.state.in_decision_cooldown()):
             window = {"id": str(uuid.uuid4()), "opened_ts": now,
                       "deadline_ts": now + config.ANTIPARALYSIS_SECONDS,
@@ -218,15 +220,15 @@ class Engine:
         )
 
         # C3 decision window + decision status
+        mode = await self.state.mode() if redis_up else "PRE_SESSION"
         window = await self._manage_decision_window(
-            phase0_state == Phase0State.OPEN, signal.score, now)
+            phase0_state == Phase0State.OPEN, signal.score, now, mode)
         signal.decision_window = window
         last_decision = await self._last_window_decision()
         signal.decision = Decision.PENDING if window.open else last_decision
         self.schema.unified_signal_output = signal
 
         # session_identity
-        mode = await self.state.mode() if redis_up else "PRE_SESSION"
         degraded_master = (signal.degraded
                            or any(m.freshness != Freshness.FRESH for m in
                                   (s1.svs_score, s1.chop, self.schema.bridge_variables.gex)))
