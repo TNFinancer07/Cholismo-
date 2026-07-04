@@ -68,8 +68,10 @@ Groq est **advisory uniquement** : son avis est affiché, jamais dans le verrou 
 par défaut (variable d'env `MACRO_CALIBRATED`), retourne `None`, contribution live = 0.
 
 ## D-008 · Déclenchement de la fenêtre de décision C3 (`PLACEHOLDER`)
-La décision passe `PENDING` (et le countdown 90 s démarre) quand : Phase 0 `OPEN` **et**
-score unifié ≥ `DECISION_ARM_THRESHOLD` (60) **et** pas de décision déjà pendante. Expiration
+La décision passe `PENDING` (et le countdown 90 s démarre) quand : mode `LIVE` **et**
+Phase 0 `OPEN` **et** score unifié ≥ `DECISION_ARM_THRESHOLD` (60) **et** pas de décision
+déjà pendante. Hors mode LIVE, aucune fenêtre ne s'arme (ni auto ni manuelle) — sinon le
+log se remplirait de timeouts SYSTEM en pré/post-session. Expiration
 → event `NO_GO reason=timeout` écrit par le backend (jamais d'entrée forcée). L'opérateur
 peut aussi armer manuellement. `ANTIPARALYSIS_SECONDS = 90` (constante, à revalider vs
 horizon SVS/S1 — note `PRD §C3`).
