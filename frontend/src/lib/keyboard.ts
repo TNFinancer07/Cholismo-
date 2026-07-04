@@ -20,7 +20,15 @@ export function useKeyboardNav() {
       const key = e.key.toUpperCase()
 
       if (key === 'ESCAPE') {
-        store.set({ focusZone: null, selfcheckOpen: false })
+        store.set({ focusZone: null, selfcheckOpen: false, commandOpen: false })
+        return
+      }
+      // Barre de commande ouverte : tout va à son input (même si le focus n'est pas
+      // encore posé) — aucun raccourci global ne doit fuir.
+      if (store.commandOpen) return
+      if (e.key === '/') {
+        e.preventDefault()
+        store.set({ commandOpen: !store.commandOpen })
         return
       }
       if (['A', 'B', 'C', 'D'].includes(key) && !e.metaKey && !e.ctrlKey) {
@@ -61,6 +69,7 @@ export function useKeyboardNav() {
 }
 
 export const KEY_HINTS: { key: string; label: string }[] = [
+  { key: '/', label: 'commande <GO>' },
   { key: 'A·B·C·D', label: 'focus zone' },
   { key: 'G', label: 'GO' },
   { key: 'N', label: 'NO-GO' },

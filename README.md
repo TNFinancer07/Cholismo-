@@ -46,6 +46,11 @@ Deuxième instance opérateur (CLAUDE §9 — un opérateur par instance, backen
 - **Clavier d'abord** : `A/B/C/D` focus zone · `G` GO · `N` NO-GO · `S` self-check C5 ·
   `M` cycle de mode · `V` cycle de vue (terminal / console orchestrateur / prompts) ·
   `Échap` annule. Les raccourcis sont affichés en bas d'écran.
+- **Barre de commande** (lignée Bloomberg) : `/` ouvre la ligne, taper un mnémonique puis
+  `⏎ <GO>` — `B4`, `C4`, `LIVE`, `PRE`, `ORCH`, `PROMPTS`, `CALME`, `VIX`, `GO`, `NOGO`,
+  `SC`, `HELP`. Les commandes de décision passent par les mêmes verrous serveur que les
+  boutons. Tick-flash vert/rouge sur les valeurs fraîches ; sparklines (score, CVD,
+  EUR/USD, VIX, GEX) sur l'historique client des valeurs reçues par SSE.
 - **Prendre une décision** : passer en mode `LIVE` → remplir le self-check `C5` (`S`) →
   quand Phase 0 est `OUVERT` et le score ≥ 60, la fenêtre C3 (90 s) s'arme → `G`/`N`.
   À expiration : `NO_GO reason=timeout` écrit automatiquement. **Aucun ordre n'est jamais

@@ -7,6 +7,7 @@ import { AlertTriangle, TimerReset } from 'lucide-react'
 import { Panel } from '@/components/ui/panel'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { Sparkline } from '@/components/Sparkline'
 import { api } from '@/lib/api'
 import { fmtNum } from '@/lib/format'
 import { cn } from '@/lib/utils'
@@ -77,9 +78,12 @@ export function UnifiedSignalPanel() {
       )}
 
       <div className="flex items-baseline justify-between">
-        <span className="text-3xl font-black tabular-nums text-term-text">
-          {signal?.score === null || signal?.score === undefined ? '—' : fmtNum(signal.score, 1)}
-          <span className="text-sm text-term-dim">/100</span>
+        <span className="flex items-baseline gap-3">
+          <span className="text-3xl font-black tabular-nums text-term-text">
+            {signal?.score === null || signal?.score === undefined ? '—' : fmtNum(signal.score, 1)}
+            <span className="text-sm text-term-dim">/100</span>
+          </span>
+          <Sparkline seriesKey="score" width={110} height={22} stroke="#f0b429" />
         </span>
         <Badge variant={signal?.decision === 'GO' ? 'green' : signal?.decision === 'NO_GO' ? 'red' : 'router'}>
           {signal?.decision === 'PENDING' && pending ? 'DÉCISION PENDANTE' : signal?.decision ?? '—'}

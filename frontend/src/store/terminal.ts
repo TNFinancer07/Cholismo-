@@ -49,11 +49,16 @@ interface TerminalStore {
   sources: Record<string, { up: boolean; fields: string[] }> | null
   selfcheckPresent: boolean
 
+  // historiques de rendu (sparklines Eikon/FactSet) — buffer client des valeurs du
+  // schéma reçues par SSE ; traçable au schéma, rien d'inventé, jamais persisté
+  history: Record<string, number[]>
+
   // état d'instance
   operator: Operator
   focusZone: ZoneKey | null
   view: ViewKey
   selfcheckOpen: boolean
+  commandOpen: boolean
   lastError: string | null
 
   // actions
@@ -85,25 +90,50 @@ export const useTerminal = create<TerminalStore>((set) => ({
   sources: null,
   selfcheckPresent: false,
 
+  history: {},
+
   operator: (new URLSearchParams(window.location.search).get('operator')?.toUpperCase() === 'YOUSSEF'
     ? 'YOUSSEF' : (import.meta.env.VITE_OPERATOR === 'YOUSSEF' ? 'YOUSSEF' : 'SONY')) as Operator,
   focusZone: null,
   view: 'TERMINAL',
   selfcheckOpen: false,
+  commandOpen: false,
   lastError: null,
 
   applyBlock: (name, payload) =>
     set((state) => {
+      const MAX_POINTS = 150
+      const push = (history: Record<string, number[]>, key: string, v: unknown) => {
+        if (typeof v !== 'number' || Number.isNaN(v)) return history
+        const arr = [...(history[key] ?? []), v].slice(-MAX_POINTS)
+        return { ...history, [key]: arr }
+      }
       switch (name) {
         case 'session_identity': {
           const si = payload as SessionIdentity
           return { session_identity: si, clockOffset: si.server_ts - Date.now() / 1000 }
         }
-        case 's1_state': return { s1_state: payload as S1State }
-        case 's2_state': return { s2_state: payload as S2State }
-        case 'bridge_variables': return { bridge_variables: payload as BridgeVariables }
+        case 's1_state': {
+          const s1 = payload as S1State
+          let history = push(state.history, 'cvd', s1.order_flow.cvd.value)
+          history = push(history, 'svs', s1.svs_score.value)
+          return { s1_state: s1, history }
+        }
+        case 's2_state': {
+          const s2 = payload as S2State
+          let history = push(state.history, 'vix', s2.cascade.vix.value)
+          history = push(history, 'eurusd', s2.cascade.eurusd.value)
+          return { s2_state: s2, history }
+        }
+        case 'bridge_variables': {
+          const bridge = payload as BridgeVariables
+          return { bridge_variables: bridge, history: push(state.history, 'gex', bridge.gex.value) }
+        }
         case 'sync_state': return { sync_state: payload as SyncState }
-        case 'unified_signal_output': return { unified_signal_output: payload as UnifiedSignalOutput }
+        case 'unified_signal_output': {
+          const signal = payload as UnifiedSignalOutput
+          return { unified_signal_output: signal, history: push(state.history, 'score', signal.score) }
+        }
         case 'extras': return { extras: payload as Extras }
         default: return state
       }

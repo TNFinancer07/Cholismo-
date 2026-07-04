@@ -3,6 +3,7 @@
 import { ArrowDown } from 'lucide-react'
 import { Panel } from '@/components/ui/panel'
 import { MetaValue } from '@/components/MetaValue'
+import { Sparkline } from '@/components/Sparkline'
 import { fmtNum, fmtSigned } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { useTerminal } from '@/store/terminal'
@@ -44,7 +45,10 @@ export function CascadePanel() {
             <li key={node.key}>
               <div className={cn('flex items-baseline justify-between border-l-2 bg-term-panel2 px-1.5 py-0.5',
                 regimeClass(node.key, meta))}>
-                <span className="text-xxs font-semibold uppercase text-term-dim">{node.label}</span>
+                <span className="flex items-baseline gap-2">
+                  <span className="text-xxs font-semibold uppercase text-term-dim">{node.label}</span>
+                  {node.key === 'vix' && <Sparkline seriesKey="vix" width={52} height={11} stroke="auto" />}
+                </span>
                 <MetaValue meta={meta} render={node.render} className="tabular-nums" />
               </div>
               {i < NODES.length - 1 && (

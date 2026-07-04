@@ -2,11 +2,32 @@
  *  STALE : valeur grisée + badge « périmé Xs ». ABSENT : « PAS DE DONNÉES », jamais un
  *  chiffre inventé (CLAUDE §2.3). Les flags de pathologie (retard, désync, contradiction)
  *  sont rendus visibles — pédigree de donnée façon ICE Data Services. */
+import { useEffect, useRef, useState } from 'react'
 import { AlertTriangle, Clock3, Unplug, GitCompareArrows } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { fmtAge } from '@/lib/format'
 import { serverNow, useTerminal } from '@/store/terminal'
 import type { MetaField } from '@/types/schema'
+
+/** Flash de tick (lignée Bloomberg/Eikon) : la valeur vire brièvement vert/rouge à la
+ *  hausse/baisse. Purement visuel — appliqué uniquement aux valeurs FRESH. */
+export function useTickFlash(value: unknown): string {
+  const prev = useRef<number | null>(null)
+  const [direction, setDirection] = useState<0 | 1 | -1>(0)
+  useEffect(() => {
+    if (typeof value !== 'number' || Number.isNaN(value)) return
+    if (prev.current !== null && value !== prev.current) {
+      setDirection(value > prev.current ? 1 : -1)
+      const timer = window.setTimeout(() => setDirection(0), 450)
+      prev.current = value
+      return () => window.clearTimeout(timer)
+    }
+    prev.current = value
+  }, [value])
+  return direction === 1 ? 'text-risk-green transition-colors duration-500'
+    : direction === -1 ? 'text-risk-red transition-colors duration-500'
+    : 'transition-colors duration-500'
+}
 
 const FLAG_ICONS: Record<string, { icon: typeof Clock3; title: string }> = {
   LATE_FEED: { icon: Clock3, title: 'Flux en retard' },
@@ -44,6 +65,7 @@ export function MetaValue({
   unit?: string
 }) {
   const age = useDataAge(meta)
+  const flash = useTickFlash(meta?.freshness === 'FRESH' ? meta.value : null)
   if (!meta || meta.freshness === 'ABSENT' || meta.value === null) {
     return (
       <span className={cn('inline-flex items-center gap-1 text-absent absent-pulse', className)}
@@ -68,7 +90,7 @@ export function MetaValue({
   }
   return (
     <span className={cn('inline-flex items-baseline gap-1', className)} title={`source: ${meta.source}`}>
-      <span>{text}{unit && <span className="text-term-dim"> {unit}</span>}</span>
+      <span className={flash}>{text}{unit && <span className="text-term-dim"> {unit}</span>}</span>
       <FlagIcons meta={meta} />
     </span>
   )

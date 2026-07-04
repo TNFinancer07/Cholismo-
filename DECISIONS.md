@@ -12,7 +12,13 @@ Aladdin, Murex, Calypso). Traduction concrète, sans violer `PRD §Rendu transve
 - **Bloomberg Terminal** — fond noir profond, ambre/or réservé au Router (bordure/trait),
   densité maximale, chiffres monospace, barre de statut supérieure, **barre de touches de
   fonction en bas d'écran** (raccourcis clavier affichés en permanence), panneaux titrés par
-  mnémonique (`B4 · SIGNAL UNIFIÉ`).
+  mnémonique (`B4 · SIGNAL UNIFIÉ`), **barre de commande** (`/` puis mnémonique + `⏎ <GO>` :
+  `B4`, `LIVE`, `VIX`, `GO`, `HELP`…) — pure navigation/reflet : `GO`/`NOGO` passent par les
+  mêmes verrous serveur que les boutons, aucun chemin privilégié — et **flashs de tick**
+  vert/rouge sur les valeurs FRESH qui bougent.
+- **Eikon / FactSet (bis)** — **sparklines** inline (SVG maison) sur score unifié, CVD,
+  EUR/USD, VIX, GEX : historique volatil côté client des valeurs du schéma reçues par SSE,
+  traçable au schéma, jamais une valeur inventée ni persistée.
 - **Refinitiv Eikon / FactSet** — espace de travail en tuiles liées : chaque panneau est une
   projection du même `ContextSchema` (les vues sont liées par construction, pas par câblage).
 - **ICE Data Services** — indicateurs de qualité de donnée de première classe : badge

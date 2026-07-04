@@ -6,6 +6,7 @@ import { connectSSE } from '@/lib/sse'
 import { KEY_HINTS, useKeyboardNav } from '@/lib/keyboard'
 import { cn } from '@/lib/utils'
 import { useTerminal, type ZoneKey } from '@/store/terminal'
+import { CommandBar } from '@/components/CommandBar'
 import { Zone0StatusBar } from '@/panels/Zone0StatusBar'
 import { CascadePanel } from '@/panels/zoneA/CascadePanel'
 import { MacroScorePanel } from '@/panels/zoneA/MacroScorePanel'
@@ -61,8 +62,9 @@ export default function App() {
   useEffect(() => connectSSE(), [])
 
   return (
-    <div className={cn('flex h-full flex-col', `session-${marker}`)}>
+    <div className={cn('relative flex h-full flex-col', `session-${marker}`)}>
       <Zone0StatusBar />
+      <CommandBar />
 
       {view === 'ORCHESTRATEUR' && <main className="min-h-0 flex-1"><OrchestratorConsole /></main>}
       {view === 'PROMPTS' && <main className="min-h-0 flex-1"><PromptsView /></main>}

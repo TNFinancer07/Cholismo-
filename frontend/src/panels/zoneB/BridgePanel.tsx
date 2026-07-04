@@ -4,6 +4,7 @@
 import { Panel } from '@/components/ui/panel'
 import { Badge } from '@/components/ui/badge'
 import { MetaValue, useDataAge } from '@/components/MetaValue'
+import { Sparkline } from '@/components/Sparkline'
 import { fmtAge, fmtGex, fmtNum } from '@/lib/format'
 import { useTerminal } from '@/store/terminal'
 import { cn } from '@/lib/utils'
@@ -19,6 +20,7 @@ export function BridgePanel() {
       <div className="flex items-baseline justify-between gap-2 border-b border-term-grid pb-1">
         <span className="text-xxs uppercase text-term-dim">GEX</span>
         <span className="flex items-baseline gap-2 tabular-nums">
+          <Sparkline seriesKey="gex" width={56} height={12} stroke="auto" />
           <MetaValue meta={bridge?.gex} render={(v) => fmtGex(v as number)} className="text-sm" />
         </span>
       </div>
