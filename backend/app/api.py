@@ -290,6 +290,13 @@ async def recon_unmatched() -> dict[str, Any]:
     return {"unmatched_fills": projections.unmatched_fills(get_store())}
 
 
+# ---------- AI observability (Étape 10 — coûts/latences loggés, CLAUDE §7) ----------
+
+@router.get("/ai/status")
+async def ai_status() -> dict[str, Any]:
+    return {"calls": get_store().ai_calls(limit=50)}
+
+
 # ---------- orchestrator console (post-MVP, Étape 7) ----------
 
 @router.get("/orchestrator")

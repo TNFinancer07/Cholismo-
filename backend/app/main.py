@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from .ai.tasks import AITasks
 from .api import router
 from .datasource.mock import MockDataSource
 from .engine import Engine
@@ -25,9 +26,13 @@ async def lifespan(app: FastAPI):
     # with a real feed implementation without touching the engine.
     app.state.engine = Engine(MockDataSource(), app.state.redis)
     await app.state.engine.start()
+    # AI: async only, out of the hot path (CLAUDE §2.8); no keys -> explicit UNAVAILABLE.
+    app.state.ai = AITasks(app.state.engine)
+    await app.state.ai.start()
     try:
         yield
     finally:
+        await app.state.ai.stop()
         await app.state.engine.stop()
         await app.state.redis.close()
 
