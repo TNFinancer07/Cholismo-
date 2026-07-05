@@ -127,6 +127,16 @@ branché. Extraits copiables dans l'onglet Prompts (`V`).
 
 ![Pipeline Youssef](docs/pipeline-youssef.png)
 
+## Onglet Journal (`/` → `JOURNAL`)
+
+Vue dédiée au journal de trading (transposition de `reference/journal/tradingjournal.html`,
+D-022) : fiches par stratégie (SVS v3.0 · Mean Reversion · Macro Youssef) préremplies
+CHOP/VIX depuis le schéma live, hiérarchie des sorties §06, « SL non respecté ⇒ erreur
+Type A automatique », friction #2 quantifiée, sentiment pré/post-session par opérateur,
+lockout dérivé (2 pertes → pause 24 h), export CSV/JSON, webhooks n8n
+(`trade_closed`/`session_closed`). Brouillon Redis modifiable → **« Clôturer &
+verrouiller » écrit une entrée append-only** — l'audit trail est immuable.
+
 ## Contraintes dures (CLAUDE §2) — où elles vivent
 
 | # | Contrainte | Implémentation |

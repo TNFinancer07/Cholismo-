@@ -108,6 +108,49 @@ class RedisState:
     async def streak_audit_acked(self, streak: int) -> bool:
         return await self._redis.exists(f"{NS}:streak_ack:{streak}") == 1
 
+    # -- trading journal (reference/journal, D-022) --
+    # Drafts are WORKING state (freely editable/deletable, Redis) ; locking a trade
+    # appends an immutable journal entry in SQLite — never the other way around.
+
+    async def journal_set_draft(self, draft_id: str, payload: dict[str, Any]) -> None:
+        await self._redis.hset(f"{NS}:journal:drafts", draft_id, json.dumps(payload, ensure_ascii=False))
+
+    async def journal_get_draft(self, draft_id: str) -> Optional[dict[str, Any]]:
+        raw = await self._redis.hget(f"{NS}:journal:drafts", draft_id)
+        return json.loads(raw) if raw else None
+
+    async def journal_delete_draft(self, draft_id: str) -> None:
+        await self._redis.hdel(f"{NS}:journal:drafts", draft_id)
+
+    async def journal_drafts(self) -> list[dict[str, Any]]:
+        raw = await self._redis.hgetall(f"{NS}:journal:drafts")
+        return sorted((json.loads(v) for v in raw.values()), key=lambda d: d.get("created_ts", 0))
+
+    async def journal_set_sentiment(self, phase: str, operator: str, payload: dict[str, Any]) -> None:
+        await self._redis.set(f"{NS}:journal:sentiment:{phase}:{operator}",
+                              json.dumps(payload, ensure_ascii=False))
+
+    async def journal_sentiments(self) -> dict[str, dict[str, Any]]:
+        out: dict[str, dict[str, Any]] = {}
+        for phase in ("PRE", "POST"):
+            for operator in ("SONY", "YOUSSEF"):
+                raw = await self._redis.get(f"{NS}:journal:sentiment:{phase}:{operator}")
+                if raw:
+                    out[f"{phase}:{operator}"] = json.loads(raw)
+        return out
+
+    async def journal_clear_sentiments(self) -> None:
+        keys = [f"{NS}:journal:sentiment:{p}:{o}" for p in ("PRE", "POST")
+                for o in ("SONY", "YOUSSEF")]
+        await self._redis.delete(*keys)
+
+    async def journal_set_n8n(self, cfg: dict[str, Any]) -> None:
+        await self._redis.set(f"{NS}:journal:n8n", json.dumps(cfg, ensure_ascii=False))
+
+    async def journal_n8n(self) -> dict[str, Any]:
+        raw = await self._redis.get(f"{NS}:journal:n8n")
+        return json.loads(raw) if raw else {"url": "", "api_key": "", "enabled": False}
+
     # -- operational mode (session-level, D-015) --
 
     async def set_mode(self, mode: str) -> None:

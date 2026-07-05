@@ -9,7 +9,7 @@ import type {
 } from '@/types/schema'
 
 export type ZoneKey = 'A' | 'B' | 'C' | 'D'
-export type ViewKey = 'TERMINAL' | 'ORCHESTRATEUR' | 'PROMPTS'
+export type ViewKey = 'TERMINAL' | 'JOURNAL' | 'ORCHESTRATEUR' | 'PROMPTS'
 
 export interface ScenarioInfo {
   current: {

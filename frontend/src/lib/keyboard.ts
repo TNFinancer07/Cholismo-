@@ -8,7 +8,7 @@ import { MODES, useTerminal, type ViewKey } from '@/store/terminal'
 import { useWorkspaces } from '@/store/workspace'
 import { refreshSelfcheck } from './sse'
 
-const VIEWS: ViewKey[] = ['TERMINAL', 'ORCHESTRATEUR', 'PROMPTS']
+const VIEWS: ViewKey[] = ['TERMINAL', 'JOURNAL', 'ORCHESTRATEUR', 'PROMPTS']
 
 export function useKeyboardNav() {
   useEffect(() => {

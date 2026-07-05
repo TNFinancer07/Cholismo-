@@ -13,6 +13,7 @@
 | `youssef/01_FONDATIONS_ET_ANALYSE_QUANTITATIVE.md` | Phase 0 (régime kurtosis VIX) · Étape 0 (quadrant Bridgewater) · N1 · N2A (D1-D5) | Youssef — analyse macro (1/3) |
 | `youssef/02_ANALYSE_QUALITATIVE_BLOCS.md` | N2B — blocs 1 à 7 (CB 3 niveaux, narratifs, cross-market, géopolitique, signaux faibles, 10 questions, calibrage) | Youssef — analyse macro (2/3) |
 | `youssef/03_SCORING_ARBITRAGES_DECISION.md` | N3 (Flux 1 + Flux 2 / 6 arbitrages) · N4 (validation) · N5 (scénarios + trade card) | Youssef — analyse macro (3/3) |
+| `journal/tradingjournal.html` | **Journal de Session — Sony & Youssef** (app React autonome, localStorage) | Journal de trading commun |
 
 ## Classement des blocs
 
@@ -80,6 +81,25 @@
 - `PLACEHOLDER` : conviction Arb1/2/3 — le fichier donne les caps mais pas la formule
   d'échelle ; convention retenue `min(|δ|/seuil×5, cap)` (Arb3 : `×4`), calquée sur les
   formules données pour Arb4/5/6. Consigné D-021.
+
+### Journal de trading (`journal/tradingjournal.html`) — `AUTORITÉ`
+- 3 vues : **Session · Historique & agrégats · Automatisation** ; stats d'en-tête R total /
+  pertes consécutives ; lockout affiché.
+- Modèle de fiche (champs canoniques) : direction · prix déclencheur/sortie · CHOP · VIX ·
+  corr NQ/ES · taille finale % · **type de sortie (hiérarchie §06)** · palier atteint ·
+  **sortie justifiée ? (friction #2)** · **distance SL respectée ?** · résultat R ·
+  **erreur A/B/C** · conviction · **Feu N4** (Youssef) · état émotionnel 1-5 · thèse · notes.
+- Règles : « SL non respecté ⇒ erreur Type A automatique » ; thèse rédigée avant l'entrée ;
+  **« Clôturer & verrouiller » = audit trail immuable** ; sentiment pré/post-session par
+  opérateur (humeur/énergie/confiance 1-5 + facteurs) ; agrégats R cumulé/winrate/erreurs/
+  **taux friction #2** ; webhooks n8n (`trade_created`, `trade_closed`, `session_closed`,
+  `threshold_breached`, `X-API-Key`, grammaire `field_updates`).
+- Câblage terminal (D-022) : brouillon = Redis (modifiable/supprimable) → verrouillage =
+  entrée **append-only** SQLite (`journal_entries`, mêmes triggers RAISE ABORT) ; lockout
+  « 2 pertes → pause 24 h » **dérivé** des entrées, jamais stocké ; CHOP/VIX préremplis
+  depuis le schéma live ; webhooks câblés : `trade_closed` + `session_closed` (async,
+  loggés) ; `PLACEHOLDER` : `trade_created`/`threshold_breached` non émis, grammaire
+  `field_updates` non implémentée (le store du terminal est append-only, pas de patch).
 
 ### Câblage terminal (où ces blocs vivent dans le code)
 - `backend/app/strategies/sony.py` — éligibilité SVS + Mean Reversion (gates câblés sur les

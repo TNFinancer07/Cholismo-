@@ -42,6 +42,18 @@ BEGIN SELECT RAISE(ABORT, 'snapshots is append-only'); END;
 CREATE TRIGGER IF NOT EXISTS snapshots_no_delete BEFORE DELETE ON snapshots
 BEGIN SELECT RAISE(ABORT, 'snapshots is append-only'); END;
 
+CREATE TABLE IF NOT EXISTS journal_entries (
+  seq     INTEGER PRIMARY KEY AUTOINCREMENT,
+  id      TEXT NOT NULL UNIQUE,
+  ts      REAL NOT NULL,
+  kind    TEXT NOT NULL CHECK (kind IN ('trade_locked','session_closed')),
+  payload TEXT NOT NULL
+);
+CREATE TRIGGER IF NOT EXISTS journal_no_update BEFORE UPDATE ON journal_entries
+BEGIN SELECT RAISE(ABORT, 'journal_entries is append-only'); END;
+CREATE TRIGGER IF NOT EXISTS journal_no_delete BEFORE DELETE ON journal_entries
+BEGIN SELECT RAISE(ABORT, 'journal_entries is append-only'); END;
+
 CREATE TABLE IF NOT EXISTS ai_calls (
   seq        INTEGER PRIMARY KEY AUTOINCREMENT,
   ts         REAL NOT NULL,
@@ -79,6 +91,33 @@ class EventStore:
             )
             self._conn.commit()
         return event
+
+    def append_journal(self, kind: str, payload: dict[str, Any],
+                       ts: Optional[float] = None) -> dict[str, Any]:
+        """Journal de trading (reference/journal, D-022) — locked entries are as
+        immutable as decisions: same append-only guards, same grammar."""
+        if kind not in ("trade_locked", "session_closed"):
+            raise ValueError(f"unknown journal kind: {kind}")
+        entry = {"id": str(uuid.uuid4()), "ts": ts if ts is not None else time.time(),
+                 "kind": kind, **payload}
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO journal_entries (id, ts, kind, payload) VALUES (?, ?, ?, ?)",
+                (entry["id"], entry["ts"], kind, json.dumps(payload, ensure_ascii=False)))
+            self._conn.commit()
+        return entry
+
+    def journal_entries(self, kind: Optional[str] = None) -> list[dict[str, Any]]:
+        query = "SELECT seq, id, ts, kind, payload FROM journal_entries"
+        params: list[Any] = []
+        if kind:
+            query += " WHERE kind = ?"
+            params.append(kind)
+        query += " ORDER BY seq ASC"
+        with self._lock:
+            rows = self._conn.execute(query, params).fetchall()
+        return [{"seq": r["seq"], "id": r["id"], "ts": r["ts"], "kind": r["kind"],
+                 **json.loads(r["payload"])} for r in rows]
 
     def save_snapshot(self, payload: dict[str, Any]) -> str:
         snap_id = str(uuid.uuid4())

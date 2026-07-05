@@ -39,6 +39,20 @@ export const api = {
   toggleSource: (name: string, up: boolean) =>
     request(`/sources/${name}/toggle`, { method: 'POST', body: JSON.stringify({ up }) }),
   setMode: (mode: string) => request('/mode', { method: 'POST', body: JSON.stringify({ mode }) }),
+  journal: () => request<unknown>('/journal'),
+  journalCreateDraft: (strategy_id: string, operator: string) =>
+    request('/journal/draft', { method: 'POST', body: JSON.stringify({ strategy_id, operator }) }),
+  journalUpdateDraft: (draftId: string, fields: Record<string, unknown>) =>
+    request(`/journal/draft/${draftId}`, { method: 'PUT', body: JSON.stringify({ fields }) }),
+  journalDeleteDraft: (draftId: string) =>
+    request(`/journal/draft/${draftId}`, { method: 'DELETE' }),
+  journalLockDraft: (draftId: string) =>
+    request(`/journal/draft/${draftId}/lock`, { method: 'POST' }),
+  journalSentiment: (payload: unknown) =>
+    request('/journal/sentiment', { method: 'POST', body: JSON.stringify(payload) }),
+  journalCloseSession: () => request('/journal/close-session', { method: 'POST' }),
+  journalSetN8n: (payload: unknown) =>
+    request('/journal/n8n', { method: 'POST', body: JSON.stringify(payload) }),
   reconImport: async (file: File, tzOffsetMinutes: number) => {
     const form = new FormData()
     form.append('file', file)

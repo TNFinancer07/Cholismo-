@@ -12,7 +12,7 @@ from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
-from . import config, projections
+from . import config, journal, projections
 from .datasource import scenarios
 from .datasource.mock import SOURCES
 from .event_store import get_store
@@ -288,6 +288,164 @@ async def recon_import(file: UploadFile = File(...),
 @router.get("/recon/unmatched")
 async def recon_unmatched() -> dict[str, Any]:
     return {"unmatched_fills": projections.unmatched_fills(get_store())}
+
+
+# ---------- trading journal (reference/journal, D-022) ----------
+
+@router.get("/journal")
+async def get_journal(request: Request) -> dict[str, Any]:
+    store = get_store()
+    redis = request.app.state.redis
+    return {
+        "strategies": journal.STRATEGIES,
+        "exit_types": journal.EXIT_TYPES,
+        "paliers": journal.PALIERS,
+        "drafts": await redis.journal_drafts(),
+        "entries": list(reversed(store.journal_entries("trade_locked")))[:200],
+        "sessions": list(reversed(store.journal_entries("session_closed")))[:60],
+        "sentiments": await redis.journal_sentiments(),
+        "aggregates": journal.aggregates(store),
+        "lockout": journal.derive_lockout(store),
+        "n8n": {**(await redis.journal_n8n()), "api_key": "***"
+                if (await redis.journal_n8n()).get("api_key") else ""},
+    }
+
+
+class JournalDraftCreate(BaseModel):
+    strategy_id: str
+    operator: Operator
+
+
+@router.post("/journal/draft")
+async def create_journal_draft(body: JournalDraftCreate, request: Request) -> dict[str, Any]:
+    if body.strategy_id not in journal.STRATEGIES:
+        raise HTTPException(400, f"stratégie inconnue : {body.strategy_id}")
+    engine = request.app.state.engine
+    redis = request.app.state.redis
+    store = get_store()
+    today = journal.day_of(time.time())
+    same_day = [e for e in store.journal_entries("trade_locked")
+                if e.get("strategy_id") == body.strategy_id and journal.day_of(e["ts"]) == today]
+    same_day_drafts = [d for d in await redis.journal_drafts()
+                       if d.get("strategy_id") == body.strategy_id]
+    chop = engine.schema.s1_state.chop.value
+    vix = engine.schema.s2_state.cascade.vix.value
+    draft = {
+        "draft_id": str(uuid.uuid4()),
+        "strategy_id": body.strategy_id,
+        "operator": body.operator.value,
+        "created_ts": time.time(),
+        "trade_num": len(same_day) + len(same_day_drafts) + 1,
+        # Pré-rempli depuis le schéma live — pedigree réel, pas de saisie recopiée.
+        "chop": None if chop is None else round(float(chop), 1),
+        "vix": None if vix is None else round(float(vix), 2),
+        "nq_es_corr": None,  # source non câblée (voir S1S) — saisie manuelle
+    }
+    await redis.journal_set_draft(draft["draft_id"], draft)
+    return {"ok": True, "draft": draft}
+
+
+class JournalDraftUpdate(BaseModel):
+    fields: dict[str, Any]
+
+
+@router.put("/journal/draft/{draft_id}")
+async def update_journal_draft(draft_id: str, body: JournalDraftUpdate,
+                               request: Request) -> dict[str, Any]:
+    redis = request.app.state.redis
+    draft = await redis.journal_get_draft(draft_id)
+    if not draft:
+        raise HTTPException(404, "brouillon inconnu (déjà verrouillé ?)")
+    unknown = set(body.fields) - journal.DRAFT_FIELDS
+    if unknown:
+        raise HTTPException(422, f"champs inconnus : {', '.join(sorted(unknown))}")
+    draft.update(body.fields)
+    await redis.journal_set_draft(draft_id, draft)
+    return {"ok": True, "draft": draft}
+
+
+@router.delete("/journal/draft/{draft_id}")
+async def delete_journal_draft(draft_id: str, request: Request) -> dict[str, Any]:
+    redis = request.app.state.redis
+    if not await redis.journal_get_draft(draft_id):
+        raise HTTPException(404, "brouillon inconnu")
+    await redis.journal_delete_draft(draft_id)  # un brouillon Redis se supprime ;
+    return {"ok": True}                          # une entrée verrouillée, jamais.
+
+
+@router.post("/journal/draft/{draft_id}/lock")
+async def lock_journal_draft(draft_id: str, request: Request) -> dict[str, Any]:
+    redis = request.app.state.redis
+    store = get_store()
+    draft = await redis.journal_get_draft(draft_id)
+    if not draft:
+        raise HTTPException(404, "brouillon inconnu")
+    problems = journal.validate_lock(draft)
+    if problems:
+        raise HTTPException(422, " · ".join(problems))
+    payload = {k: v for k, v in draft.items() if k != "draft_id"}
+    entry = store.append_journal("trade_locked", payload)
+    await redis.journal_delete_draft(draft_id)
+    await journal.fire_webhook(await redis.journal_n8n(), "trade_closed", entry, store)
+    return {"ok": True, "entry": entry}
+
+
+class SentimentBody(BaseModel):
+    phase: str  # PRE | POST
+    operator: Operator
+    humeur: int
+    energie: int
+    confiance: int
+    facteurs: str = ""
+    note: str = ""
+
+
+@router.post("/journal/sentiment")
+async def post_sentiment(body: SentimentBody, request: Request) -> dict[str, Any]:
+    if body.phase not in ("PRE", "POST"):
+        raise HTTPException(400, "phase invalide (PRE|POST)")
+    for value in (body.humeur, body.energie, body.confiance):
+        if not 1 <= value <= 5:
+            raise HTTPException(422, "échelles 1-5")
+    await request.app.state.redis.journal_set_sentiment(
+        body.phase, body.operator.value,
+        {"humeur": body.humeur, "energie": body.energie, "confiance": body.confiance,
+         "facteurs": body.facteurs, "note": body.note, "ts": time.time()})
+    return {"ok": True}
+
+
+@router.post("/journal/close-session")
+async def close_journal_session(request: Request) -> dict[str, Any]:
+    redis = request.app.state.redis
+    store = get_store()
+    today = journal.day_of(time.time())
+    day_trades = [e for e in store.journal_entries("trade_locked")
+                  if journal.day_of(e["ts"]) == today]
+    entry = store.append_journal("session_closed", {
+        "day": today,
+        "trades": len(day_trades),
+        "r_total": round(sum(float(t.get("resultat_r") or 0) for t in day_trades), 2),
+        "sentiments": await redis.journal_sentiments(),
+        "trade_ids": [t["id"] for t in day_trades],
+    })
+    await redis.journal_clear_sentiments()
+    await journal.fire_webhook(await redis.journal_n8n(), "session_closed", entry, store)
+    return {"ok": True, "entry": entry}
+
+
+class N8nConfig(BaseModel):
+    url: str = ""
+    api_key: str = ""
+    enabled: bool = False
+
+
+@router.post("/journal/n8n")
+async def set_journal_n8n(body: N8nConfig, request: Request) -> dict[str, Any]:
+    current = await request.app.state.redis.journal_n8n()
+    api_key = body.api_key if body.api_key != "***" else current.get("api_key", "")
+    await request.app.state.redis.journal_set_n8n(
+        {"url": body.url, "api_key": api_key, "enabled": body.enabled})
+    return {"ok": True}
 
 
 # ---------- AI observability (Étape 10 — coûts/latences loggés, CLAUDE §7) ----------

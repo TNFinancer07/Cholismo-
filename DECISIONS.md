@@ -149,6 +149,24 @@ N2B 7 blocs, N3-N5). Câblage :
 - Stack RMS du Mode Live : noms canoniques KillSwitch/CircuitBreaker/StrategyOverlay/
   RiskSizer/PortfolioRisk (MR §01b). Onglet Prompts : extraits réels des 5 artefacts.
 
+## D-022 · Onglet JOURNAL — journal de trading event-sourced (`AUTORITÉ` /reference/journal)
+L'app de référence (« Journal de Session — Sony & Youssef », React/localStorage) est
+transposée en vue dédiée du terminal (`/` → `JOURNAL`, alias `JT`), en remplaçant son
+stockage navigateur par la grammaire du terminal :
+- **brouillon** de fiche = Redis (modifiable, supprimable — état de travail) ;
+- **« Clôturer & verrouiller »** = entrée `trade_locked` **append-only** (SQLite,
+  `journal_entries`, triggers RAISE ABORT identiques au Decision Log) — pas de « Rouvrir » :
+  l'audit trail du terminal est réellement immuable, plus strict que l'app de référence ;
+- règles de verrouillage du document appliquées serveur (422) : direction/type de sortie/
+  résultat R/« SL respecté ? » obligatoires ; « SL non respecté ⇒ erreur Type A
+  automatique » ; sortie précoce ⇒ justification (friction #2) ;
+- sentiment pré/post par opérateur en Redis, figé dans l'entrée `session_closed` ;
+- lockout « 2 pertes consécutives → pause 24 h » (couche KillSwitch) **dérivé**, affiché
+  dans l'en-tête — non branché sur Phase 0 pour l'instant (candidat futur, à trancher) ;
+- CHOP/VIX préremplis depuis le schéma live à la création de fiche (pedigree réel) ;
+- webhooks n8n `trade_closed`/`session_closed` async + loggés dans `ai_calls` ;
+  `trade_created`/`threshold_breached` et `field_updates` non implémentés (PLACEHOLDER).
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.

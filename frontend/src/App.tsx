@@ -14,6 +14,7 @@ import { WorkspaceBar } from '@/components/WorkspaceBar'
 import { Zone0StatusBar } from '@/panels/Zone0StatusBar'
 import { SelfCheckDialog } from '@/panels/zoneC/SelfCheckDialog'
 import { DecisionBlotter } from '@/panels/zoneD/DecisionBlotter'
+import { JournalView } from '@/panels/views/JournalView'
 import { OrchestratorConsole } from '@/panels/views/OrchestratorConsole'
 import { PromptsView } from '@/panels/views/PromptsView'
 
@@ -92,6 +93,7 @@ export default function App() {
 
       {view === 'ORCHESTRATEUR' && <main className="min-h-0 flex-1"><OrchestratorConsole /></main>}
       {view === 'PROMPTS' && <main className="min-h-0 flex-1"><PromptsView /></main>}
+      {view === 'JOURNAL' && <main className="flex min-h-0 flex-1 flex-col"><JournalView /></main>}
       {view === 'TERMINAL' && <WorkspaceGrid />}
 
       <FunctionKeyBar />

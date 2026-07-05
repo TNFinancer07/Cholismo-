@@ -82,7 +82,7 @@ function useStaticCommands(): Command[] {
       mode('LIVE', 'LIVE'), mode('PRE', 'PRE_SESSION', ['PRESESSION']),
       mode('POST', 'POST_SESSION', ['POSTSESSION']),
       view('TERM', 'TERMINAL', ['TERMINAL']), view('ORCH', 'ORCHESTRATEUR', ['ORCHESTRATEUR']),
-      view('PROMPTS', 'PROMPTS'),
+      view('PROMPTS', 'PROMPTS'), view('JOURNAL', 'JOURNAL', ['JT']),
       scenario('CALME', 'calme'), scenario('NEWS', 'news_eur_tier1', ['EUR']),
       scenario('STREAK', 'streak_loss'), scenario('VIX', 'vix_spike', ['SPIKE']),
       scenario('CUSTOM', 'custom'),
