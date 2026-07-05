@@ -83,6 +83,9 @@ function useStaticCommands(): Command[] {
       mode('POST', 'POST_SESSION', ['POSTSESSION']),
       view('TERM', 'TERMINAL', ['TERMINAL']), view('ORCH', 'ORCHESTRATEUR', ['ORCHESTRATEUR']),
       view('PROMPTS', 'PROMPTS'), view('JOURNAL', 'JOURNAL', ['JT']),
+      view('RECAP', 'RECAP', ['COCKPIT', 'RC']),
+      view('MODELIVE', 'LIVE', ['ML', 'LECTURE']),
+      view('PARAMS', 'PARAMS', ['CONFIG', 'SET', 'PARAMETRES']),
       scenario('CALME', 'calme'), scenario('NEWS', 'news_eur_tier1', ['EUR']),
       scenario('STREAK', 'streak_loss'), scenario('VIX', 'vix_spike', ['SPIKE']),
       scenario('CUSTOM', 'custom'),
@@ -100,7 +103,7 @@ function useStaticCommands(): Command[] {
       },
       {
         mnemonic: 'HELP', aliases: ['?'], label: 'liste des mnémoniques',
-        run: () => 'A·B·C·D / A1…C4 focus · LIVE/PRE/POST mode · TERM/ORCH/PROMPTS vue · CALME/NEWS/STREAK/VIX/CUSTOM scénario · GO/NOGO · SC · DEFAUT/MICRO/MACRO/DISCIPLINE ou WS1…9 espaces · WS suivant · WSRESET',
+        run: () => 'A·B·C·D / A1…C4 focus · LIVE/PRE/POST mode · TERM/RECAP/MODELIVE/JOURNAL/ORCH/PROMPTS/PARAMS vue · CALME/NEWS/STREAK/VIX/CUSTOM scénario · GO/NOGO · SC · DEFAUT/MICRO/MACRO/DISCIPLINE ou WS1…9 espaces · WS suivant · WSRESET',
       },
     ]
   }, [])

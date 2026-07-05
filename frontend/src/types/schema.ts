@@ -285,3 +285,124 @@ export interface OrchestratorPayload {
   action: 'NONE' | 'REQUEST_ACK' | 'BLOCK_ENTRY' | 'SUSPEND_TRADING'
   requires_human_ack: boolean
 }
+
+// ---------- RECAP — cockpit de session (miroir de GET /recap, D-023) ----------
+
+export interface RecapWindowState {
+  state: 'AVANT' | 'OUVERTE' | 'FERMÉE'
+  opens_in_s: number | null
+  closes_in_s: number | null
+}
+
+export interface RecapModule {
+  id: string
+  label: string
+  state: string
+  reason: string
+  gates?: { name: string; status: string; detail: string }[]
+  sizing_pct?: number | null
+}
+
+export interface RecapPayload {
+  granularity: string
+  granularities: string[]
+  generated_ts: number
+  r_unit_usd: number
+  pnl: {
+    n_trades: number
+    r_total: number
+    usd: number
+    wins: number
+    losses: number
+    win_rate_pct: number | null
+    expectancy_r: number | null
+    drawdown_r: number
+    equity_curve: number[]
+  }
+  risk: {
+    max_r: number
+    max_drawdown_r_day: number
+    consumed_r: number
+    remaining_r: number
+    consumed_pct: number | null
+    avg_loss_r: number | null
+    risk_clock_trades_left: number | null
+    lockout: { active: boolean; consecutive_losses: number; until_ts: number | null; rule: string }
+  }
+  weather: { level: 'VERT' | 'JAUNE' | 'ROUGE'; action: string; reasons: string[] }
+  windows: { svs: RecapWindowState; mean_reversion: RecapWindowState }
+  strategy_split: { strategy_id: string; label: string; accent: string; n_trades: number; r_total: number }[]
+  modules: RecapModule[]
+  agents: { provider: string; state: string; detail: string; age_s: number | null; latency_ms: number | null }[]
+  signal_degraded: boolean
+  gex_absent: boolean
+}
+
+// ---------- Paramètres 2 étages (miroir de GET /settings, D-023) ----------
+
+export interface SettingScopeValue { value: unknown; tier: 'default' | 'global' | 'override' }
+
+export interface SettingParam {
+  key: string
+  domain: 'signal' | 'risk' | 'alerts' | 'ai' | 'live'
+  label: string
+  control: 'number' | 'bool' | 'choice'
+  unit: string
+  default: unknown
+  minimum: number | null
+  maximum: number | null
+  choices: string[]
+  locked: boolean
+  authority: string
+  reduce_only: boolean
+  guard_below: number | null
+  scoped: boolean
+  scopes: Record<string, SettingScopeValue>
+}
+
+export interface SettingsPayload {
+  parameters: SettingParam[]
+  specific_scopes: string[]
+  overrides_count: number
+  presets: { name: string; ts: number }[]
+}
+
+export interface SettingHistoryEvent {
+  seq: number
+  ts: number
+  action: string
+  key: string | null
+  scope: string | null
+  value: unknown
+  operator: string | null
+  name: string | null
+}
+
+// ---------- Mode Live (miroir de GET /live/context + POST /live/ask, D-023) ----------
+
+export interface LiveReading { level: 'VERT' | 'AMBRE' | 'ROUGE'; title: string; message: string }
+
+export interface LiveContextPayload {
+  context: {
+    timestamp: number
+    session_window: 'svs' | 'mean_reversion' | 'off_window'
+    market: { cvd: number | null; chop: number | null }
+    macro: { vix: number | null; gex: number | null }
+    active_scores: { svs: number | null; unified: number | null; degraded: boolean }
+    rms_state: { level: number | null }
+    phase0: { blocked: boolean; blockers: string[] }
+    absent_fields: string[]
+  }
+  reading: LiveReading
+  suggestions: string[]
+  cycle_seconds: number
+  cycle_offwindow_seconds: number
+}
+
+export interface LiveAnswer {
+  answer: string
+  glossary: string | null
+  advisory: boolean
+  engine: string
+  ts: number
+}

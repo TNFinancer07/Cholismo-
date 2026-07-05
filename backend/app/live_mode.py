@@ -52,6 +52,11 @@ def _fmt(v: Optional[float], digits: int = 1) -> str:
     return "—" if v is None else f"{v:.{digits}f}"
 
 
+def _fmt_gex(v: Optional[float]) -> str:
+    """GEX arrives in raw dollars — humans read billions (signed)."""
+    return "—" if v is None else f"{v / 1e9:+.1f}"
+
+
 class LiveCtx:
     """Flat snapshot used by the reading + responder (mirrors the injected schema)."""
 
@@ -203,7 +208,7 @@ def answer(question: str, schema: ContextSchema, extras: dict[str, Any],
                    else "Mitigé" if (ctx.chop or 0) > 55 or (ctx.vix or 0) > 22
                    else "Favorable")
         text = (f"{verdict}. VIX {_fmt(ctx.vix)}, CHOP {_fmt(ctx.chop, 0)}, GEX "
-                f"{_fmt(ctx.gex)}B. "
+                f"{_fmt_gex(ctx.gex)} G$. "
                 + ("Phase 0 bloque l'entrée." if ctx.phase0_blocked
                    else "Les filtres Phase 0 sont passés."))
     elif has("simplement", "explique"):
@@ -242,7 +247,7 @@ def answer(question: str, schema: ContextSchema, extras: dict[str, Any],
                    if conflict else "Pas de conflit entre score et flux pour l'instant."))
     else:
         text = (f"État courant : VIX {_fmt(ctx.vix)} · CHOP {_fmt(ctx.chop, 0)} · CVD "
-                f"{_fmt(ctx.cvd, 0)} · GEX {_fmt(ctx.gex)}B · fenêtre {ctx.window}. "
+                f"{_fmt(ctx.cvd, 0)} · GEX {_fmt_gex(ctx.gex)} G$ · fenêtre {ctx.window}. "
                 "Reformule si tu veux un angle précis (contexte, flux, risque, score…).")
 
     return {"answer": text, "glossary": glossary, "advisory": True,

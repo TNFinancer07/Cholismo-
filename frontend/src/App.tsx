@@ -15,8 +15,11 @@ import { Zone0StatusBar } from '@/panels/Zone0StatusBar'
 import { SelfCheckDialog } from '@/panels/zoneC/SelfCheckDialog'
 import { DecisionBlotter } from '@/panels/zoneD/DecisionBlotter'
 import { JournalView } from '@/panels/views/JournalView'
+import { LiveView } from '@/panels/views/LiveView'
 import { OrchestratorConsole } from '@/panels/views/OrchestratorConsole'
+import { ParamsView } from '@/panels/views/ParamsView'
 import { PromptsView } from '@/panels/views/PromptsView'
+import { RecapView } from '@/panels/views/RecapView'
 
 const COLUMN_ZONES: ZoneKey[] = ['A', 'B', 'C']
 
@@ -94,6 +97,9 @@ export default function App() {
       {view === 'ORCHESTRATEUR' && <main className="min-h-0 flex-1"><OrchestratorConsole /></main>}
       {view === 'PROMPTS' && <main className="min-h-0 flex-1"><PromptsView /></main>}
       {view === 'JOURNAL' && <main className="flex min-h-0 flex-1 flex-col"><JournalView /></main>}
+      {view === 'RECAP' && <main className="flex min-h-0 flex-1 flex-col"><RecapView /></main>}
+      {view === 'LIVE' && <main className="flex min-h-0 flex-1 flex-col"><LiveView /></main>}
+      {view === 'PARAMS' && <main className="flex min-h-0 flex-1 flex-col"><ParamsView /></main>}
       {view === 'TERMINAL' && <WorkspaceGrid />}
 
       <FunctionKeyBar />

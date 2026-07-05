@@ -53,6 +53,25 @@ export const api = {
   journalCloseSession: () => request('/journal/close-session', { method: 'POST' }),
   journalSetN8n: (payload: unknown) =>
     request('/journal/n8n', { method: 'POST', body: JSON.stringify(payload) }),
+  recap: (granularity: string) => request<unknown>(`/recap?granularity=${granularity}`),
+  settings: () => request<unknown>('/settings'),
+  settingsHistory: () => request<{ history: unknown[] }>('/settings/history'),
+  settingsExport: () => request<unknown>('/settings/export'),
+  putSetting: (key: string, payload: unknown) =>
+    request(`/settings/${key}`, { method: 'PUT', body: JSON.stringify(payload) }),
+  revertSetting: (key: string, payload: unknown) =>
+    request(`/settings/${key}/revert`, { method: 'POST', body: JSON.stringify(payload) }),
+  savePreset: (name: string) =>
+    request('/settings/presets', { method: 'POST', body: JSON.stringify({ name }) }),
+  applyPreset: (name: string, unlockLive: boolean) =>
+    request('/settings/presets/apply', {
+      method: 'POST', body: JSON.stringify({ name, unlock_live: unlockLive }) }),
+  importSettings: (payload: unknown, unlockLive: boolean) =>
+    request('/settings/import', {
+      method: 'POST', body: JSON.stringify({ payload, unlock_live: unlockLive }) }),
+  liveContext: () => request<unknown>('/live/context'),
+  liveAsk: (question: string, operator: string) =>
+    request<unknown>('/live/ask', { method: 'POST', body: JSON.stringify({ question, operator }) }),
   reconImport: async (file: File, tzOffsetMinutes: number) => {
     const form = new FormData()
     form.append('file', file)
