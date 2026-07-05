@@ -167,6 +167,39 @@ stockage navigateur par la grammaire du terminal :
 - webhooks n8n `trade_closed`/`session_closed` async + loggés dans `ai_calls` ;
   `trade_created`/`threshold_breached` et `field_updates` non implémentés (PLACEHOLDER).
 
+## D-023 · Cockpit RECAP · Mode Live · Paramètres 2 étages (maquettes opérateur, PLACEHOLDER sauf mention)
+Deux maquettes fournies par l'opérateur (« Brainstorm Récapitulatif + Paramètres » et
+« Cholismo Cycle Automatisé Unifié ») sont implémentées comme **projections du terminal**,
+pas recopiées : leurs arbres conditionnels restent des maquettes (§11), la logique vient
+du schéma/event store existants.
+- **RECAP** (vue `RECAP`) : pure projection (journal `trade_locked` + decision log +
+  schéma). Arbitrages de la maquette respectés : hiérarchie réflexe/analyse ; seuls P&L et
+  risque s'animent (lissés) ; **aucun toggle destructif dans la vue** (lecture gratuite,
+  le danger se mérite) — armer/désarmer n'existe pas côté serveur, seul l'état + raison
+  est affiché. Le « feu météo » réutilise l'arbitrage de la console (une seule source de
+  vérité). P&L en R depuis le journal (vérité opérateur) × `risk.r_unit_usd` (D-018) ;
+  risk-clock honnête : `null` tant qu'aucune perte n'a défini le rythme. Fenêtres
+  SVS/MR = horloge Montréal des stratégies Sony (compte à rebours réel, pas de TTL inventé).
+- **Mode Live** (vue `MODELIVE`) : lecture marché + dialogue **100 % déterministes côté
+  serveur** (règles pures sur le schéma, <1 ms). La maquette suggérait un agent LLM ;
+  CLAUDE §2.8 interdit tout LLM synchrone dans le hot path → le répondeur est un port
+  des règles du mock sur les valeurs réelles, badgé ADVISORY, fail-closed sur données
+  absentes, refus hors périmètre, conflits score/flux exposés, jamais d'override. Un
+  étage LLM async (Groq/Claude) reste possible PLUS TARD, hors hot path, non requis.
+  Cadence lecture = settings (`live.cycle_seconds` 180 s / 600 s hors fenêtre, cadence du
+  mock) + event-driven sur franchissement de seuil côté client.
+- **Paramètres** (vue `PARAMS`) : moteur 2 étages event-sourcé (`setting_events`
+  append-only, mêmes triggers). Étage spécifique = par stratégie (`SVS`/`MEAN_REVERSION`) ;
+  par instrument ES/NQ **non retenu** (un seul instrument câblé — honnêteté avant tout).
+  Invariants serveur : AUTORITÉ verrouillé 409 (pondérations 35/25/20/15/5, CHOP 61.8,
+  VIX 30, sizing 50 %, audit 8/20, budget Groq) ; risque réduit-seulement 422
+  (spécifique ⊆ global, protection par construction) ; garde-fou 428 + ack explicite
+  (seuil C3 < 50) ; écriture en LIVE 423 sauf déverrouillage explicite. Consommés
+  réellement : `decision.arm_threshold` (moteur, cache en process — zéro I/O hot path),
+  `ai.claude_scoring_period_seconds` (boucle Claude), `risk.*` (jauges RECAP),
+  `live.cycle_*` (cadence Mode Live), `alerts.*` (vue Live). Presets/import = events
+  (l'historique garde tout) ; validation COMPLÈTE avant écriture, rien de semi-appliqué.
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.

@@ -44,13 +44,27 @@ Deuxième instance opérateur (CLAUDE §9 — un opérateur par instance, backen
 ## Utiliser le terminal
 
 - **Clavier d'abord** : `A/B/C/D` focus zone · `G` GO · `N` NO-GO · `S` self-check C5 ·
-  `M` cycle de mode · `V` cycle de vue (terminal / console orchestrateur / prompts) ·
-  `Échap` annule. Les raccourcis sont affichés en bas d'écran.
+  `M` cycle de mode · `V` cycle de vue (terminal / recap / mode live / journal / console /
+  prompts / paramètres) · `Échap` annule. Les raccourcis sont affichés en bas d'écran.
 - **Barre de commande** (lignée Bloomberg) : `/` ouvre la ligne, taper un mnémonique puis
-  `⏎ <GO>` — `B4`, `C4`, `LIVE`, `PRE`, `ORCH`, `PROMPTS`, `CALME`, `VIX`, `GO`, `NOGO`,
-  `SC`, `HELP`. Les commandes de décision passent par les mêmes verrous serveur que les
-  boutons. Tick-flash vert/rouge sur les valeurs fraîches ; sparklines (score, CVD,
-  EUR/USD, VIX, GEX) sur l'historique client des valeurs reçues par SSE.
+  `⏎ <GO>` — `B4`, `C4`, `LIVE`, `PRE`, `ORCH`, `PROMPTS`, `RECAP`, `MODELIVE`, `PARAMS`,
+  `CALME`, `VIX`, `GO`, `NOGO`, `SC`, `HELP`. Les commandes de décision passent par les
+  mêmes verrous serveur que les boutons. Tick-flash vert/rouge sur les valeurs fraîches ;
+  sparklines (score, CVD, EUR/USD, VIX, GEX) sur l'historique client des valeurs reçues par SSE.
+- **Cockpit RECAP** (`/` → `RECAP`, capture `docs/recap-cockpit.png`) : niveau réflexe
+  lisible < 3 s (P&L session en R et $, jauge de risque consommé + risk-clock, feu météo,
+  fenêtres SVS/MR avec compte à rebours) et niveau analyse dépliable (win rate, expectancy,
+  drawdown, equity, P&L par stratégie, modules avec « pourquoi pas de signal ? » sur les
+  gates réelles, pouls des agents IA).
+- **Mode Live** (`/` → `MODELIVE`, capture `docs/live-mode.png`) : lecture marché en
+  langage clair (3 statuts) + chat ADVISORY — réponses **déterministes** côté serveur sur
+  le schéma live (zéro LLM dans le hot path, fail-closed sur données absentes, ne passe
+  jamais d'ordre).
+- **Paramètres** (`/` → `PARAMS`, capture `docs/params-two-tier.png`) : deux étages
+  GLOBAL → SPÉCIFIQUE (par stratégie) avec badges hérite/override, « revenir au global »,
+  presets, export/import JSON, historique append-only. Verrous serveur : AUTORITÉ 409 ·
+  spécifique > plafond global 422 · garde-fou 428 (ack explicite) · lecture seule en
+  session LIVE 423.
 - **Espaces de travail** (lignée Eikon) : onglets `DÉFAUT · MICRO · MACRO · DISCIPLINE`
   sous la barre de statut, bascule touches `1-9` ou mnémoniques (`MICRO`, `WS`, `WSRESET`).
   Dupliquer (icône copie) crée un espace `PERSO` ; le mode édition (crayon) permet de
@@ -58,7 +72,8 @@ Deuxième instance opérateur (CLAUDE §9 — un opérateur par instance, backen
   Layouts persistés en localStorage, par opérateur. Un espace ne fait que réarranger les
   panneaux — chacun reste traçable à un bloc du schéma.
 - **Prendre une décision** : passer en mode `LIVE` → remplir le self-check `C5` (`S`) →
-  quand Phase 0 est `OUVERT` et le score ≥ 60, la fenêtre C3 (90 s) s'arme → `G`/`N`.
+  quand Phase 0 est `OUVERT` et le score ≥ 60 (seuil réglable dans `PARAMS`, garde-fou
+  sous 50), la fenêtre C3 (90 s) s'arme → `G`/`N`.
   À expiration : `NO_GO reason=timeout` écrit automatiquement. **Aucun ordre n'est jamais
   passé** — chaque décision est un event immuable du Decision Log (Zone D).
 - **Prouver le comportement** : exporter les trades NinjaTrader (grille « Trades » → CSV)
