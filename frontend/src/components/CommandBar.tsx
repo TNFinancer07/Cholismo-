@@ -8,6 +8,7 @@ import { api } from '@/lib/api'
 import { refreshScenario, refreshSelfcheck } from '@/lib/sse'
 import { cn } from '@/lib/utils'
 import { useTerminal, type ViewKey, type ZoneKey } from '@/store/terminal'
+import { useWorkspaces } from '@/store/workspace'
 
 interface Command {
   mnemonic: string
@@ -16,7 +17,41 @@ interface Command {
   run: () => Promise<string> | string
 }
 
+/** Mnémonique insensible aux accents : DÉFAUT ↔ DEFAUT. */
+function normalize(s: string): string {
+  return s.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^A-Z0-9?]/gi, '').toUpperCase()
+}
+
 function useCommands(): Command[] {
+  const workspaces = useWorkspaces((s) => s.workspaces)
+  const workspaceCommands: Command[] = useMemo(() => [
+    ...workspaces.map((ws, index) => ({
+      mnemonic: normalize(ws.name),
+      aliases: [`WS${index + 1}`],
+      label: `espace de travail ${ws.name}`,
+      run: () => { useWorkspaces.getState().setActive(ws.id); return `espace → ${ws.name}` },
+    })),
+    {
+      mnemonic: 'WS', label: 'espace de travail suivant',
+      run: () => {
+        const state = useWorkspaces.getState()
+        const index = state.workspaces.findIndex((w) => w.id === state.activeId)
+        const next = state.workspaces[(index + 1) % state.workspaces.length]
+        state.setActive(next.id)
+        return `espace → ${next.name}`
+      },
+    },
+    {
+      mnemonic: 'WSRESET', label: 'réinitialiser les espaces intégrés',
+      run: () => { useWorkspaces.getState().resetBuiltins(); return 'espaces intégrés réinitialisés' },
+    },
+  ], [workspaces])
+  const staticCommands = useStaticCommands()
+  return useMemo(() => [...staticCommands, ...workspaceCommands],
+    [staticCommands, workspaceCommands])
+}
+
+function useStaticCommands(): Command[] {
   return useMemo(() => {
     const store = () => useTerminal.getState()
     const focus = (zone: ZoneKey, label: string): Command => ({
@@ -65,7 +100,7 @@ function useCommands(): Command[] {
       },
       {
         mnemonic: 'HELP', aliases: ['?'], label: 'liste des mnémoniques',
-        run: () => 'A·B·C·D / A1…C4 focus · LIVE/PRE/POST mode · TERM/ORCH/PROMPTS vue · CALME/NEWS/STREAK/VIX/CUSTOM scénario · GO/NOGO · SC',
+        run: () => 'A·B·C·D / A1…C4 focus · LIVE/PRE/POST mode · TERM/ORCH/PROMPTS vue · CALME/NEWS/STREAK/VIX/CUSTOM scénario · GO/NOGO · SC · DEFAUT/MICRO/MACRO/DISCIPLINE ou WS1…9 espaces · WS suivant · WSRESET',
       },
     ]
   }, [])
@@ -87,14 +122,15 @@ export function CommandBar() {
 
   if (!open) return null
 
-  const query = input.trim().toUpperCase()
+  const query = normalize(input)
   const matches = query
-    ? commands.filter((c) => c.mnemonic.startsWith(query)
-        || c.aliases?.some((a) => a.startsWith(query)))
+    ? commands.filter((c) => normalize(c.mnemonic).startsWith(query)
+        || c.aliases?.some((a) => normalize(a).startsWith(query)))
     : commands.slice(0, 8)
 
   async function execute() {
-    const exact = commands.find((c) => c.mnemonic === query || c.aliases?.includes(query))
+    const exact = commands.find((c) => normalize(c.mnemonic) === query
+      || c.aliases?.some((a) => normalize(a) === query))
     const target = exact ?? (matches.length === 1 ? matches[0] : null)
     if (!target) {
       setFeedback({ text: `mnémonique inconnu : ${query || '∅'} — HELP pour la liste`, error: true })

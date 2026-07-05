@@ -51,6 +51,12 @@ Deuxième instance opérateur (CLAUDE §9 — un opérateur par instance, backen
   `SC`, `HELP`. Les commandes de décision passent par les mêmes verrous serveur que les
   boutons. Tick-flash vert/rouge sur les valeurs fraîches ; sparklines (score, CVD,
   EUR/USD, VIX, GEX) sur l'historique client des valeurs reçues par SSE.
+- **Espaces de travail** (lignée Eikon) : onglets `DÉFAUT · MICRO · MACRO · DISCIPLINE`
+  sous la barre de statut, bascule touches `1-9` ou mnémoniques (`MICRO`, `WS`, `WSRESET`).
+  Dupliquer (icône copie) crée un espace `PERSO` ; le mode édition (crayon) permet de
+  déplacer ◀▲▼▶ / masquer / réafficher les panneaux, renommer, et couper le blotter.
+  Layouts persistés en localStorage, par opérateur. Un espace ne fait que réarranger les
+  panneaux — chacun reste traçable à un bloc du schéma.
 - **Prendre une décision** : passer en mode `LIVE` → remplir le self-check `C5` (`S`) →
   quand Phase 0 est `OUVERT` et le score ≥ 60, la fenêtre C3 (90 s) s'arme → `G`/`N`.
   À expiration : `NO_GO reason=timeout` écrit automatiquement. **Aucun ordre n'est jamais

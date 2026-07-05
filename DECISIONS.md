@@ -19,6 +19,12 @@ Aladdin, Murex, Calypso). Traduction concrète, sans violer `PRD §Rendu transve
 - **Eikon / FactSet (bis)** — **sparklines** inline (SVG maison) sur score unifié, CVD,
   EUR/USD, VIX, GEX : historique volatil côté client des valeurs du schéma reçues par SSE,
   traçable au schéma, jamais une valeur inventée ni persistée.
+- **Eikon (ter) — espaces de travail** : multi-layouts nommés (`DÉFAUT`, `MICRO · S1`,
+  `MACRO · S2`, `DISCIPLINE` + duplicables en `PERSO n`), onglets sous la barre de statut,
+  bascule touches `1-9` ou mnémoniques (`MICRO`, `WS1…`, `WS`, `WSRESET`), mode édition
+  (déplacer ◀▲▼▶, masquer, renommer, blotter on/off), persistés en localStorage **par
+  opérateur**. Un workspace ne fait que réarranger les panneaux du registre — chaque panneau
+  reste traçable à un bloc du schéma (CLAUDE §1), aucune donnée créée, aucun verrou contourné.
 - **Refinitiv Eikon / FactSet** — espace de travail en tuiles liées : chaque panneau est une
   projection du même `ContextSchema` (les vues sont liées par construction, pas par câblage).
 - **ICE Data Services** — indicateurs de qualité de donnée de première classe : badge

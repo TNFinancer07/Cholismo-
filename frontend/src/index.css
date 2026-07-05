@@ -38,6 +38,9 @@ body {
 @keyframes absent-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
 .absent-pulse { animation: absent-pulse 1.6s ease-in-out infinite; }
 
+/* Tuiles d'espace de travail : les panneaux remplissent la colonne (lignée Eikon) */
+.panel-slot > section { flex: 1 1 auto; }
+
 /* Countdown C3 en alerte */
 @keyframes countdown-critical { 0%, 100% { background-color: rgba(248,113,113,0.12); } 50% { background-color: rgba(248,113,113,0.28); } }
 .countdown-critical { animation: countdown-critical 0.8s ease-in-out infinite; }

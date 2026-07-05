@@ -1,0 +1,44 @@
+/** Registre des panneaux — la table id → composant utilisée par les workspaces Eikon.
+ *  Chaque entrée reste UN panneau = UN bloc du schéma (CLAUDE §1) ; le registre ne fait
+ *  que donner un nom stable aux panneaux existants pour que les layouts les réarrangent. */
+import type { ComponentType } from 'react'
+import type { PanelId } from '@/store/workspace'
+import { PANEL_IDS } from '@/store/workspace'
+import { CascadePanel } from '@/panels/zoneA/CascadePanel'
+import { BridgewaterMatrix } from '@/panels/zoneA/BridgewaterMatrix'
+import { MacroScorePanel } from '@/panels/zoneA/MacroScorePanel'
+import { ScenarioPanel } from '@/panels/harness/ScenarioPanel'
+import { S1S2Panel } from '@/panels/zoneB/S1S2Panel'
+import { BridgePanel } from '@/panels/zoneB/BridgePanel'
+import { SyncPanel } from '@/panels/zoneB/SyncPanel'
+import { UnifiedSignalPanel } from '@/panels/zoneB/UnifiedSignalPanel'
+import { Phase0DetailPanel } from '@/panels/zoneC/Phase0DetailPanel'
+import { StreakPanel } from '@/panels/zoneC/StreakPanel'
+import { CalibrationPanel } from '@/panels/zoneC/CalibrationPanel'
+import { ModePanel } from '@/panels/modes/ModePanel'
+
+export interface PanelDef {
+  id: PanelId
+  label: string
+  component: ComponentType
+}
+
+export const PANEL_REGISTRY: Record<PanelId, PanelDef> = {
+  A1: { id: 'A1', label: 'Cascade macro', component: CascadePanel },
+  A2: { id: 'A2', label: 'Matrice Bridgewater', component: BridgewaterMatrix },
+  A3: { id: 'A3', label: 'Score macro (A3)', component: MacroScorePanel },
+  MOCK: { id: 'MOCK', label: 'Scénarios & pathologies', component: ScenarioPanel },
+  B1: { id: 'B1', label: 'États S1 · S2', component: S1S2Panel },
+  B2: { id: 'B2', label: 'Bridge variables', component: BridgePanel },
+  B3: { id: 'B3', label: 'Sync S1↔S2', component: SyncPanel },
+  B4: { id: 'B4', label: 'Signal unifié', component: UnifiedSignalPanel },
+  C1: { id: 'C1', label: 'Phase 0 — règles', component: Phase0DetailPanel },
+  C2: { id: 'C2', label: 'Streak pertes', component: StreakPanel },
+  C4: { id: 'C4', label: 'Calibration', component: CalibrationPanel },
+  MODE: { id: 'MODE', label: 'Vue par mode', component: ModePanel },
+}
+
+// Garde-fou : tout id canonique doit être couvert par le registre.
+for (const id of PANEL_IDS) {
+  if (!PANEL_REGISTRY[id]) throw new Error(`panneau non enregistré : ${id}`)
+}

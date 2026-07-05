@@ -5,6 +5,7 @@
 import { useEffect } from 'react'
 import { api } from './api'
 import { MODES, useTerminal, type ViewKey } from '@/store/terminal'
+import { useWorkspaces } from '@/store/workspace'
 import { refreshSelfcheck } from './sse'
 
 const VIEWS: ViewKey[] = ['TERMINAL', 'ORCHESTRATEUR', 'PROMPTS']
@@ -33,6 +34,13 @@ export function useKeyboardNav() {
       }
       if (['A', 'B', 'C', 'D'].includes(key) && !e.metaKey && !e.ctrlKey) {
         store.set({ focusZone: key as never })
+        return
+      }
+      if (/^[1-9]$/.test(key) && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        // Bascule directe d'espace de travail (lignée Eikon)
+        const { workspaces, setActive } = useWorkspaces.getState()
+        const target = workspaces[Number(key) - 1]
+        if (target) setActive(target.id)
         return
       }
       if (key === 'G' || key === 'N') {
@@ -70,6 +78,7 @@ export function useKeyboardNav() {
 
 export const KEY_HINTS: { key: string; label: string }[] = [
   { key: '/', label: 'commande <GO>' },
+  { key: '1-9', label: 'espace' },
   { key: 'A·B·C·D', label: 'focus zone' },
   { key: 'G', label: 'GO' },
   { key: 'N', label: 'NO-GO' },
