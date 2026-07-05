@@ -15,7 +15,7 @@ import uuid
 from datetime import datetime, timezone, timedelta
 from typing import Any, Optional
 
-from . import config
+from . import config, settings
 from .datasource.base import MarketDataSource
 from .datasource import scenarios
 from .event_store import get_store
@@ -131,8 +131,11 @@ class Engine:
                                       deadline_ts=window["deadline_ts"],
                                       instrument=window.get("instrument"))
         # Windows only arm in LIVE mode (D-008) — pre/post-session never opens a decision.
+        # Threshold read from the settings projection (PLACEHOLDER D-008 -> editable
+        # with a server-side guard, D-023); cached dict lookup — no I/O in hot path.
+        arm_threshold = float(settings.value("decision.arm_threshold"))
         if (mode == "LIVE" and phase0_open and score is not None
-                and score >= config.DECISION_ARM_THRESHOLD
+                and score >= arm_threshold
                 and not await self.state.in_decision_cooldown()):
             window = {"id": str(uuid.uuid4()), "opened_ts": now,
                       "deadline_ts": now + config.ANTIPARALYSIS_SECONDS,

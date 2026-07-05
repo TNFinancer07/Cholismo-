@@ -12,7 +12,7 @@ from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
-from . import config, journal, projections
+from . import config, journal, live_mode, projections, recap, settings
 from .datasource import scenarios
 from .datasource.mock import SOURCES
 from .event_store import get_store
@@ -446,6 +446,143 @@ async def set_journal_n8n(body: N8nConfig, request: Request) -> dict[str, Any]:
     await request.app.state.redis.journal_set_n8n(
         {"url": body.url, "api_key": api_key, "enabled": body.enabled})
     return {"ok": True}
+
+
+# ---------- RECAP — session cockpit projection (brainstorm Récapitulatif, D-023) ----------
+
+@router.get("/recap")
+async def get_recap(request: Request, granularity: str = "session") -> dict[str, Any]:
+    engine = request.app.state.engine
+    return recap.recap_payload(get_store(), engine.schema, engine._extras, granularity)
+
+
+# ---------- Settings — two-tier, event-sourced, server-validated (D-023) ----------
+
+def _settings_guard(exc: settings.SettingsError) -> HTTPException:
+    return HTTPException(exc.status, exc.detail)
+
+
+@router.get("/settings")
+async def get_settings() -> dict[str, Any]:
+    return settings.payload(get_store())
+
+
+@router.get("/settings/history")
+async def get_settings_history() -> dict[str, Any]:
+    return {"history": settings.history(get_store())}
+
+
+@router.get("/settings/export")
+async def export_settings() -> dict[str, Any]:
+    return settings.export_overrides()
+
+
+class SettingWrite(BaseModel):
+    value: Any = None
+    scope: Optional[str] = None
+    operator: Operator = Operator.SONY
+    ack_guard: bool = False       # explicit acknowledgement of a guard warning
+    unlock_live: bool = False     # explicit unlock while a LIVE session is running
+
+
+@router.put("/settings/{key:path}")
+async def put_setting(key: str, body: SettingWrite, request: Request) -> dict[str, Any]:
+    try:
+        settings.check_live_lock(await request.app.state.redis.mode(), body.unlock_live)
+        event = settings.set_value(key, body.value, body.scope, body.operator.value,
+                                   ack_guard=body.ack_guard)
+    except settings.SettingsError as exc:
+        raise _settings_guard(exc) from exc
+    return {"ok": True, "event": event, "settings": settings.payload(get_store())}
+
+
+class SettingRevert(BaseModel):
+    scope: Optional[str] = None
+    operator: Operator = Operator.SONY
+    unlock_live: bool = False
+
+
+@router.post("/settings/{key:path}/revert")
+async def revert_setting(key: str, body: SettingRevert, request: Request) -> dict[str, Any]:
+    try:
+        settings.check_live_lock(await request.app.state.redis.mode(), body.unlock_live)
+        event = settings.revert(key, body.scope, body.operator.value)
+    except settings.SettingsError as exc:
+        raise _settings_guard(exc) from exc
+    return {"ok": True, "event": event, "settings": settings.payload(get_store())}
+
+
+class PresetBody(BaseModel):
+    name: str
+    operator: Operator = Operator.SONY
+    unlock_live: bool = False
+
+
+@router.post("/settings/presets")
+async def save_preset(body: PresetBody) -> dict[str, Any]:
+    try:
+        event = settings.save_preset(body.name, body.operator.value)
+    except settings.SettingsError as exc:
+        raise _settings_guard(exc) from exc
+    return {"ok": True, "event": event, "settings": settings.payload(get_store())}
+
+
+@router.post("/settings/presets/apply")
+async def apply_preset(body: PresetBody, request: Request) -> dict[str, Any]:
+    try:
+        settings.check_live_lock(await request.app.state.redis.mode(), body.unlock_live)
+        event = settings.apply_preset(body.name.strip().upper()[:24], body.operator.value)
+    except settings.SettingsError as exc:
+        raise _settings_guard(exc) from exc
+    return {"ok": True, "event": event, "settings": settings.payload(get_store())}
+
+
+class ImportBody(BaseModel):
+    payload: dict[str, Any]
+    operator: Operator = Operator.SONY
+    unlock_live: bool = False
+
+
+@router.post("/settings/import")
+async def import_settings(body: ImportBody, request: Request) -> dict[str, Any]:
+    try:
+        settings.check_live_lock(await request.app.state.redis.mode(), body.unlock_live)
+        event = settings.import_overrides(body.payload, body.operator.value)
+    except settings.SettingsError as exc:
+        raise _settings_guard(exc) from exc
+    return {"ok": True, "event": event, "settings": settings.payload(get_store())}
+
+
+# ---------- Mode Live — deterministic advisory layer (D-023, CLAUDE §2.8) ----------
+
+@router.get("/live/context")
+async def live_context(request: Request) -> dict[str, Any]:
+    engine = request.app.state.engine
+    mode = await request.app.state.redis.mode()
+    return {
+        "context": live_mode.context_payload(engine.schema, engine._extras, mode),
+        "reading": live_mode.market_reading(engine.schema, engine._extras, mode),
+        "suggestions": live_mode.SUGGESTIONS,
+        "cycle_seconds": settings.value("live.cycle_seconds"),
+        "cycle_offwindow_seconds": settings.value("live.cycle_offwindow_seconds"),
+    }
+
+
+class AskBody(BaseModel):
+    question: str
+    operator: Operator = Operator.SONY
+
+
+@router.post("/live/ask")
+async def live_ask(body: AskBody, request: Request) -> dict[str, Any]:
+    question = body.question.strip()
+    if not question:
+        raise HTTPException(422, "question vide")
+    if len(question) > 500:
+        raise HTTPException(422, "question trop longue (500 caractères max)")
+    engine = request.app.state.engine
+    mode = await request.app.state.redis.mode()
+    return live_mode.answer(question, engine.schema, engine._extras, mode)
 
 
 # ---------- AI observability (Étape 10 — coûts/latences loggés, CLAUDE §7) ----------

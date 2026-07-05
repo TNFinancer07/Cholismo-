@@ -54,6 +54,22 @@ BEGIN SELECT RAISE(ABORT, 'journal_entries is append-only'); END;
 CREATE TRIGGER IF NOT EXISTS journal_no_delete BEFORE DELETE ON journal_entries
 BEGIN SELECT RAISE(ABORT, 'journal_entries is append-only'); END;
 
+CREATE TABLE IF NOT EXISTS setting_events (
+  seq      INTEGER PRIMARY KEY AUTOINCREMENT,
+  id       TEXT NOT NULL UNIQUE,
+  ts       REAL NOT NULL,
+  action   TEXT NOT NULL CHECK (action IN ('set','revert','preset_save','preset_apply','import')),
+  key      TEXT,
+  scope    TEXT,
+  value    TEXT,
+  operator TEXT,
+  name     TEXT
+);
+CREATE TRIGGER IF NOT EXISTS settings_no_update BEFORE UPDATE ON setting_events
+BEGIN SELECT RAISE(ABORT, 'setting_events is append-only'); END;
+CREATE TRIGGER IF NOT EXISTS settings_no_delete BEFORE DELETE ON setting_events
+BEGIN SELECT RAISE(ABORT, 'setting_events is append-only'); END;
+
 CREATE TABLE IF NOT EXISTS ai_calls (
   seq        INTEGER PRIMARY KEY AUTOINCREMENT,
   ts         REAL NOT NULL,
@@ -126,6 +142,36 @@ class EventStore:
                                (snap_id, time.time(), json.dumps(payload, ensure_ascii=False)))
             self._conn.commit()
         return snap_id
+
+    def append_setting(self, action: str, key: Optional[str] = None,
+                       scope: Optional[str] = None, value: Any = None,
+                       operator: Optional[str] = None, name: Optional[str] = None,
+                       ts: Optional[float] = None) -> dict[str, Any]:
+        """Settings change log — same event-sourced grammar as decisions: a change is an
+        immutable event, current config is a projection, history comes for free."""
+        if action not in ("set", "revert", "preset_save", "preset_apply", "import"):
+            raise ValueError(f"unknown setting action: {action}")
+        event = {"id": str(uuid.uuid4()), "ts": ts if ts is not None else time.time(),
+                 "action": action, "key": key, "scope": scope, "value": value,
+                 "operator": operator, "name": name}
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO setting_events (id, ts, action, key, scope, value, operator, name)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (event["id"], event["ts"], action, key, scope,
+                 json.dumps(value, ensure_ascii=False), operator, name))
+            self._conn.commit()
+        return event
+
+    def setting_events(self) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT seq, id, ts, action, key, scope, value, operator, name"
+                " FROM setting_events ORDER BY seq ASC").fetchall()
+        return [{"seq": r["seq"], "id": r["id"], "ts": r["ts"], "action": r["action"],
+                 "key": r["key"], "scope": r["scope"],
+                 "value": json.loads(r["value"]) if r["value"] is not None else None,
+                 "operator": r["operator"], "name": r["name"]} for r in rows]
 
     def log_ai_call(self, provider: str, purpose: str, status: str,
                     latency_ms: Optional[float] = None, cost_usd: Optional[float] = None,

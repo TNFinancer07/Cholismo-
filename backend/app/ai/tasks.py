@@ -19,7 +19,7 @@ import time
 
 import httpx
 
-from .. import config, projections
+from .. import config, projections, settings
 from ..event_store import get_store
 
 log = logging.getLogger("cholismo.ai")
@@ -92,7 +92,9 @@ class AITasks:
             store.log_ai_call("claude", "scoring", "SKIPPED_NO_KEY")
             return
         while True:
-            await asyncio.sleep(config.CLAUDE_SCORING_PERIOD_SECONDS)
+            # Period from the settings projection (bounded 60-3600 server-side, D-023) —
+            # re-read each cycle so a change applies without restart; never < 60 s.
+            await asyncio.sleep(float(settings.value("ai.claude_scoring_period_seconds")))
             started = time.time()
             try:
                 snapshot = self.engine.schema.model_dump(mode="json")
