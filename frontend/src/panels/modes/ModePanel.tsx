@@ -41,8 +41,16 @@ function PreSession() {
 
 function LiveRmsStack() {
   const rms = useTerminal((s) => s.extras?.rms ?? null)
-  const layers = ['L1 · taille max', 'L2 · stop obligatoire', 'L3 · perte/jour',
-    'L4 · corrélation', 'L5 · kill-switch']
+  // Noms canoniques des 5 couches RMS (AUTORITÉ — reference/sony/strategie2 §01b).
+  // Ordre de priorité descendant : le garde du dessus prime toujours ; un score de
+  // 100/100 ne franchit jamais une limite posée au-dessus de lui.
+  const layers = [
+    ['1 · KillSwitch', 'arrêt d\'urgence — pause 24 h après 2 pertes'],
+    ['2 · CircuitBreaker', '1 %/trade · 2 %/jour · VIX > 30 · news'],
+    ['3 · StrategyOverlay', 'gates + score + verrou 30 min (ce document)'],
+    ['4 · RiskSizer', 'taille = score × VIX, arrondi 5 % bas'],
+    ['5 · PortfolioRisk', 'corrélation ES/NQ · sync Youssef'],
+  ]
   const active = rms === null ? 0 : Math.min(5, Math.max(0, Math.ceil(rms)))
   return (
     <div>
@@ -50,11 +58,13 @@ function LiveRmsStack() {
         <Layers size={10} aria-hidden /> Stack RMS 5 couches — niveau {rms === null ? '—' : fmtNum(rms, 1)}
       </div>
       <div className="space-y-0.5">
-        {layers.map((label, i) => (
-          <div key={label} className={cn('flex items-center justify-between border px-1.5 py-0.5 text-xxs',
-            i < active ? 'border-risk-yellow/60 bg-risk-yellow/10 text-risk-yellow' : 'border-term-grid text-term-faint')}>
-            {label}
-            <span>{i < active ? 'ENGAGÉ' : 'repos'}</span>
+        {layers.map(([label, detail], i) => (
+          <div key={label} className={cn('flex items-center justify-between gap-2 border px-1.5 py-0.5 text-xxs',
+            i < active ? 'border-risk-yellow/60 bg-risk-yellow/10 text-risk-yellow' : 'border-term-grid text-term-faint')}
+            title={detail}>
+            <span className="shrink-0 font-semibold">{label}</span>
+            <span className="truncate text-term-faint">{detail}</span>
+            <span className="shrink-0">{i < active ? 'ENGAGÉ' : 'repos'}</span>
           </div>
         ))}
       </div>

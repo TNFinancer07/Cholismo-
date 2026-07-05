@@ -27,7 +27,12 @@ SOURCES = {
     "cme": ["nq_es", "zn", "dxy_alt"],
     "fx_feed": ["eurusd", "dx", "dxy"],
     "greeks_engine": ["gex"],
-    "macro_feed": ["real_rates", "bridgewater_matrix"],
+    "macro_feed": ["real_rates", "bridgewater_matrix",
+                   # Simulated N1/N2A outputs feeding the REAL Youssef pipeline formulas
+                   # (reference/youssef/*, D-021): momentum axes, D-scores, arb deltas.
+                   "g_momentum", "pi_momentum", "d1", "d2", "d3", "d4", "d5",
+                   "taylor_ois_delta", "phillips_tips_delta", "beer_z", "carry_net",
+                   "cycle_div_delta", "leading_turn", "rr_zscore", "spot_momentum"],
     "rms_engine": ["rms"],
 }
 
@@ -137,3 +142,32 @@ class MockDataSource(MarketDataSource):
         matrix = [[round(max(-1.0, min(1.0, rng.gauss(0, 0.45))), 2) for _ in range(6)]
                   for _ in range(5)]
         await self._emit(state, "macro_feed", "bridgewater_matrix", matrix, patho)
+
+        # --- Simulated N1/N2A outputs for the Youssef pipeline (bases derived from the
+        # scenario regime; the downstream FORMULAS are the canonical ones, D-021) ---
+        clamp = lambda x: max(-1.0, min(1.0, x))
+        g = clamp(self._drift("g_mom", (base["svs"] - 50.0) / 40.0, vol, 0.04))
+        pi = clamp(self._drift("pi_mom", (base["vix"] - 18.0) / 20.0, vol, 0.04))
+        await self._emit(state, "macro_feed", "g_momentum", round(g, 3), patho)
+        await self._emit(state, "macro_feed", "pi_momentum", round(pi, 3), patho)
+        d_scores = {
+            "d1": clamp(self._drift("d1", g * 0.8, vol, 0.05)),
+            "d2": clamp(self._drift("d2", -pi * 0.5 - 0.1, vol, 0.05)),
+            "d3": clamp(self._drift("d3", pi * 0.6, vol, 0.05)),
+            "d4": clamp(self._drift("d4", (15.0 - base["vix"]) / 20.0, vol, 0.05)),
+            "d5": clamp(self._drift("d5", -0.2, vol, 0.04)),
+        }
+        for key, value in d_scores.items():
+            await self._emit(state, "macro_feed", key, round(value, 3), patho)
+        for key, base_value, scale in (
+            ("taylor_ois_delta", 0.15, 0.08),      # Arb1 — seuil 0.30 %
+            ("phillips_tips_delta", -0.2, 0.10),   # Arb2 — seuil 0.25 %
+            ("beer_z", -1.2, 0.15),                # Arb3 — seuil |z| 1.5
+            ("carry_net", 3.0, 0.4),               # Arb4 — seuil 2.0 après gate
+            ("cycle_div_delta", 0.4, 0.10),        # Arb5 — seuil 0.5
+            ("leading_turn", 0.4, 0.08),
+            ("rr_zscore", -(base["vix"] - 18.0) / 6.0, 0.15),  # Arb6 — seuil |z| 1.5
+            ("spot_momentum", 0.6, 0.10),
+        ):
+            await self._emit(state, "macro_feed", key,
+                             round(self._drift(key, base_value, vol, scale), 3), patho)

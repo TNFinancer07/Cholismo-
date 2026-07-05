@@ -111,6 +111,22 @@ SQLite : event store + snapshots (append-only)
 n8n / LangGraph : orchestration hors hot path (Phase 0 appliquée AVANT tout appel Claude)
 ```
 
+## Les 5 stratégies réelles (visibles dans le terminal)
+
+Les artefacts des opérateurs vivent dans [`/reference/`](reference/MANIFEST.md) et sont
+câblés dans le schéma (D-021) :
+
+| Opérateur | Stratégie | Où c'est visible |
+|---|---|---|
+| Sony | **SVS — Structural Vacuum Squeeze** (breakout LVN, 09h30-11h00, seuil 88/100) | panneau `S1S` — éligibilité gate par gate + sizing VIX×session |
+| Sony | **Mean Reversion — Piège d'Absorption v5.8** (15h30-17h00, seuil 80/100, CI > 61.8) | panneau `S1S` + stack RMS 5 couches canoniques (Mode Live) |
+| Youssef | **Pipeline macro** (3 docs : Phase 0 kurtosis VIX → quadrant Bridgewater → N2A/N2B → N3 Flux 1+2 → N4/N5) | panneau `S2P` — régime D4, quadrant+poids, Flux 1, 6 arbitrages |
+
+Formules AUTORITÉ ; intrants N1-N2A simulés par le mock tant qu'aucun feed réel n'est
+branché. Extraits copiables dans l'onglet Prompts (`V`).
+
+![Pipeline Youssef](docs/pipeline-youssef.png)
+
 ## Contraintes dures (CLAUDE §2) — où elles vivent
 
 | # | Contrainte | Implémentation |

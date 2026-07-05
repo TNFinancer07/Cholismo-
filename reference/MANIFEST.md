@@ -1,24 +1,91 @@
 # /reference/ — MANIFEST
 
-> Règle (`CLAUDE.md §11`) : les artifacts de ce dossier sont des **maquettes**. Seuls les blocs
-> listés ici comme `AUTORITÉ` peuvent être extraits comme logique métier canonique. Tout le
-> reste est `PLACEHOLDER` : inspiration UI uniquement, jamais de la logique métier.
+> Règle (`CLAUDE.md §11`) : seuls les blocs listés `AUTORITÉ` peuvent être extraits comme
+> logique métier canonique. Le reste est `PLACEHOLDER` (inspiration UI, jamais canonique).
+> En cas de doute → `PLACEHOLDER` + note dans `DECISIONS.md`.
 
-## État actuel
+## Artefacts présents
 
-**Aucun artifact `/reference/` n'a été fourni dans ce dépôt** (dépôt initialisé vide).
-Conséquence, appliquée fail-closed :
-
-| Bloc | Statut | Conséquence |
+| Fichier | Contenu | Opérateur |
 |---|---|---|
-| Arbres conditionnels du chat Mode Live | `PLACEHOLDER` (absent) | Non implémentés comme logique canonique ; refus VIX>30 / CHOP≥61.8 codé en dur depuis `PRD §Vues par mode` uniquement. |
-| Formules Q7/Q8 | `PLACEHOLDER` (jamais résolues, cf. `CLAUDE §11`) | Non implémentées. |
-| Prompts / contextes (onglet 6 blocs) | `PLACEHOLDER` (absent) | L'onglet affiche des gabarits explicitement marqués `PLACEHOLDER — à remplacer par les blocs AUTORITÉ de /reference/`. Rien d'inventé n'est présenté comme canonique. |
-| Formules de scoring (Structure/OrderFlow/Sentiment/Quality) | `PLACEHOLDER` | Implémentées isolées, commentées `v1 provisional`, consignées dans `DECISIONS.md`. |
-| `compute_s2_macro_score()` | `AUTORITÉ` (squelette donné dans `PRD §A3`) | Implémentée telle que spécifiée : `CALIBRATED=False` par défaut, retourne `None`, ne pilote rien. |
-| Poids du signal unifié 35/25/20/15/5 + renormalisation /80 | `AUTORITÉ` (`PRD §0`) | Implémentés tels quels. |
-| Seuils `CHOP≥61.8` crit · `VIX>30` crit · `RMS≥3` warn/crit · GEX stale 180 s · audit streak à 8 · countdown 90 s · N/60 · 50+ trades · result score à 20+ | `AUTORITÉ` (`TASKS §2.3`, `PRD §B2/§C/§D`) | Implémentés tels quels, constantes nommées dans `backend/app/config.py`. |
-| Grammaire event store (DecisionEvent/OutcomeEvent/ReconEvent, append-only, projections) | `AUTORITÉ` (`PRD §Zone D`) | Implémentée telle quelle. |
+| `sony/SVS_System_Prompt_3.html` | **SVS — Structural Vacuum Squeeze** (breakout LVN ES/NQ), scoring v2.0 CHOP intégré | Sony — stratégie d'exécution 1 |
+| `sony/strategie2_mean_reversion_v5_afternoon.html` | **Mean Reversion — Piège d'Absorption v5.8** (Bookmap natif, après-midi) | Sony — stratégie d'exécution 2 |
+| `youssef/01_FONDATIONS_ET_ANALYSE_QUANTITATIVE.md` | Phase 0 (régime kurtosis VIX) · Étape 0 (quadrant Bridgewater) · N1 · N2A (D1-D5) | Youssef — analyse macro (1/3) |
+| `youssef/02_ANALYSE_QUALITATIVE_BLOCS.md` | N2B — blocs 1 à 7 (CB 3 niveaux, narratifs, cross-market, géopolitique, signaux faibles, 10 questions, calibrage) | Youssef — analyse macro (2/3) |
+| `youssef/03_SCORING_ARBITRAGES_DECISION.md` | N3 (Flux 1 + Flux 2 / 6 arbitrages) · N4 (validation) · N5 (scénarios + trade card) | Youssef — analyse macro (3/3) |
 
-> Quand des artifacts `/reference/` seront ajoutés, classer ici **chaque bloc** `AUTORITÉ` vs
-> `PLACEHOLDER` avant toute extraction, et mettre à jour `DECISIONS.md`.
+## Classement des blocs
+
+### Sony · SVS (stratégie d'exécution 1) — `AUTORITÉ`
+- Identité : breakout par vide de liquidité (LVN) après cassure de Value Area, ES/corrélat NQ.
+- Fenêtre prime **09h30–11h00** ; malus session tampon **−3** / zone morte **−7** ; plafond **1 trade zone morte/semaine** (veto dur).
+- Seuil unique **score ajusté ≥ 88/100** ; piliers et planchers (compensation interdite) :
+  C1 Structure 35 (min 26) · C2 Order Flow 25 (min 19) · C3 Macro&Timing 20 (min 13) ·
+  C4 Sentiment 15 (min 10) · C5 Qualité 5 (min 3).
+- Filtres absolus Phase 0 : obstacle < 8 ticks · **CHOP(14) 15min ≥ 61.8 bloquant** ·
+  divergence de flux/absorption · news Tier 1 ±30 min · corr NQ/ES < +0.40 (purge) ·
+  **VIX > 30 = session suspendue**.
+- Sizing VIX : <15 → 100 % · 15–20 → 75 % · 20–30 → 50 % · >30 → suspendu ; ×1.00/×0.75/×0.50
+  selon tranche de session ; base = 50 % calibration (60 trades).
+- Stop-limit uniquement (expiration 90 s), break-even obligatoire à +1.5R, sortie CVD 2 bougies.
+- `PLACEHOLDER` : les « corrections d'audit » listées dans le document (non appliquées aux
+  seuils en vigueur) ; note : l'en-tête du doc dit « v2.0 CHOP intégré » alors que
+  `CLAUDE.md §3` parle de « SVS v3.0 » — le contenu du fichier fait foi, écart signalé.
+
+### Sony · Mean Reversion — Piège d'Absorption v5.8 (stratégie d'exécution 2) — `AUTORITÉ`
+- Créneau optimal **15h30–17h00** ; hors-fenêtre = floor de pénalité (bordure 0 / intermédiaire
+  −5 / lointain −8 ; seuil effectif MAX(seuil, 89)) + cap **1 hors-fenêtre/semaine** + taille ×0.75.
+- Seuil **score ≥ 80/100** ; piliers/planchers : Structure 30 (min 21) · Order Flow 25 (min 17) ·
+  Macro 25 (min 15) · Sentiment 15 (min 10) · ajustement VWAP +2/+5.
+- Gates éliminatoires (fail-fast, ordre v5.1) : verrou 30 min → G1 news High Impact →
+  G2 hors VWAP ±1σ → **G4 CI > 61.8** (mean reversion non viable sous ce seuil) → G3 SL défini.
+- Buffer SL par CI : >90 → 2 ticks · 75–90 → 5 ticks · 61.8–75 → 3 ticks.
+- Modificateur VIX : <15 ×1.0 · 15–20 ×0.75 · 20–30 ×0.50 · **>30 suspendu (CircuitBreaker)** ;
+  backwardation VIX9D ≥ VIX → mode ultra-sélectif (seuil 95).
+- Taille par score : 80–84 → 25 % · 85–89 → 50 % · 90–94 → 75 % · 95–100 → 100 % ; arrondi 5 % vers le bas.
+- Limites : **1 %/trade · 2 %/jour · pause 24 h après 2 pertes** ; erreurs A/B/C.
+- **Architecture RMS 5 couches (AUTORITÉ — noms canoniques)** :
+  1 `KillSwitch` · 2 `CircuitBreaker` · 3 `StrategyOverlay` · 4 `RiskSizer` · 5 `PortfolioRisk`
+  (le garde du dessus prime toujours ; un score de 100 ne franchit jamais une limite au-dessus).
+
+### Youssef · pipeline macro (stratégie d'analyse, 3 fichiers) — `AUTORITÉ`
+- **Phase 0 / D4 — régime kurtosis VIX** : GREEN (<15) / YELLOW (15–24) / ORANGE (24–35) /
+  RED (>35) ; hystérésis entry/exit 18/14 · 26/22 · 37/33 ; multiplicateurs
+  carry 1.0/0.7/0.4/0.0 (⚠ conflit résolu dans le doc : valeurs Arb4 font foi) ·
+  fund 1.0/1.0/0.7/0.3 · score 1.0/0.7/0.4/0.0 ; kurtosis > 9 force RED.
+- **Étape 0 — quadrant Bridgewater** : classification par signes (g,π), r/θ/confidence,
+  transition_risk (<15°/30°), hystérésis zone morte + 3 relevés.
+  ⚠ **Conflit de versions constaté entre fichiers** : la table de poids par quadrant du
+  fichier 1 (§4, « valeurs canoniques ») diffère de celle du fichier 3 (§N3 Étape 2) pour
+  GOLDILOCKS/STAGFLATION/DESINFLATION. **Résolution : fichier 1 fait foi pour WEIGHTS**
+  (il se déclare canonique) ; **fichier 3 fait foi pour les 6 arbitrages** (il se déclare
+  « version la plus récente, fait foi » sur ce périmètre). Consigné D-021.
+- **N3 Flux 1** : renormalisation des poids après modificateur 2B ; `raw = Σ w·D` ;
+  `tanh` ; `× d4_mult.fundamental` ; `conviction = |score|×10` (cap 7 si réflexivité Q7) ;
+  4 horizons : long `0.5·D1+0.5·D5` · moyen ★ `0.6·D2+0.4·D3` · court `D4_score` · intra flux.
+- **N3 Flux 2 — 6 arbitrages** (seuils/caps AUTORITÉ, fichier 3) :
+  Arb1 Taylor/OIS |δ|>0.30, cap 9 · Arb2 Phillips/TIPS |δ|>0.25, cap 9 ·
+  Arb3 BEER/spot |z|>1.5, cap 6, direction inversée, jamais seul ·
+  Arb4 Carry/UIP |signal|>2.0 APRÈS gate carry_mult, cap 8, conviction `min(|s|/2×5, 8)` ·
+  Arb5 Cycle |δ|>0.5, timing_factor `1+0.3|leading_turn|`, conviction `min(|δ|/0.5×4×tf, 7)` ·
+  Arb6 RR 2 conditions (|z|>1.5 ET divergence>0), cap 6, conviction `min(|z|/1.5×4, 6)`,
+  `sentiment_extreme` si |z|>2, boucle de protection carry Arb6→D4→Arb4.
+- **N2B** : 7 blocs, verdict B6 par flags (0-2 full · 3-4 half · 5+ no_trade), ordre de
+  calibrage A→F, hiérarchie gates > plafonds > confiance > modulations.
+- **N4** : 4 tests, table conviction→sizing (≥6 GO plein · 4–6 réduit 30-50 % · 3–4 minimal 20 % · <3 NO-GO).
+- **N5** : scénarios 60/30/10 + trade card (R:R ≥ 2:1 visé).
+- `PLACEHOLDER` : conviction Arb1/2/3 — le fichier donne les caps mais pas la formule
+  d'échelle ; convention retenue `min(|δ|/seuil×5, cap)` (Arb3 : `×4`), calquée sur les
+  formules données pour Arb4/5/6. Consigné D-021.
+
+### Câblage terminal (où ces blocs vivent dans le code)
+- `backend/app/strategies/sony.py` — éligibilité SVS + Mean Reversion (gates câblés sur les
+  données réellement présentes dans le schéma ; gates sans source → `MANUAL`/`ABSENT`,
+  jamais inventés) → `s1_state.strategies` → panneau **S1S**.
+- `backend/app/strategies/youssef.py` — régime D4 (hystérésis), quadrant + WEIGHTS,
+  Flux 1, 6 arbitrages → `s2_state.pipeline` → panneau **S2P**.
+- ⚠ Les intrants D1-D5 et deltas d'arbitrage sont produits par le **MockDataSource**
+  (simulation des sorties N1/N2A) tant qu'aucun feed réel n'est branché — les FORMULES
+  aval sont AUTORITÉ, les VALEURS d'entrée sont simulées (couture mock, CLAUDE §4).
+- Stack RMS du Mode Live : noms canoniques des 5 couches (Mean Reversion §01b).
+- Onglet Prompts & Contextes : blocs copiables extraits de ces fichiers (plus de gabarits inventés).

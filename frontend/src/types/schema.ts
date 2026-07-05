@@ -54,11 +54,35 @@ export interface Structure {
   lvn: MetaField<number[]>
 }
 
+export interface StrategyGate {
+  name: string
+  status: 'PASS' | 'FAIL' | 'ABSENT' | 'MANUAL'
+  detail: string
+}
+
+export interface ExecutionStrategy {
+  strategy_id: string
+  label: string
+  version: string
+  window: string
+  score_threshold: string
+  eligible: boolean
+  sizing_pct: number | null
+  gates: StrategyGate[]
+  reference: string
+}
+
+export interface S1Strategies {
+  svs: ExecutionStrategy
+  mean_reversion: ExecutionStrategy
+}
+
 export interface S1State {
   svs_score: MetaField<number>
   order_flow: OrderFlow
   structure: Structure
   chop: MetaField<number>
+  strategies: S1Strategies | null
 }
 
 // --- s2_state → B1 droite + ZONE A (Youssef, violet) [lent] ---
@@ -80,10 +104,60 @@ export interface S2MacroScore {
   gate: number | null
 }
 
+export interface MacroRegime {
+  tier: 'GREEN' | 'YELLOW' | 'ORANGE' | 'RED'
+  vix: number | null
+  kurtosis: number | null
+  carry_mult: number
+  fund_mult: number
+  score_mult: number
+}
+
+export interface BridgewaterQuadrant {
+  quadrant: string | null
+  g: number | null
+  pi: number | null
+  r: number | null
+  theta: number | null
+  confidence: number | null
+  transition_risk: string
+  weights: Record<string, number>
+}
+
+export interface Flux1 {
+  d_scores: Record<string, number | null>
+  raw_score: number | null
+  score_final: number | null
+  conviction: number | null
+  direction: 'LONG' | 'SHORT' | 'NEUTRE'
+  horizons: Record<string, number | null>
+}
+
+export interface Arbitrage {
+  arb_id: number
+  name: string
+  source_dim: string
+  horizon: string
+  threshold: string
+  active: boolean | null
+  delta: number | null
+  direction: string | null
+  conviction: number | null
+  note: string
+}
+
+export interface S2Pipeline {
+  regime: MacroRegime
+  quadrant: BridgewaterQuadrant
+  flux1: Flux1
+  arbitrages: Arbitrage[]
+}
+
 export interface S2State {
   cascade: Cascade
   bridgewater_matrix: MetaField<number[][]>
   s2_macro_score: S2MacroScore
+  pipeline: S2Pipeline | null
 }
 
 // --- bridge_variables → B2 [rapide] ---

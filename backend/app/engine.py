@@ -29,6 +29,8 @@ from .schema import (BridgeVariables, Cascade, ContextSchema, Decision, Decision
                      SessionIdentity, SessionMarker, Structure, SyncState, SyncVerdict)
 from .scoring import compute_unified_signal
 from .sse import broadcaster
+from .strategies.sony import evaluate_strategies
+from .strategies.youssef import compute_pipeline, update_regime
 
 log = logging.getLogger("cholismo.engine")
 
@@ -48,6 +50,11 @@ FIELD_SPEC: dict[str, tuple[str, float, float]] = {
     "real_rates": ("macro_feed", *_SLOW), "bridgewater_matrix": ("macro_feed", *_SLOW),
     "gex": ("greeks_engine", config.GEX_STALE_SECONDS, config.GEX_STALE_SECONDS * 4),
     "rms": ("rms_engine", *_FAST),
+    # Simulated N1/N2A outputs (Youssef pipeline inputs — slow cadence, D-021)
+    **{field: ("macro_feed", *_SLOW) for field in (
+        "g_momentum", "pi_momentum", "d1", "d2", "d3", "d4", "d5",
+        "taylor_ois_delta", "phillips_tips_delta", "beer_z", "carry_net",
+        "cycle_div_delta", "leading_turn", "rr_zscore", "spot_momentum")},
 }
 DXY_CONTRADICTION_TOLERANCE = 0.5  # cross-source divergence threshold (D-012)
 
@@ -59,6 +66,7 @@ class Engine:
         self.schema = ContextSchema()
         self._tasks: list[asyncio.Task] = []
         self._extras: dict[str, Any] = {"rms": None, "streak": 0, "scenario": None}
+        self._regime_tier = "GREEN"  # D4 hysteresis state (reference/youssef/01)
 
     # ---------- assembly helpers ----------
 
@@ -197,6 +205,16 @@ class Engine:
         # VIX is a Phase-0-critical field: refresh its meta on the fast path too (the
         # slow channel keeps its own cadence for SSE — nothing is re-pushed here).
         self.schema.s2_state.cascade.vix = await self._meta("vix", raws, now)
+        vix_value = (float(self.schema.s2_state.cascade.vix.value)
+                     if self.schema.s2_state.cascade.vix.value is not None else None)
+
+        # D4 regime hysteresis is "always-on" (reference/youssef/01) — updated each fast
+        # tick; the full pipeline block is (re)published on the slow channel.
+        self._regime_tier = update_regime(self._regime_tier, vix_value, None)
+
+        # Sony execution strategies — SVS + Mean Reversion eligibility (reference/sony/*)
+        s1.strategies = evaluate_strategies(s1, vix_value,
+                                            self.schema.session_identity.session_marker, now)
 
         # sync + unified signal
         self.schema.sync_state = self._sync_verdict()
@@ -266,7 +284,10 @@ class Engine:
 
     async def _assemble_slow(self, now: float) -> None:
         raws = await self.state.read_raw_many(
-            ["nq_es", "vix", "zn", "dx", "eurusd", "real_rates", "bridgewater_matrix"])
+            ["nq_es", "vix", "zn", "dx", "eurusd", "real_rates", "bridgewater_matrix",
+             "g_momentum", "pi_momentum", "d1", "d2", "d3", "d4", "d5",
+             "taylor_ois_delta", "phillips_tips_delta", "beer_z", "carry_net",
+             "cycle_div_delta", "leading_turn", "rr_zscore", "spot_momentum"])
         cascade = Cascade(
             nq_es=await self._meta("nq_es", raws, now),
             vix=await self._meta("vix", raws, now),
@@ -283,8 +304,10 @@ class Engine:
             matrix_meta.value if isinstance(matrix_meta.value, list) else None,
             cascade.real_rates.value if isinstance(cascade.real_rates.value, (int, float)) else None,
         )
+        # Youssef pipeline (reference/youssef/*) — canonical formulas over simulated inputs.
+        pipeline = compute_pipeline(self._regime_tier, raws)
         self.schema.s2_state = S2State(cascade=cascade, bridgewater_matrix=matrix_meta,
-                                       s2_macro_score=macro)
+                                       s2_macro_score=macro, pipeline=pipeline)
         broadcaster.publish("slow", "s2_state", self.schema.model_dump(mode="json")["s2_state"])
 
     async def _fast_loop(self) -> None:

@@ -6,7 +6,7 @@ import { create } from 'zustand'
 import { useTerminal } from './terminal'
 
 /** Identifiants canoniques des panneaux disponibles (couverts par panels/registry). */
-export const PANEL_IDS = ['A1', 'A2', 'A3', 'MOCK', 'B1', 'B2', 'B3', 'B4',
+export const PANEL_IDS = ['A1', 'A2', 'A3', 'S2P', 'MOCK', 'B1', 'B2', 'B3', 'B4', 'S1S',
   'C1', 'C2', 'C4', 'MODE'] as const
 export type PanelId = (typeof PANEL_IDS)[number]
 
@@ -21,11 +21,11 @@ export interface Workspace {
 function builtins(): Workspace[] {
   return [
     { id: 'defaut', name: 'DÉFAUT', builtin: true, showBlotter: true,
-      columns: [['A1', 'A3', 'A2', 'MOCK'], ['B4', 'B1', 'B2', 'B3'], ['C1', 'C2', 'C4', 'MODE']] },
+      columns: [['A1', 'S2P', 'A3', 'MOCK'], ['B4', 'S1S', 'B1'], ['C1', 'C2', 'C4', 'MODE']] },
     { id: 'micro', name: 'MICRO · S1', builtin: true, showBlotter: true,
-      columns: [['B1', 'B2'], ['B4', 'B3'], ['C1', 'C2', 'MOCK']] },
+      columns: [['S1S', 'B2'], ['B4', 'B1', 'B3'], ['C1', 'C2', 'MOCK']] },
     { id: 'macro', name: 'MACRO · S2', builtin: true, showBlotter: false,
-      columns: [['A1', 'A3'], ['A2', 'B4'], ['B3', 'MODE', 'MOCK']] },
+      columns: [['A1', 'A3'], ['S2P', 'A2'], ['B4', 'B3', 'MOCK']] },
     { id: 'discipline', name: 'DISCIPLINE', builtin: true, showBlotter: true,
       columns: [['C1', 'C2'], ['B4', 'C4'], ['MODE', 'MOCK']] },
   ]

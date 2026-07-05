@@ -81,11 +81,39 @@ class Structure(BaseModel):
     lvn: MetaField = Field(default_factory=MetaField)  # value: list[float]
 
 
+class StrategyGate(BaseModel):
+    """One gate/filter of an execution strategy. status: PASS | FAIL | ABSENT (data
+    missing -> fail-closed) | MANUAL (source not wired, operator's responsibility)."""
+    name: str
+    status: str = "MANUAL"
+    detail: str = ""
+
+
+class ExecutionStrategy(BaseModel):
+    """Sony execution strategy card — AUTORITÉ params from /reference/sony/* (D-021)."""
+    strategy_id: str
+    label: str
+    version: str
+    window: str
+    score_threshold: str
+    eligible: bool = False
+    sizing_pct: Optional[float] = None    # % of calibration size after VIX/session modifiers
+    gates: list[StrategyGate] = Field(default_factory=list)
+    reference: str = ""
+
+
+class S1Strategies(BaseModel):
+    svs: ExecutionStrategy
+    mean_reversion: ExecutionStrategy
+
+
 class S1State(BaseModel):
     svs_score: MetaField = Field(default_factory=MetaField)
     order_flow: OrderFlow = Field(default_factory=OrderFlow)
     structure: Structure = Field(default_factory=Structure)
     chop: MetaField = Field(default_factory=MetaField)
+    # The two REAL Sony execution strategies (reference/sony/*), evaluated live (D-021).
+    strategies: Optional[S1Strategies] = None
 
 
 # --- s2_state → B1 right + ZONE A (Youssef, violet) [slow] ---
@@ -109,10 +137,66 @@ class S2MacroScore(BaseModel):
     gate: Optional[float] = None
 
 
+class MacroRegime(BaseModel):
+    """Phase 0 Youssef — VIX kurtosis regime with hysteresis (reference/youssef/01)."""
+    tier: str = "GREEN"                    # GREEN | YELLOW | ORANGE | RED
+    vix: Optional[float] = None
+    kurtosis: Optional[float] = None       # not fed by the mock -> None (honest)
+    carry_mult: float = 1.0
+    fund_mult: float = 1.0
+    score_mult: float = 1.0
+
+
+class BridgewaterQuadrant(BaseModel):
+    """Étape 0 — quadrant from (g, pi) momentum; weights table AUTORITÉ file 1 (D-021)."""
+    quadrant: Optional[str] = None
+    g: Optional[float] = None
+    pi: Optional[float] = None
+    r: Optional[float] = None
+    theta: Optional[float] = None
+    confidence: Optional[float] = None
+    transition_risk: str = "unknown"
+    weights: dict[str, float] = Field(default_factory=dict)
+
+
+class Flux1(BaseModel):
+    """N3 Flux 1 — weighted tanh aggregation + D4 gate + 4 horizons (reference/youssef/03)."""
+    d_scores: dict[str, Optional[float]] = Field(default_factory=dict)
+    raw_score: Optional[float] = None
+    score_final: Optional[float] = None
+    conviction: Optional[float] = None
+    direction: str = "NEUTRE"
+    horizons: dict[str, Optional[float]] = Field(default_factory=dict)
+
+
+class Arbitrage(BaseModel):
+    """N3 Flux 2 — one of the 6 anticipation arbitrages (thresholds AUTORITÉ file 3)."""
+    arb_id: int
+    name: str
+    source_dim: str
+    horizon: str
+    threshold: str
+    active: Optional[bool] = None          # None = inputs missing
+    delta: Optional[float] = None
+    direction: Optional[str] = None
+    conviction: Optional[float] = None
+    note: str = ""
+
+
+class S2Pipeline(BaseModel):
+    regime: MacroRegime = Field(default_factory=MacroRegime)
+    quadrant: BridgewaterQuadrant = Field(default_factory=BridgewaterQuadrant)
+    flux1: Flux1 = Field(default_factory=Flux1)
+    arbitrages: list[Arbitrage] = Field(default_factory=list)
+
+
 class S2State(BaseModel):
     cascade: Cascade = Field(default_factory=Cascade)
     bridgewater_matrix: MetaField = Field(default_factory=MetaField)  # value: 5x6 signed intensities
     s2_macro_score: S2MacroScore = Field(default_factory=S2MacroScore)
+    # The REAL Youssef macro pipeline (reference/youssef/01-03), formulas AUTORITÉ,
+    # inputs simulated by the mock until real feeds exist (D-021).
+    pipeline: Optional[S2Pipeline] = None
 
 
 # --- bridge_variables → B2 [fast] ---

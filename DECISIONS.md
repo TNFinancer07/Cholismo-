@@ -123,6 +123,31 @@ chemin de décision. Sans clé API : Groq advisory → `UNAVAILABLE` (Phase 0 in
 scoring Claude et audit Gemini → jobs marqués `SKIPPED_NO_KEY` et loggés. Budgets/coûts
 loggés dans `ai_calls` (SQLite, append-only aussi).
 
+## D-021 · Les 5 stratégies réelles câblées visiblement (`AUTORITÉ` /reference/)
+Les artefacts fournis par les opérateurs sont installés dans `/reference/` et classés dans
+`MANIFEST.md` : **Sony ×2 exécution** (SVS — Structural Vacuum Squeeze, scoring v2.0 CHOP ;
+Mean Reversion — Piège d'Absorption v5.8) et **Youssef ×3 analyse macro** (fondations/N2A,
+N2B 7 blocs, N3-N5). Câblage :
+- `s1_state.strategies` (canal rapide) — éligibilité SVS + MR : seuls les gates dont la
+  donnée existe dans le schéma sont évalués (`PASS/FAIL/ABSENT` fail-closed) ; les gates
+  sans source câblée sont affichés `MANUAL`, jamais devinés. Le SCORE lui-même reste chez
+  l'opérateur — le terminal montre éligibilité + modificateurs de taille (VIX × session).
+- `s2_state.pipeline` (canal lent) — régime D4 avec hystérésis « always-on » (mise à jour
+  au tick rapide, publication à la cadence lente), quadrant Bridgewater + poids canoniques,
+  N3 Flux 1 (renorm, tanh, gate fund, conviction, 4 horizons), Flux 2 (6 arbitrages).
+- Extension additive du `ContextSchema` (v1.0 → champs `strategies`/`pipeline` optionnels) ;
+  les nouveaux panneaux S1S/S2P tracent à ces blocs (CLAUDE §1 respecté).
+- **Intrants simulés** : g/π, D1-D5 et les deltas d'arbitrage sont produits par le
+  `MockDataSource` (simulation des sorties N1/N2A) tant qu'aucun feed réel n'existe. Les
+  FORMULES aval sont AUTORITÉ ; les VALEURS d'entrée sont mock (couture unique, CLAUDE §4).
+- **Conflits résolus** (consignés aussi dans MANIFEST) : table WEIGHTS par quadrant —
+  fichier 1 (« canonique ») fait foi ; 6 arbitrages — fichier 3 (« fait foi ») ; échelle de
+  conviction Arb1/2/3 non spécifiée → convention `min(|δ|/seuil×5, cap)` (Arb3 ×4) calquée
+  sur les formules données pour Arb4/5/6. Version SVS : l'en-tête du doc dit v2.0 alors que
+  `CLAUDE §3` dit v3.0 — le contenu du fichier fait foi.
+- Stack RMS du Mode Live : noms canoniques KillSwitch/CircuitBreaker/StrategyOverlay/
+  RiskSizer/PortfolioRisk (MR §01b). Onglet Prompts : extraits réels des 5 artefacts.
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.
