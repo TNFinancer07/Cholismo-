@@ -8,7 +8,7 @@
 
 | Fichier | Contenu | Opérateur |
 |---|---|---|
-| `sony/SVS_System_Prompt_3.html` | **SVS — Structural Vacuum Squeeze** (breakout LVN ES/NQ), scoring v2.0 CHOP intégré | Sony — stratégie d'exécution 1 |
+| `sony/SVS_System_Prompt_3.html` | **SVS v3.0 — Structural Vacuum Squeeze** (breakout LVN ES/NQ), scoring CHOP intégré | Sony — stratégie d'exécution 1 |
 | `sony/strategie2_mean_reversion_v5_afternoon.html` | **Mean Reversion — Piège d'Absorption v5.8** (Bookmap natif, après-midi) | Sony — stratégie d'exécution 2 |
 | `youssef/01_FONDATIONS_ET_ANALYSE_QUANTITATIVE.md` | Phase 0 (régime kurtosis VIX) · Étape 0 (quadrant Bridgewater) · N1 · N2A (D1-D5) | Youssef — analyse macro (1/3) |
 | `youssef/02_ANALYSE_QUALITATIVE_BLOCS.md` | N2B — blocs 1 à 7 (CB 3 niveaux, narratifs, cross-market, géopolitique, signaux faibles, 10 questions, calibrage) | Youssef — analyse macro (2/3) |
@@ -29,8 +29,11 @@
   selon tranche de session ; base = 50 % calibration (60 trades).
 - Stop-limit uniquement (expiration 90 s), break-even obligatoire à +1.5R, sortie CVD 2 bougies.
 - `PLACEHOLDER` : les « corrections d'audit » listées dans le document (non appliquées aux
-  seuils en vigueur) ; note : l'en-tête du doc dit « v2.0 CHOP intégré » alors que
-  `CLAUDE.md §3` parle de « SVS v3.0 » — le contenu du fichier fait foi, écart signalé.
+  seuils en vigueur).
+- **Version — tranché par l'opérateur** : la désignation canonique est **SVS v3.0**
+  (cohérente avec `CLAUDE.md §3` et le nom du fichier) ; le « v2.0 » de l'en-tête du
+  document ne désigne que la version de la matrice de scoring CHOP. Le contenu (seuils,
+  filtres, planchers) du fichier fait foi tel quel.
 
 ### Sony · Mean Reversion — Piège d'Absorption v5.8 (stratégie d'exécution 2) — `AUTORITÉ`
 - Créneau optimal **15h30–17h00** ; hors-fenêtre = floor de pénalité (bordure 0 / intermédiaire

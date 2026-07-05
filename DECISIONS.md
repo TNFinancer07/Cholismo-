@@ -143,8 +143,9 @@ N2B 7 blocs, N3-N5). Câblage :
 - **Conflits résolus** (consignés aussi dans MANIFEST) : table WEIGHTS par quadrant —
   fichier 1 (« canonique ») fait foi ; 6 arbitrages — fichier 3 (« fait foi ») ; échelle de
   conviction Arb1/2/3 non spécifiée → convention `min(|δ|/seuil×5, cap)` (Arb3 ×4) calquée
-  sur les formules données pour Arb4/5/6. Version SVS : l'en-tête du doc dit v2.0 alors que
-  `CLAUDE §3` dit v3.0 — le contenu du fichier fait foi.
+  sur les formules données pour Arb4/5/6. Version SVS : **tranché par l'opérateur — la
+  désignation canonique est SVS v3.0** (le « v2.0 » de l'en-tête du document ne couvre que
+  la matrice de scoring CHOP) ; le contenu du fichier (seuils, filtres, planchers) fait foi.
 - Stack RMS du Mode Live : noms canoniques KillSwitch/CircuitBreaker/StrategyOverlay/
   RiskSizer/PortfolioRisk (MR §01b). Onglet Prompts : extraits réels des 5 artefacts.
 

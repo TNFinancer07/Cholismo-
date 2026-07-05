@@ -20,8 +20,8 @@ export function PromptsView() {
   }))
 
   const blocks = [
-    block('Sony 1 — SVS · Structural Vacuum Squeeze',
-      `[reference/sony/SVS_System_Prompt_3.html — scoring v2.0 CHOP intégré]
+    block('Sony 1 — SVS v3.0 · Structural Vacuum Squeeze',
+      `[reference/sony/SVS_System_Prompt_3.html — v3.0, scoring CHOP intégré]
 Breakout ES/NQ par vide de liquidité (LVN) après cassure de Value Area. Fenêtre prime 09h30-11h00.
 SCORE = structure×0.35 + orderflow×0.25 + macro×0.20 + sentiment×0.15 + qualité×0.05
 Seuil : score ajusté ≥ 88/100 (malus session : tampon −3, zone morte −7 ; plafond 1 zone morte/semaine).

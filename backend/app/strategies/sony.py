@@ -137,7 +137,9 @@ def evaluate_svs(s1: S1State, vix: Optional[float], session_marker: SessionMarke
     eligible = all(g.status == "PASS" for g in gates if g.status in ("PASS", "FAIL", "ABSENT"))
     return ExecutionStrategy(
         strategy_id="SVS", label="SVS — Structural Vacuum Squeeze",
-        version="scoring v2.0 · CHOP intégré", window="09h30-11h00 · ES/corrélat NQ",
+        # v3.0 = désignation canonique (arbitrage opérateur, D-021) ; l'en-tête du doc
+        # porte « v2.0 » pour la matrice de scoring CHOP uniquement.
+        version="v3.0 · scoring CHOP intégré", window="09h30-11h00 · ES/corrélat NQ",
         score_threshold="score ajusté ≥ 88/100 · planchers C1 26/35 · C2 19/25 · C3 13/20 · C4 10/15 · C5 3/5",
         eligible=eligible, sizing_pct=sizing if eligible else 0.0, gates=gates,
         reference="reference/sony/SVS_System_Prompt_3.html")
