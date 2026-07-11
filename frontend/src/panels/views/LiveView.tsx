@@ -212,7 +212,7 @@ export function LiveView() {
       <div className="grid min-h-0 flex-1 grid-cols-1 gap-1.5 lg:grid-cols-2">
         {/* ---- LECTURE MARCHÉ ---- */}
         <div className="flex min-h-0 flex-col gap-1.5">
-          <Panel code="LIVE" title="Lecture marché" accent="sony"
+          <Panel code="LIVE" title="Lecture marché" owner="S1 + S2"
             block="s1_state · s2_state · bridge_variables (SSE)"
             right={
               <span className="inline-flex items-center gap-1 font-mono text-xxs text-term-faint">

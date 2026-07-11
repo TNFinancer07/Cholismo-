@@ -200,6 +200,24 @@ du schéma/event store existants.
   `live.cycle_*` (cadence Mode Live), `alerts.*` (vue Live). Presets/import = events
   (l'historique garde tout) ; validation COMPLÈTE avant écriture, rien de semi-appliqué.
 
+## D-024 · Couleurs opérateur : Sony ROUGE / Youssef JAUNE (arbitrage opérateur) + badge par bloc
+L'opérateur a demandé un code couleur d'identification des blocs : **rouge pour Sony,
+jaune pour Youssef** — en remplacement du cyan/violet initial de `CLAUDE §3`. Contradiction
+de spec réelle (collision avec les statuts de risque VERT/JAUNE/ROUGE et l'or Router) →
+question posée (§12), **tranché par l'opérateur : rouge/jaune avec garde-fous**.
+Garde-fous appliqués :
+- **Teintes distinctes** : Sony `#f43f5e` (framboise) ≠ risque ROUGE `#f87171` (saumon) ;
+  Youssef `#facc15` (citron) ≠ risque JAUNE `#fbbf24` (ambre) ≠ Router `#f0b429` (or).
+- **La couleur opérateur n'est jamais seule** : chaque panneau porte un **badge texte**
+  (`S1 · SONY` / `S2 · YOUSSEF` / `ROUTER` / `SYSTÈME`) + un liseré gauche ; les blocs
+  mixtes (B1 états, B2 bridge, lecture Mode Live) sont badgés `S1 + S2` (dégradé).
+- **Attribution schéma-driven** : `s1_state` → SONY ; `s2_state` → YOUSSEF ;
+  `unified_signal_output`/`sync_state` → ROUTER ; Phase 0, calibration, streak, mode,
+  harnais mock, blotter → SYSTÈME (les events du blotter portent déjà `operator` par ligne).
+  Forcer ces blocs système sur un opérateur serait mensonger — non retenu.
+- Le code risque VERT/JAUNE/ROUGE reste inchangé et toujours doublé forme+icône (§3).
+`CLAUDE §3` mis à jour en conséquence (l'arbitrage opérateur fait foi).
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.

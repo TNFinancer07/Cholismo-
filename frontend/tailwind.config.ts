@@ -1,8 +1,10 @@
 import type { Config } from 'tailwindcss'
 
-/** Tokens couleur (TASKS 0.3 / CLAUDE §3) — lignée Bloomberg :
- *  fond noir profond, Sony CYAN, Youssef VIOLET, Router OR (bordure/trait, jamais
- *  remplissage), risque VERT/JAUNE/ROUGE toujours doublé d'une forme/icône. */
+/** Tokens couleur (TASKS 0.3 / CLAUDE §3, D-024) — fond noir profond, Sony ROUGE
+ *  framboise, Youssef JAUNE citron (teintes DISTINCTES des statuts de risque : rouge
+ *  saumon / ambre), Router OR (bordure/trait, jamais remplissage). La couleur opérateur
+ *  n'est JAMAIS seule : chaque bloc porte un badge texte S1 · SONY / S2 · YOUSSEF ;
+ *  le risque VERT/JAUNE/ROUGE reste toujours doublé d'une forme/icône. */
 export default {
   content: ['./index.html', './src/**/*.{ts,tsx}'],
   theme: {
@@ -18,8 +20,8 @@ export default {
           dim: '#67788f',
           faint: '#3d4a5c',
         },
-        sony: { DEFAULT: '#22d3ee', dim: '#0e7490' },      // S1 cyan
-        youssef: { DEFAULT: '#a78bfa', dim: '#6d28d9' },   // S2 violet
+        sony: { DEFAULT: '#f43f5e', dim: '#9f1239' },      // S1 ROUGE framboise (≠ risque #f87171 saumon)
+        youssef: { DEFAULT: '#facc15', dim: '#854d0e' },   // S2 JAUNE citron (≠ risque #fbbf24 ambre, ≠ Router or)
         router: { DEFAULT: '#f0b429', dim: '#92610e' },    // OR — bordure/trait uniquement
         risk: {
           green: '#34d399',

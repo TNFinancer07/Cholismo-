@@ -31,8 +31,12 @@ Palette **choisie pour Cholismo**, pas reprise d'un produit identifiable :
 
 - **Fond** — noir profond `#06080b` → `#0e141c` (dark-mode dense). *Choix de contraste
   pour la lecture prolongée, pas une charte signature.*
-- **Sony (S1)** — CYAN `#22d3ee` · **Youssef (S2)** — VIOLET `#a78bfa` : deux couleurs
-  d'opérateur **assignées par le domaine** (§3), pas décoratives.
+- **Sony (S1)** — ROUGE framboise `#f43f5e` · **Youssef (S2)** — JAUNE citron `#facc15`
+  (arbitrage opérateur, D-024) : deux couleurs d'opérateur **assignées par le domaine**
+  (§3), pas décoratives. Teintes volontairement **distinctes des statuts de risque**
+  (framboise ≠ rouge saumon `#f87171` ; citron ≠ ambre `#fbbf24` ≠ or Router) et
+  **jamais seules** : chaque bloc porte un badge texte `S1 · SONY` / `S2 · YOUSSEF` /
+  `ROUTER` / `SYSTÈME` (mixte : `S1 + S2`) + un liseré gauche.
 - **Router** — OR `#f0b429` en **bordure/trait uniquement, jamais remplissage** : évite
   la collision avec le JAUNE (amber) du risque — décision d'accessibilité maison.
 - **Risque** — VERT `#34d399` / JAUNE `#fbbf24` / ROUGE `#f87171`, **toujours** doublés

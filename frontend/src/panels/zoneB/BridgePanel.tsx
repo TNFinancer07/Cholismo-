@@ -16,7 +16,7 @@ export function BridgePanel() {
   const gexAbsent = !bridge || bridge.gex.freshness === 'ABSENT'
 
   return (
-    <Panel code="B2" title="Bridge Variables" block="bridge_variables">
+    <Panel code="B2" title="Bridge Variables" block="bridge_variables" owner="S1 + S2">
       <div className="flex items-baseline justify-between gap-2 border-b border-term-grid pb-1">
         <span className="text-xxs uppercase text-term-dim">GEX</span>
         <span className="flex items-baseline gap-2 tabular-nums">

@@ -1,7 +1,7 @@
 # CHOLISMO TERMINAL
 
 Terminal de trading **human-in-the-loop** pour futures ES/NQ (microstructure) + EUR/USD
-(macro FX). Deux opérateurs en miroir — **Sony (S1, cyan)** et **Youssef (S2, violet)** —
+(macro FX). Deux opérateurs en miroir — **Sony (S1, rouge framboise)** et **Youssef (S2, jaune citron)** —
 arbitrés par le **Router (or)**.
 
 > Le terminal n'est pas un dashboard : c'est le rendu visuel direct du `ContextSchema v1.0`.

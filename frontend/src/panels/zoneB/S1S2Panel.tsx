@@ -1,4 +1,4 @@
-/** B1 — États S1 / S2 côte à côte (`s1_state` cyan / `s2_state` violet).
+/** B1 — États S1 / S2 côte à côte (`s1_state` rouge / `s2_state` jaune).
  *  S1 sur canal rapide, S2 sur canal lent — les âges divergent, c'est voulu. */
 import { Panel } from '@/components/ui/panel'
 import { MetaValue } from '@/components/MetaValue'
@@ -22,7 +22,7 @@ export function S1S2Panel() {
   const chopCrit = (s1?.chop.value ?? 0) >= 61.8
 
   return (
-    <Panel code="B1" title="États S1 · S2" block="s1_state / s2_state">
+    <Panel code="B1" title="États S1 · S2" block="s1_state / s2_state" owner="S1 + S2">
       <div className="grid grid-cols-2 gap-2">
         <div className="border-l-2 border-sony/60 pl-1.5">
           <div className="mb-0.5 flex items-center justify-between">
@@ -43,7 +43,7 @@ export function S1S2Panel() {
         <div className="border-l-2 border-youssef/60 pl-1.5">
           <div className="mb-0.5 flex items-center justify-between">
             <span className="text-xxs font-bold uppercase tracking-wider text-youssef">S2 · Youssef · macro</span>
-            <Sparkline seriesKey="eurusd" width={64} height={12} stroke="#a78bfa" />
+            <Sparkline seriesKey="eurusd" width={64} height={12} stroke="#facc15" />
           </div>
           <Row label="EUR/USD"><MetaValue meta={s2?.cascade.eurusd} render={(v) => fmtNum(v as number, 5)} /></Row>
           <Row label="VIX"><MetaValue meta={s2?.cascade.vix} render={(v) => fmtNum(v as number, 2)} /></Row>

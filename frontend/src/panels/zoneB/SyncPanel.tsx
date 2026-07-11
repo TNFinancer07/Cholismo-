@@ -16,7 +16,7 @@ export function SyncPanel() {
   const spec = sync ? SPEC[sync.verdict] : null
   const Icon = spec?.icon ?? GitPullRequestDraft
   return (
-    <Panel code="B3" title="Sync S1 ↔ S2" block="sync_state">
+    <Panel code="B3" title="Sync S1 ↔ S2" block="sync_state" accent="router">
       <div className={cn('flex items-center justify-center gap-2 border px-2 py-2 text-base font-black tracking-widest',
         spec?.cls ?? 'text-term-dim border-term-border')}>
         <Icon size={16} aria-hidden />

@@ -39,7 +39,7 @@ export interface SessionIdentity {
   server_ts: number
 }
 
-// --- s1_state → B1 gauche (Sony, cyan) [rapide] ---
+// --- s1_state → B1 gauche (Sony, rouge framboise) [rapide] ---
 
 export interface OrderFlow {
   cvd: MetaField<number>
@@ -85,7 +85,7 @@ export interface S1State {
   strategies: S1Strategies | null
 }
 
-// --- s2_state → B1 droite + ZONE A (Youssef, violet) [lent] ---
+// --- s2_state → B1 droite + ZONE A (Youssef, jaune citron) [lent] ---
 
 export interface Cascade {
   nq_es: MetaField<number>

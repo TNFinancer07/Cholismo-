@@ -50,14 +50,17 @@ Priorité de build = §10. On construit depuis l'usage réel, pas la complétude
 
 | Profil | Domaine | Bloc | Couleur |
 |---|---|---|---|
-| **Sony (S1)** | Intraday microstructure, order flow, SVS v3.0, S1 mean reversion | `s1_state` | **CYAN** |
-| **Youssef (S2)** | Macro FX, matrice Bridgewater, cascade, EUR/USD | `s2_state` | **VIOLET** |
+| **Sony (S1)** | Intraday microstructure, order flow, SVS v3.0, S1 mean reversion | `s1_state` | **ROUGE framboise** (D-024) |
+| **Youssef (S2)** | Macro FX, matrice Bridgewater, cascade, EUR/USD | `s2_state` | **JAUNE citron** (D-024) |
 | **Router** | Arbitrage / signal unifié | `unified_signal_output` | **OR (bordure/trait, pas remplissage)** |
 
 Statuts risque : **VERT / JAUNE / ROUGE**. ⚠️ **Le risque n'est jamais encodé par la seule
 couleur** : toujours **forme + icône + position** en plus (daltonisme rouge/vert ~8 % des
-hommes). Le Router passe en **or/bordure** pour ne pas entrer en collision avec le JAUNE (amber).
-Dark-mode, densité Bloomberg, monospace pour les chiffres.
+hommes). ⚠️ Les couleurs opérateur (rouge/jaune, arbitrage opérateur D-024) voisinent avec
+les statuts de risque : leurs **teintes sont distinctes** (framboise ≠ rouge saumon du
+risque ; citron ≠ ambre du risque ≠ or Router) et **chaque bloc porte un badge texte**
+`S1 · SONY` / `S2 · YOUSSEF` / `ROUTER` / `SYSTÈME` (mixte : `S1 + S2`) — la couleur
+opérateur n'est jamais seule. Dark-mode, densité maximale, monospace pour les chiffres.
 
 ---
 

@@ -1,4 +1,4 @@
-/** A1 — Cascade analytique NQ/ES → VIX → ZN → DX → EUR/USD (canal lent, violet).
+/** A1 — Cascade analytique NQ/ES → VIX → ZN → DX → EUR/USD (canal lent, jaune Youssef).
  *  `real_rates` EN EXERGUE (driver primaire, pivot visuel). Nœud périmé → STALE explicite. */
 import { ArrowDown } from 'lucide-react'
 import { Panel } from '@/components/ui/panel'
