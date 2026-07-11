@@ -326,12 +326,18 @@ class Engine:
 
     async def _slow_loop(self) -> None:
         while True:
+            started = time.time()
             try:
                 await self.ds.tick_slow(self.state)
                 await self._assemble_slow(time.time())
             except Exception:
                 log.exception("slow loop tick failed")
-            await asyncio.sleep(config.SLOW_TICK_SECONDS)
+            # Cadence, pas pause : compenser la durée du tick (même pattern que la
+            # _fast_loop) sinon l'intervalle réel dérive de cadence+tick (RUNTIME_LOOPS
+            # Loop D). Plancher anti busy-wait ; un tick plus lent que la cadence saute
+            # simplement au suivant — pas d'empilement (backpressure).
+            elapsed = time.time() - started
+            await asyncio.sleep(max(0.05, config.SLOW_TICK_SECONDS - elapsed))
 
     async def start(self) -> None:
         self._tasks = [asyncio.create_task(self._fast_loop()),

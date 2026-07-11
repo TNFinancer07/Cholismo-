@@ -15,8 +15,12 @@ Audite une boucle *dans* le terminal contre les pièges connus de `RUNTIME_LOOPS
 4. **Sortie propre & retry** — arrêt gracieux (Loop H) ? retry seulement sur transitoire, avec plafond + jitter (Loop E).
 
 ## Pistes connues Cholismo (note INSTALL)
-- `engine._fast_loop` compense déjà la durée du tick (`sleep(max(0.02, FAST_TICK − elapsed))`).
-- `engine._slow_loop` fait un `sleep(SLOW_TICK)` **fixe** → dérive de cadence : l'intervalle réel = SLOW_TICK + durée du tick. Candidat correctif.
+- `engine._fast_loop` ET `engine._slow_loop` compensent la durée du tick
+  (`sleep(max(plancher, CADENCE − elapsed))`) — dérive `_slow_loop` **corrigée**
+  (régression : `tests/test_engine_loops.py`).
+- `ai/tasks.py` : 3 `sleep` fixes (Groq 30 s, Claude période settings, Gemini poll 60 s)
+  — périodicités **best-effort assumées**, pas des contrats de cadence (CLAUDE §6 ne
+  couvre que les canaux SSE du schéma). Ne pas « corriger » sans contrat.
 - Vérifier la **remontée de l'âge de la donnée à l'écran** (STALE/ABSENT) sur coupure de source.
 
 ## Sortie
