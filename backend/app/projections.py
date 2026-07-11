@@ -7,7 +7,7 @@ through the other (D-010): the impossibility is structural.
 from __future__ import annotations
 
 import math
-from typing import Any, Optional
+from typing import Any
 
 from . import config
 from .event_store import EventStore

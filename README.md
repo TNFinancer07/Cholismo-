@@ -41,6 +41,13 @@ cd frontend && npm install && npm run dev    # http://localhost:5173
 Deuxième instance opérateur (CLAUDE §9 — un opérateur par instance, backend partagé) :
 `http://localhost:5173/?operator=YOUSSEF`.
 
+### Tests & lint (figés par `docs/adr/0001-stack.md`)
+```bash
+cd backend && .venv/bin/pip install -r requirements-dev.txt
+.venv/bin/pytest && .venv/bin/ruff check app tests   # invariants CLAUDE §2 + lint
+cd frontend && npm run typecheck                      # tsc strict = gate de type
+```
+
 ## Utiliser le terminal
 
 - **Clavier d'abord** : `A/B/C/D` focus zone · `G` GO · `N` NO-GO · `S` self-check C5 ·

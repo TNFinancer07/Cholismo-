@@ -145,7 +145,8 @@ class MockDataSource(MarketDataSource):
 
         # --- Simulated N1/N2A outputs for the Youssef pipeline (bases derived from the
         # scenario regime; the downstream FORMULAS are the canonical ones, D-021) ---
-        clamp = lambda x: max(-1.0, min(1.0, x))
+        def clamp(x: float) -> float:
+            return max(-1.0, min(1.0, x))
         g = clamp(self._drift("g_mom", (base["svs"] - 50.0) / 40.0, vol, 0.04))
         pi = clamp(self._drift("pi_mom", (base["vix"] - 18.0) / 20.0, vol, 0.04))
         await self._emit(state, "macro_feed", "g_momentum", round(g, 3), patho)

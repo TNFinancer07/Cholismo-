@@ -6,7 +6,6 @@ reflects this verdict, it can never override it.
 """
 from __future__ import annotations
 
-import time
 from dataclasses import dataclass
 from typing import Callable, Optional
 
