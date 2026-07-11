@@ -1,7 +1,7 @@
 /** Navigation clavier first-class (TASKS 3.3, PRD §Navigation) :
  *  A/B/C/D focus zone · G = GO · N = NO-GO · M cycle mode · V cycle vue ·
  *  S self-check · Échap efface le focus. Les raccourcis sont affichés en permanence
- *  dans la barre de touches (façon Bloomberg). */
+ *  dans la barre de touches (lignée des terminaux financiers). */
 import { useEffect } from 'react'
 import { api } from './api'
 import { MODES, useTerminal, type ViewKey } from '@/store/terminal'
@@ -38,7 +38,7 @@ export function useKeyboardNav() {
         return
       }
       if (/^[1-9]$/.test(key) && !e.metaKey && !e.ctrlKey && !e.altKey) {
-        // Bascule directe d'espace de travail (lignée Eikon)
+        // Bascule directe d'espace de travail (lignée des terminaux financiers)
         const { workspaces, setActive } = useWorkspaces.getState()
         const target = workspaces[Number(key) - 1]
         if (target) setActive(target.id)
@@ -78,7 +78,7 @@ export function useKeyboardNav() {
 }
 
 export const KEY_HINTS: { key: string; label: string }[] = [
-  { key: '/', label: 'commande <GO>' },
+  { key: '/', label: 'commande' },
   { key: '1-9', label: 'espace' },
   { key: 'A·B·C·D', label: 'focus zone' },
   { key: 'G', label: 'GO' },

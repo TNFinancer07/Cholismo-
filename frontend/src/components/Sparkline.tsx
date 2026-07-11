@@ -1,4 +1,4 @@
-/** Sparkline inline (lignée Eikon/FactSet) — SVG maison, zéro dépendance. Rend
+/** Sparkline inline (lignée des terminaux financiers) — SVG maison, zéro dépendance. Rend
  *  l'historique CLIENT des valeurs du schéma reçues par SSE : aucune valeur inventée,
  *  buffer volatil, purement décoratif-informatif. */
 import { useTerminal } from '@/store/terminal'

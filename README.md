@@ -46,8 +46,8 @@ Deuxième instance opérateur (CLAUDE §9 — un opérateur par instance, backen
 - **Clavier d'abord** : `A/B/C/D` focus zone · `G` GO · `N` NO-GO · `S` self-check C5 ·
   `M` cycle de mode · `V` cycle de vue (terminal / recap / mode live / journal / console /
   prompts / paramètres) · `Échap` annule. Les raccourcis sont affichés en bas d'écran.
-- **Barre de commande** (lignée Bloomberg) : `/` ouvre la ligne, taper un mnémonique puis
-  `⏎ <GO>` — `B4`, `C4`, `LIVE`, `PRE`, `ORCH`, `PROMPTS`, `RECAP`, `MODELIVE`, `PARAMS`,
+- **Barre de commande** (ligne de commande façon terminal financier) : `/` ouvre la ligne, taper un mnémonique puis
+  `⏎ EXÉC` — `B4`, `C4`, `LIVE`, `PRE`, `ORCH`, `PROMPTS`, `RECAP`, `MODELIVE`, `PARAMS`,
   `CALME`, `VIX`, `GO`, `NOGO`, `SC`, `HELP`. Les commandes de décision passent par les
   mêmes verrous serveur que les boutons. Tick-flash vert/rouge sur les valeurs fraîches ;
   sparklines (score, CVD, EUR/USD, VIX, GEX) sur l'historique client des valeurs reçues par SSE.

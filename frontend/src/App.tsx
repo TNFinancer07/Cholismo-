@@ -1,5 +1,5 @@
 /** Terminal Cholismo — layout 5 zones + barre statut + barre de touches (TASKS 3.2),
- *  organisé en ESPACES DE TRAVAIL nommés (lignée Eikon) : les colonnes du workspace actif
+ *  organisé en ESPACES DE TRAVAIL nommés (lignée des terminaux financiers) : les colonnes du workspace actif
  *  réarrangent les panneaux du registre — chaque panneau reste traçable à un bloc du
  *  schéma. Fond teinté par le marqueur de session ; zones focusables A/B/C/D. */
 import { useEffect } from 'react'

@@ -1,4 +1,4 @@
-/** Registre des panneaux — la table id → composant utilisée par les workspaces Eikon.
+/** Registre des panneaux — la table id → composant utilisée par les workspaces nommés.
  *  Chaque entrée reste UN panneau = UN bloc du schéma (CLAUDE §1) ; le registre ne fait
  *  que donner un nom stable aux panneaux existants pour que les layouts les réarrangent. */
 import type { ComponentType } from 'react'

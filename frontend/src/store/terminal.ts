@@ -50,7 +50,7 @@ interface TerminalStore {
   sources: Record<string, { up: boolean; fields: string[] }> | null
   selfcheckPresent: boolean
 
-  // historiques de rendu (sparklines Eikon/FactSet) — buffer client des valeurs du
+  // historiques de rendu (sparklines) — buffer client des valeurs du
   // schéma reçues par SSE ; traçable au schéma, rien d'inventé, jamais persisté
   history: Record<string, number[]>
 

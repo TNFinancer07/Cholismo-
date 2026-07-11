@@ -2,7 +2,7 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Terminal Cholismo — densité Bloomberg, dark, monospace (CLAUDE §3) */
+/* Terminal Cholismo — densité des terminaux financiers, dark, monospace (CLAUDE §3) */
 
 :root {
   color-scheme: dark;
@@ -38,7 +38,7 @@ body {
 @keyframes absent-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
 .absent-pulse { animation: absent-pulse 1.6s ease-in-out infinite; }
 
-/* Tuiles d'espace de travail : les panneaux remplissent la colonne (lignée Eikon) */
+/* Tuiles d'espace de travail : les panneaux remplissent la colonne (lignée des terminaux financiers) */
 .panel-slot > section { flex: 1 1 auto; }
 
 /* Countdown C3 en alerte */

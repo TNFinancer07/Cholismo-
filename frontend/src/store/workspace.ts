@@ -1,4 +1,4 @@
-/** Espaces de travail (lignée Refinitiv Eikon) — multi-layouts nommés, personnalisables,
+/** Espaces de travail (lignée des terminaux financiers) — multi-layouts nommés, personnalisables,
  *  persistés par opérateur. Un workspace ne fait que RÉARRANGER les panneaux existants
  *  (chacun traçable à un bloc du schéma, CLAUDE §1) : il ne crée aucune donnée, ne
  *  contourne aucun verrou. Pure projection d'affichage, volatile en localStorage. */

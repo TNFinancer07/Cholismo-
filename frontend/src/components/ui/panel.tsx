@@ -1,5 +1,5 @@
 /** Panneau terminal — un panneau = un bloc du schéma (CLAUDE §1). L'entête porte le
- *  mnémonique (façon Bloomberg) + le bloc source + la pastille opérateur. */
+ *  mnémonique (lignée des terminaux financiers) + le bloc source + la pastille opérateur. */
 import { cn } from '@/lib/utils'
 
 export function Panel({

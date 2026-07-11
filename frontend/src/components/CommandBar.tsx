@@ -1,5 +1,5 @@
-/** Barre de commande — la signature du Bloomberg Terminal : `/` ouvre la ligne, on tape
- *  un mnémonique, Entrée = <GO>. Pure NAVIGATION/reflet : les commandes GO/NOGO passent
+/** Barre de commande — ligne de commande façon terminal financier : `/` ouvre la ligne,
+ *  on tape un mnémonique maison, Entrée = exécute. Pure NAVIGATION/reflet : les commandes GO/NOGO passent
  *  par les mêmes verrous serveur que les boutons (Phase 0, C5, fenêtre C3) — la barre
  *  n'ouvre aucun chemin privilégié. */
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -167,7 +167,7 @@ export function CommandBar() {
           spellCheck={false}
         />
         <span className="rounded-sm border border-router px-1.5 py-0.5 text-xxs font-black text-router">
-          ⏎ &lt;GO&gt;
+          ⏎ EXÉC
         </span>
       </div>
       {feedback && (

@@ -1,4 +1,4 @@
-/** Barre d'espaces de travail (lignée Eikon) — onglets nommés sous la barre de statut,
+/** Barre d'espaces de travail (lignée des terminaux financiers) — onglets nommés sous la barre de statut,
  *  duplication, mode édition (renommer, masquer/déplacer les panneaux, blotter on/off).
  *  Touches 1-9 = bascule directe ; mnémoniques (DEFAUT, MICRO…) dans la barre de commande. */
 import { useState } from 'react'

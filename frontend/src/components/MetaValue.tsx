@@ -9,7 +9,7 @@ import { fmtAge } from '@/lib/format'
 import { serverNow, useTerminal } from '@/store/terminal'
 import type { MetaField } from '@/types/schema'
 
-/** Flash de tick (lignée Bloomberg/Eikon) : la valeur vire brièvement vert/rouge à la
+/** Flash de tick (lignée des terminaux financiers) : la valeur vire brièvement vert/rouge à la
  *  hausse/baisse. Purement visuel — appliqué uniquement aux valeurs FRESH. */
 export function useTickFlash(value: unknown): string {
   const prev = useRef<number | null>(null)
