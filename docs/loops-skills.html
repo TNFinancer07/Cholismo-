@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>cholismo — loops ↔ skills</title>
+<style>
+  :root{
+    --bg:#0B0F1A;
+    --bg-2:#0E1421;
+    --surface:#131B2C;
+    --surface-2:#182238;
+    --line:#243149;
+    --line-soft:#1B2436;
+    --ink:#E7EBF4;
+    --ink-mut:#8592AC;
+    --ink-dim:#5C6885;
+    /* loops = or/ambre ; skills = indigo ; sémantique = teal/corail */
+    --loop:#E0A64B;
+    --loop-soft:#3a2f1c;
+    --skill:#8B7CF6;
+    --skill-soft:#2a2650;
+    --up:#37C695;
+    --down:#F2637E;
+    --wire:#2f3d5a;
+    --radius:10px;
+    --mono:ui-monospace,"SF Mono","SFMono-Regular",Menlo,Consolas,"Liberation Mono",monospace;
+    --sans:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{
+    background:
+      radial-gradient(1100px 500px at 82% -8%, rgba(224,166,75,.06), transparent 60%),
+      radial-gradient(900px 500px at 5% 8%, rgba(139,124,246,.06), transparent 55%),
+      var(--bg);
+    color:var(--ink);
+    font-family:var(--sans);
+    line-height:1.5;
+    -webkit-font-smoothing:antialiased;
+    padding:32px 20px 80px;
+  }
+  .wrap{max-width:1080px;margin:0 auto}
+
+  /* ---- header ---- */
+  header{border-bottom:1px solid var(--line);padding-bottom:20px;margin-bottom:26px}
+  .eyebrow{
+    font-family:var(--mono);font-size:11px;letter-spacing:.28em;text-transform:uppercase;
+    color:var(--ink-dim);display:flex;align-items:center;gap:10px;margin-bottom:14px;
+  }
+  .eyebrow .dot{width:6px;height:6px;border-radius:50%;background:var(--up);box-shadow:0 0 8px var(--up)}
+  h1{
+    font-family:var(--mono);font-weight:600;font-size:clamp(26px,4.4vw,40px);
+    margin:0;letter-spacing:-.01em;line-height:1.05;
+  }
+  h1 .arrow{color:var(--ink-dim);font-weight:400;padding:0 .18em}
+  h1 .b{color:var(--loop)}
+  h1 .c{color:var(--skill)}
+  .sub{color:var(--ink-mut);font-size:15px;max-width:60ch;margin-top:12px}
+  .legend{display:flex;flex-wrap:wrap;gap:18px;margin-top:18px;font-family:var(--mono);font-size:11.5px;color:var(--ink-mut)}
+  .legend span{display:inline-flex;align-items:center;gap:7px}
+  .swatch{width:11px;height:11px;border-radius:3px;display:inline-block}
+
+  /* ---- section titles ---- */
+  .sec-head{display:flex;align-items:baseline;gap:14px;margin:34px 0 14px}
+  .sec-head h2{font-family:var(--mono);font-size:13px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink);margin:0;font-weight:600}
+  .sec-head .rule{flex:1;height:1px;background:var(--line-soft)}
+  .sec-head .count{font-family:var(--mono);font-size:11px;color:var(--ink-dim)}
+
+  /* ---- the bus rows (signature: loop --wire--> skill) ---- */
+  .bus{display:flex;flex-direction:column;gap:8px}
+  .row{
+    display:grid;
+    grid-template-columns:52px 1fr 26px minmax(150px,190px);
+    align-items:center;
+    gap:0;
+    background:linear-gradient(180deg,var(--surface),var(--bg-2));
+    border:1px solid var(--line-soft);
+    border-radius:var(--radius);
+    padding:13px 16px;
+    cursor:pointer;
+    position:relative;
+    transition:border-color .18s ease, transform .18s ease, background .18s ease;
+  }
+  .row:hover,.row:focus-visible{border-color:var(--loop);outline:none;transform:translateY(-1px)}
+  .row:hover .wire,.row:focus-visible .wire{background:var(--loop)}
+  .row:hover .wire::after,.row:focus-visible .wire::after{border-left-color:var(--loop);opacity:1}
+  .row:hover .cmd,.row:focus-visible .cmd{color:var(--ink);border-color:var(--skill)}
+  .row.active{border-color:var(--loop);background:linear-gradient(180deg,var(--surface-2),var(--surface))}
+
+  .num{
+    font-family:var(--mono);font-size:20px;font-weight:600;color:var(--loop);
+    display:flex;flex-direction:column;align-items:flex-start;line-height:1;
+  }
+  .num small{font-size:9px;letter-spacing:.18em;color:var(--ink-dim);font-weight:500;margin-top:5px}
+  .meta{min-width:0;padding-right:10px}
+  .meta .name{font-family:var(--mono);font-size:15px;font-weight:600;color:var(--ink);letter-spacing:-.01em}
+  .meta .role{font-size:13px;color:var(--ink-mut);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+  .wire{position:relative;height:2px;background:var(--wire);align-self:center;transition:background .18s ease}
+  .wire::after{ /* arrowhead */
+    content:"";position:absolute;right:-1px;top:50%;transform:translateY(-50%);
+    border-top:5px solid transparent;border-bottom:5px solid transparent;border-left:7px solid var(--wire);
+    opacity:.85;transition:border-left-color .18s ease,opacity .18s ease;
+  }
+  .cmd{
+    font-family:var(--mono);font-size:13.5px;color:var(--skill);
+    background:var(--skill-soft);border:1px solid var(--line);
+    border-radius:7px;padding:7px 11px;text-align:left;justify-self:end;width:100%;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:border-color .18s ease,color .18s ease;
+  }
+
+  /* transverse skills */
+  .tv{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px}
+  .card{
+    background:linear-gradient(180deg,var(--surface),var(--bg-2));
+    border:1px solid var(--line-soft);border-radius:var(--radius);
+    padding:15px 16px;cursor:pointer;transition:border-color .18s ease,transform .18s ease;
+  }
+  .card:hover,.card:focus-visible{border-color:var(--skill);outline:none;transform:translateY(-1px)}
+  .card .cmd2{font-family:var(--mono);font-size:14.5px;color:var(--skill);font-weight:600}
+  .card .role{font-size:13px;color:var(--ink-mut);margin-top:4px}
+  .card .tie{font-family:var(--mono);font-size:11px;color:var(--ink-dim);margin-top:9px;display:flex;align-items:center;gap:6px}
+  .card .tie b{color:var(--loop);font-weight:600}
+
+  /* runtime strip */
+  .rt-note{font-size:13px;color:var(--ink-mut);margin:-4px 0 14px}
+  .rt-note code{font-family:var(--mono);color:var(--skill);background:var(--skill-soft);padding:1px 6px;border-radius:5px;font-size:12px}
+  .rt{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:8px}
+  .chip{
+    display:flex;align-items:center;gap:11px;
+    background:var(--bg-2);border:1px solid var(--line-soft);border-radius:8px;padding:10px 12px;
+  }
+  .chip .k{font-family:var(--mono);font-weight:600;font-size:13px;color:var(--up);width:16px;text-align:center;flex:none}
+  .chip .t{font-size:13px;color:var(--ink)}
+  .chip .t small{display:block;color:var(--ink-dim);font-family:var(--mono);font-size:10.5px;letter-spacing:.04em}
+
+  /* ---- drawer ---- */
+  .scrim{position:fixed;inset:0;background:rgba(4,7,13,.62);opacity:0;pointer-events:none;transition:opacity .2s ease;z-index:40;backdrop-filter:blur(2px)}
+  .scrim.open{opacity:1;pointer-events:auto}
+  .drawer{
+    position:fixed;top:0;right:0;height:100%;width:min(440px,92vw);
+    background:var(--bg-2);border-left:1px solid var(--line);
+    transform:translateX(100%);transition:transform .24s cubic-bezier(.4,.0,.2,1);
+    z-index:50;display:flex;flex-direction:column;
+  }
+  .drawer.open{transform:translateX(0)}
+  .d-head{padding:22px 24px 16px;border-bottom:1px solid var(--line)}
+  .d-tag{font-family:var(--mono);font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--loop)}
+  .d-title{font-family:var(--mono);font-size:22px;font-weight:600;margin:8px 0 2px;color:var(--ink)}
+  .d-cmd{font-family:var(--mono);font-size:14px;color:var(--skill);margin-top:6px}
+  .d-body{padding:20px 24px 40px;overflow:auto}
+  .d-body h3{font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-dim);margin:22px 0 9px}
+  .d-body h3:first-child{margin-top:0}
+  .steps{list-style:none;margin:0;padding:0;counter-reset:s}
+  .steps li{position:relative;padding:0 0 0 30px;margin-bottom:9px;font-size:14px;color:var(--ink);counter-increment:s}
+  .steps li::before{content:counter(s);position:absolute;left:0;top:0;font-family:var(--mono);font-size:11px;font-weight:600;color:var(--loop);border:1px solid var(--line);border-radius:6px;width:20px;height:20px;display:flex;align-items:center;justify-content:center;background:var(--surface)}
+  .kv{font-size:14px;color:var(--ink);background:var(--surface);border:1px solid var(--line-soft);border-left:2px solid var(--loop);border-radius:7px;padding:11px 13px}
+  .kv.guard{border-left-color:var(--down)}
+  .prompt{font-family:var(--mono);font-size:13px;background:#080b12;border:1px solid var(--line);border-radius:8px;padding:12px 14px;color:var(--ink);overflow-x:auto}
+  .prompt .p{color:var(--up)}
+  .prompt .c{color:var(--skill)}
+  .close{position:absolute;top:18px;right:18px;background:var(--surface);border:1px solid var(--line);color:var(--ink-mut);width:32px;height:32px;border-radius:8px;cursor:pointer;font-size:16px;font-family:var(--mono);z-index:2}
+  .close:hover{color:var(--ink);border-color:var(--loop)}
+
+  footer{margin-top:40px;border-top:1px solid var(--line-soft);padding-top:16px;font-size:12px;color:var(--ink-dim);font-family:var(--mono);letter-spacing:.02em}
+
+  @media (max-width:560px){
+    .row{grid-template-columns:44px 1fr 20px 110px;padding:11px 12px}
+    .meta .role{white-space:normal}
+    .cmd{font-size:12px;padding:6px 8px}
+  }
+  @media (prefers-reduced-motion:reduce){
+    *{transition:none!important}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="eyebrow"><span class="dot"></span> cholismo · terminal financier · référence interne</div>
+    <h1><span class="b">loops</span><span class="arrow">→</span><span class="c">skills</span></h1>
+    <p class="sub">Chaque boucle de développement de <code>CLAUDE.md</code> est câblée à une skill Claude Code. Clique une ligne pour voir les étapes, la condition de sortie et l'invocation.</p>
+    <div class="legend">
+      <span><i class="swatch" style="background:var(--loop)"></i> boucle (loop)</span>
+      <span><i class="swatch" style="background:var(--skill)"></i> skill <code style="font-family:var(--mono);color:var(--skill)">/cmd</code></span>
+      <span><i class="swatch" style="background:var(--up)"></i> boucle runtime</span>
+      <span><i class="swatch" style="background:var(--down)"></i> garde-fou</span>
+    </div>
+  </header>
+
+  <div class="sec-head"><h2>Boucles de développement</h2><span class="rule"></span><span class="count">7 paires · 1:1</span></div>
+  <div class="bus" id="bus"></div>
+
+  <div class="sec-head"><h2>Skills transverses</h2><span class="rule"></span><span class="count">3 · hors boucle</span></div>
+  <div class="tv" id="tv"></div>
+
+  <div class="sec-head"><h2>Boucles runtime</h2><span class="rule"></span><span class="count">8 patterns</span></div>
+  <p class="rt-note">Ces boucles vivent <em>dans</em> le code du terminal (<code>RUNTIME_LOOPS.md</code>). Elles n'ont pas de skill dédiée : elles sont auditées par <code>/loop-check</code> et stressées par <code>/devil</code>.</p>
+  <div class="rt" id="rt"></div>
+
+  <footer>cholismo // inspiré des terminaux financiers pour leurs principes — jamais copié</footer>
+</div>
+
+<!-- drawer -->
+<div class="scrim" id="scrim"></div>
+<aside class="drawer" id="drawer" aria-hidden="true" role="dialog" aria-label="Détail de la boucle">
+  <button class="close" id="close" aria-label="Fermer">✕</button>
+  <div class="d-head">
+    <div class="d-tag" id="d-tag"></div>
+    <div class="d-title" id="d-title"></div>
+    <div class="d-cmd" id="d-cmd"></div>
+  </div>
+  <div class="d-body" id="d-body"></div>
+</aside>
+
+<script>
+const LOOPS = [
+  {n:"0", label:"LOOP 0", name:"Décision de stack", cmd:"/stack", role:"Choisir & verrouiller la base technique",
+   steps:["Lister 2-3 candidats réalistes","Comparer (rendu, async, testabilité, poids)","Écrire l'ADR docs/adr/0001-stack.md","Figer runtime, paquets, test, linter","Squelette « démarre puis s'arrête »"],
+   exit:"ADR écrit, squelette démarre/s'arrête sans erreur, test & lint tournent.",
+   guard:"Maintenable par une seule personne. On choisit pour la durée, pas la mode.",
+   ex:'/stack TUI riche, léger'},
+  {n:"1", label:"LOOP 1", name:"Développement de feature", cmd:"/feature", role:"La boucle centrale, du besoin au commit",
+   steps:["Clarifier (1 phrase + cas limites)","Plan (plus petite tranche livrable)","Test d'abord (qui échoue)","Implémenter le minimum","Auto-revue du diff","Vérifier : tests + lint + essai manuel","Commit atomique"],
+   exit:"La tranche marche, DoD respectée, essai manuel concluant.",
+   guard:"Une seule feature par commit. Si la tranche grossit → re-découper.",
+   ex:'/feature autocomplétion des commandes'},
+  {n:"2", label:"LOOP 2", name:"Correction de bug", cmd:"/bugfix", role:"De la reproduction à la cause racine",
+   steps:["Reproduire (suite d'actions minimale)","Capturer par un test de régression","Isoler la cause racine, pas le symptôme","Corriger le plus ciblé possible","Confirmer (régression + tests verts)","Prévenir (où ailleurs ce bug ?)"],
+   exit:"Repro impossible, test de régression vert, aucune régression ailleurs.",
+   guard:"Jamais masquer le symptôme (catch vide, défaut silencieux).",
+   ex:'/bugfix crash sur Ctrl-C pendant un fetch de marché'},
+  {n:"3", label:"LOOP 3", name:"Refactor sûr", cmd:"/refactor", role:"Changer la forme, pas le comportement",
+   steps:["Filet de sécurité : tests couvrants d'abord","Micro-étapes, verts entre chaque","Zéro changement de comportement","Commit fréquent (chaque étape verte)"],
+   exit:"Code plus clair, comportement identique prouvé, tout vert.",
+   guard:"Jamais refactor + feature ensemble. >3 tests cassés → revenir en arrière.",
+   ex:'/refactor src/parser'},
+  {n:"4", label:"LOOP 4", name:"Devil's advocate", cmd:"/devil", role:"Attaquer son propre code avant commit",
+   steps:["Attaquer : 3 façons concrètes de casser","Cas limite oublié (état partagé, ordre…)","Questionner le design (plus simple ?)","Intégrer / documenter les risques assumés"],
+   exit:"Les 3 scénarios de casse sont gérés ou documentés hors-scope.",
+   guard:"Revue honnête, jamais de complaisance. Le doute réel finit tracé.",
+   ex:'/devil'},
+  {n:"5", label:"LOOP 5", name:"Polish UX", cmd:"/polish", role:"Le « agréable à utiliser »",
+   steps:["Latence perçue : feedback < 100 ms","Messages lisibles et actionnables","Cohérence (raccourcis, vocabulaire, style)","Sortie propre (Ctrl-C, quit)","Découvrabilité (help / ?)"],
+   exit:"Un utilisateur sans doc comprend et n'est jamais bloqué sans message.",
+   guard:"Lisibilité > décoration. Pas de « joli » au prix de la clarté.",
+   ex:'/polish vue watchlist'},
+  {n:"6", label:"LOOP 6", name:"Langage visuel & inspiration", cmd:"/design", role:"Inspiré des terminaux financiers, jamais copié",
+   steps:["Extraire les principes, pas les pixels","Traduire en identité propre (tokens, commandes maison)","Checklist anti-copie (couleurs, codes, layout)","Documenter docs/design-language.md"],
+   exit:"Design distinctement cholismo, chaque emprunt justifié, chaque élément original.",
+   guard:"On emprunte l'IDÉE (densité, clavier-first, couleur sémantique), jamais l'EXPRESSION protégée.",
+   ex:'/design vue watchlist temps réel'},
+];
+
+const TRANSVERSE = [
+  {cmd:"/loop-check", role:"Auditer une boucle runtime contre les pièges connus", tie:"Runtime A–H", ties:"RUNTIME_LOOPS",
+   steps:["Détecter busy-wait / blocage","Vérifier race conditions & backpressure","Traquer exceptions avalées","Contrôler sortie propre & retry"],
+   exit:"Rapport : boucle → piège (ou OK) → correctif. Rien modifié sans validation.",
+   guard:"Audit lecture seule. Ne corrige pas sans accord.",
+   ex:'/loop-check src/render_loop', tag:"TRANSVERSE"},
+  {cmd:"/done", role:"Vérifier la Definition of Done avant de clôturer", tie:"Loop 1 · 2 · 3", ties:"clôture",
+   steps:["Build / démarrage sans erreur","Tests verts","Lint vert","Rappel d'essai manuel","Diff atomique"],
+   exit:"Verdict clair : DONE ou PAS DONE + ce qui bloque.",
+   guard:"N'affirme jamais « fait » si une étape n'a pas été exécutée.",
+   ex:'/done', tag:"TRANSVERSE"},
+  {cmd:"/commit", role:"Créer un commit atomique et propre", tie:"Loop 1 · 2 · 3", ties:"étape finale",
+   steps:["Dépôt vert avant de committer","Changement atomique (un seul sujet)","Message clair : quoi + pourquoi","Indexer & committer"],
+   exit:"Un commit cohérent, dépôt vert, message clair.",
+   guard:"Jamais deux features à la fois, ni du code cassé.",
+   ex:'/commit ajoute l\'autocomplétion des commandes', tag:"TRANSVERSE"},
+];
+
+const RUNTIME = [
+  ["A","Boucle principale","REPL / event loop"],
+  ["B","Rendu / refresh","dirty flag + fps"],
+  ["C","Input non-bloquant","producteur → file"],
+  ["D","Données arrière-plan","worker async"],
+  ["E","Retry backoff","exponentiel + jitter"],
+  ["F","Debounce / throttle","lisser les events"],
+  ["G","Watchdog","heartbeat"],
+  ["H","Arrêt gracieux","signaux + cleanup"],
+];
+
+/* render bus rows */
+const bus = document.getElementById('bus');
+LOOPS.forEach((l,i)=>{
+  const r = document.createElement('div');
+  r.className='row'; r.tabIndex=0; r.setAttribute('role','button');
+  r.setAttribute('aria-label', l.label+' '+l.name+' → '+l.cmd);
+  r.innerHTML =
+    `<div class="num">${l.n}<small>LOOP</small></div>`+
+    `<div class="meta"><div class="name">${l.name}</div><div class="role">${l.role}</div></div>`+
+    `<div class="wire"></div>`+
+    `<div class="cmd">${l.cmd}</div>`;
+  r.addEventListener('click',()=>open(l,'loop',r));
+  r.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();open(l,'loop',r);}});
+  bus.appendChild(r);
+});
+
+/* render transverse cards */
+const tv = document.getElementById('tv');
+TRANSVERSE.forEach(t=>{
+  const c=document.createElement('div');
+  c.className='card'; c.tabIndex=0; c.setAttribute('role','button'); c.setAttribute('aria-label',t.cmd);
+  c.innerHTML=`<div class="cmd2">${t.cmd}</div><div class="role">${t.role}</div>`+
+    `<div class="tie">↳ relie <b>${t.tie}</b> · ${t.ties}</div>`;
+  c.addEventListener('click',()=>open(t,'tv',c));
+  c.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();open(t,'tv',c);}});
+  tv.appendChild(c);
+});
+
+/* render runtime chips */
+const rt=document.getElementById('rt');
+RUNTIME.forEach(([k,name,sub])=>{
+  const ch=document.createElement('div'); ch.className='chip';
+  ch.innerHTML=`<div class="k">${k}</div><div class="t">${name}<small>${sub}</small></div>`;
+  rt.appendChild(ch);
+});
+
+/* drawer */
+const scrim=document.getElementById('scrim'),drawer=document.getElementById('drawer');
+const dTag=document.getElementById('d-tag'),dTitle=document.getElementById('d-title'),dCmd=document.getElementById('d-cmd'),dBody=document.getElementById('d-body');
+let lastFocus=null;
+
+function open(item,kind,el){
+  document.querySelectorAll('.row.active').forEach(x=>x.classList.remove('active'));
+  if(kind==='loop') el.classList.add('active');
+  lastFocus=el;
+  dTag.textContent = kind==='loop' ? item.label : (item.tag||'SKILL');
+  dTitle.textContent = kind==='loop' ? item.name : item.cmd;
+  dCmd.textContent = kind==='loop' ? ('skill → '+item.cmd) : (item.role);
+  const stepsHtml = '<ol class="steps">'+item.steps.map(s=>`<li>${s}</li>`).join('')+'</ol>';
+  const exHtml = item.ex.replace(/</g,'&lt;');
+  dBody.innerHTML =
+    `<h3>Étapes</h3>${stepsHtml}`+
+    `<h3>Condition de sortie</h3><div class="kv">${item.exit}</div>`+
+    `<h3>Garde-fou</h3><div class="kv guard">${item.guard}</div>`+
+    `<h3>Invocation</h3><div class="prompt"><span class="p">&gt;</span> <span class="c">${exHtml}</span></div>`;
+  scrim.classList.add('open'); drawer.classList.add('open'); drawer.setAttribute('aria-hidden','false');
+  document.getElementById('close').focus();
+}
+function close(){
+  scrim.classList.remove('open'); drawer.classList.remove('open'); drawer.setAttribute('aria-hidden','true');
+  document.querySelectorAll('.row.active').forEach(x=>x.classList.remove('active'));
+  if(lastFocus) lastFocus.focus();
+}
+document.getElementById('close').addEventListener('click',close);
+scrim.addEventListener('click',close);
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&drawer.classList.contains('open'))close();});
+</script>
+</body>
+</html>
