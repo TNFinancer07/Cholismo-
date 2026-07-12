@@ -18,40 +18,59 @@ import type { EconEvent } from '@/types/schema'
 
 const BLACKOUT_S = 30 * 60  // fenêtre Tier-1 ±30 min (reference/MANIFEST §Sony·SVS)
 
-const TIER: Record<number, { squares: string; word: string; cls: string }> = {
-  1: { squares: '▣▣▣', word: 'FORT', cls: 'text-risk-red border-risk-red/60' },
-  2: { squares: '▣▣', word: 'MODÉRÉ', cls: 'text-risk-yellow border-risk-yellow/60' },
-  3: { squares: '▣', word: 'FAIBLE', cls: 'text-term-dim border-term-border' },
+// Hiérarchie visuelle T1 > T2 > T3 : chip T1 REMPLIE (l'impact fort se voit de loin),
+// T2 bordée, T3 discrète — toujours forme (nb de carrés) + code texte, jamais la couleur
+// seule (§3).
+const TIER: Record<number, { squares: string; word: string; cls: string; tint: string }> = {
+  1: { squares: '▣▣▣', word: 'FORT', tint: 'text-risk-red',
+       cls: 'text-risk-red border-risk-red/70 bg-risk-red/15' },
+  2: { squares: '▣▣', word: 'MODÉRÉ', tint: 'text-risk-yellow',
+       cls: 'text-risk-yellow border-risk-yellow/50' },
+  3: { squares: '▣', word: 'FAIBLE', tint: 'text-term-text',
+       cls: 'text-term-dim border-term-border/60' },
 }
 
-/** Compte à rebours précis (H/M/S) vers un `ts` connu. Passé → « il y a … ». */
+const IMMINENT_S = 10 * 60  // échéance ≤ 10 min → countdown accentué
+
+/** Compte à rebours à LARGEUR CONSTANTE (7 caractères, alignement strict) vers un `ts`
+ *  connu. Nomenclature lancement : `T−` avant l'heure H, `T+` après — corps toujours
+ *  5 caractères zéro-paddés (`07m32`, `01h30`). */
 function countdown(secs: number): { label: string; past: boolean } {
   const past = secs < 0
   const a = Math.abs(secs)
   const h = Math.floor(a / 3600), m = Math.floor((a % 3600) / 60), s = Math.floor(a % 60)
   const core = h > 0
-    ? `${h}h${String(m).padStart(2, '0')}`
-    : `${m}m${String(s).padStart(2, '0')}`
-  return { label: past ? `-${core}` : core, past }
+    ? `${String(h).padStart(2, '0')}h${String(m).padStart(2, '0')}`
+    : `${String(m).padStart(2, '0')}m${String(s).padStart(2, '0')}`
+  return { label: `${past ? 'T+' : 'T−'}${core}`, past }
 }
 
 function Row({ e, now, next }: { e: EconEvent; now: number; next: boolean }) {
   const t = TIER[e.tier] ?? TIER[3]
-  const { label, past } = countdown(e.ts - now)
+  const secs = e.ts - now
+  const { label, past } = countdown(secs)
+  // Imminent (≤ 10 min à venir) : gras + teinte du tier. L'imminence reste portée par la
+  // VALEUR du countdown elle-même — le style ne fait qu'appuyer (§3).
+  const imminent = !past && secs <= IMMINENT_S
   return (
     <div className={cn('grid h-[15px] grid-cols-[62px_54px_1fr_34px] items-center gap-x-1.5 border-l-2 pl-1 font-mono text-xxs tabular-nums',
       e.tier === 1 ? 'border-l-risk-red/70' : e.tier === 2 ? 'border-l-risk-yellow/60' : 'border-l-term-border',
       next && 'bg-term-panel2', past && 'opacity-45')}>
-      <span className={cn('text-right', past ? 'text-term-faint' : next ? 'text-term-text font-bold' : 'text-term-dim')}
-        aria-label={past ? 'passé' : 'compte à rebours'}>
-        {past ? label : `T−${label}`}
+      <span className={cn('text-right',
+        past ? 'text-term-faint'
+          : imminent ? cn('font-bold', t.tint)
+            : next ? 'font-bold text-term-text' : 'text-term-dim')}
+        aria-label={past ? 'écoulé depuis' : 'compte à rebours'}
+        title={imminent ? `imminent — sous ${IMMINENT_S / 60} min` : undefined}>
+        {label}
       </span>
       {/* Tier jamais par la couleur seule : carrés pleins (forme) + code texte (§3). */}
       <span className={cn('inline-flex items-center gap-1 rounded-sm border px-1 leading-none', t.cls)}
         title={`impact liquidité ${t.word}`}>
         <span aria-hidden>{t.squares}</span><span className="font-bold">T{e.tier}</span>
       </span>
-      <span className="truncate text-term-text" title={e.name}>{e.name}</span>
+      <span className={cn('truncate text-term-text', e.tier === 1 && !past && 'font-medium')}
+        title={e.name}>{e.name}</span>
       <span className="text-right text-term-faint">{e.region}</span>
     </div>
   )
