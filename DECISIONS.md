@@ -218,6 +218,22 @@ Garde-fous appliqués :
 - Le code risque VERT/JAUNE/ROUGE reste inchangé et toujours doublé forme+icône (§3).
 `CLAUDE §3` mis à jour en conséquence (l'arbitrage opérateur fait foi).
 
+## D-025 · Carnet d'ordres (`s1_state.order_book`, panneau `OB`) — PLACEHOLDER
+Nouveau bloc du schéma (domaine Sony, canal rapide) + panneau DOM. Hypothèses :
+- **Profondeur 10 niveaux** par côté, tick ES 0.25, `value = {bids: [[prix, taille]…],
+  asks: […]}` bids décroissants / asks croissants — PLACEHOLDER en attendant le feed réel.
+- **Lecture seule absolue** (§2.1) : aucun chemin d'exécution — contrairement aux DOM de
+  plateformes, cliquer un prix ne fait RIEN. Le panneau n'a aucun handler d'action.
+- **Pas critique Phase 0 en v1** : le carnet est de l'affichage/lecture ; en faire un
+  blocker `DATA_PRESENT` changerait un verrou dur → décision séparée si besoin.
+- **Validation déterministe serveur** : carnet croisé (best bid ≥ best ask) = donnée
+  réelle pathologique → montrée + flag `CROSSED_BOOK` ; structure malformée = donnée
+  inexploitable → RETIRÉE (ABSENT + flag `MALFORMED`, fail-closed §3).
+- **Imbalance** Σbid/(Σbid+Σask) dérivée à l'affichage du même champ (pure) ; côtés
+  colorés vert/rouge par convention de marché mais TOUJOURS libellés `BID`/`ASK` (§3).
+- Mock : pathologies dédiées — profondeur partielle, spread élargi, croisement sur la
+  probabilité `contradict_p` du scénario. Layouts localStorage bumpés v2 (OB visible).
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.

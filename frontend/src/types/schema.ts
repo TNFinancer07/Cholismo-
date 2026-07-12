@@ -77,11 +77,18 @@ export interface S1Strategies {
   mean_reversion: ExecutionStrategy
 }
 
+/** DOM ES (D-025) — bids décroissants / asks croissants, [prix, taille]. */
+export interface OrderBookValue {
+  bids: [number, number][]
+  asks: [number, number][]
+}
+
 export interface S1State {
   svs_score: MetaField<number>
   order_flow: OrderFlow
   structure: Structure
   chop: MetaField<number>
+  order_book: MetaField<OrderBookValue>
   strategies: S1Strategies | null
 }
 

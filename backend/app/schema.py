@@ -112,6 +112,9 @@ class S1State(BaseModel):
     order_flow: OrderFlow = Field(default_factory=OrderFlow)
     structure: Structure = Field(default_factory=Structure)
     chop: MetaField = Field(default_factory=MetaField)
+    # DOM ES 10 niveaux (D-025) — value: {"bids": [[price, size]…], "asks": [[price, size]…]},
+    # bids décroissants / asks croissants. Affichage lecture seule, PAS critique Phase 0 en v1.
+    order_book: MetaField = Field(default_factory=MetaField)
     # The two REAL Sony execution strategies (reference/sony/*), evaluated live (D-021).
     strategies: Optional[S1Strategies] = None
 

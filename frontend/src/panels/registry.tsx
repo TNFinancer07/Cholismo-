@@ -11,6 +11,7 @@ import { PipelinePanel } from '@/panels/zoneA/PipelinePanel'
 import { StrategiesPanel } from '@/panels/zoneB/StrategiesPanel'
 import { ScenarioPanel } from '@/panels/harness/ScenarioPanel'
 import { S1S2Panel } from '@/panels/zoneB/S1S2Panel'
+import { OrderBookPanel } from '@/panels/zoneB/OrderBookPanel'
 import { BridgePanel } from '@/panels/zoneB/BridgePanel'
 import { SyncPanel } from '@/panels/zoneB/SyncPanel'
 import { UnifiedSignalPanel } from '@/panels/zoneB/UnifiedSignalPanel'
@@ -33,6 +34,7 @@ export const PANEL_REGISTRY: Record<PanelId, PanelDef> = {
   S1S: { id: 'S1S', label: 'Stratégies exécution Sony', component: StrategiesPanel },
   MOCK: { id: 'MOCK', label: 'Scénarios & pathologies', component: ScenarioPanel },
   B1: { id: 'B1', label: 'États S1 · S2', component: S1S2Panel },
+  OB: { id: 'OB', label: "Carnet d'ordres ES", component: OrderBookPanel },
   B2: { id: 'B2', label: 'Bridge variables', component: BridgePanel },
   B3: { id: 'B3', label: 'Sync S1↔S2', component: SyncPanel },
   B4: { id: 'B4', label: 'Signal unifié', component: UnifiedSignalPanel },

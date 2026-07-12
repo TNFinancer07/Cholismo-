@@ -97,6 +97,20 @@ class MockDataSource(MarketDataSource):
         await self._emit(state, "sierra_chart", "lvn",
                          [round(es - 20 - 6 * k, 2) for k in range(3)], patho)
 
+        # Order book ES — 10 niveaux autour du mid, tick 0.25 (D-025). Pathologies :
+        # profondeur partielle, spread élargi, carnet CROISÉ (contradiction) que le
+        # moteur détecte et flagge — le mock reste volontairement sale (CLAUDE §4).
+        mid = round(es * 4) / 4
+        depth = 10 if rng.random() > patho["drop_p"] * 2 else rng.randint(3, 9)
+        half_spread = 0.25 if rng.random() > 0.15 else 0.50
+        cross_shift = 0.75 if rng.random() < patho["contradict_p"] else 0.0
+        bids = [[round(mid - half_spread - 0.25 * k + cross_shift, 2),
+                 max(1, int(rng.gauss(60, 35)))] for k in range(depth)]
+        asks = [[round(mid + half_spread + 0.25 * k, 2),
+                 max(1, int(rng.gauss(60, 35)))] for k in range(depth)]
+        await self._emit(state, "sierra_chart", "order_book",
+                         {"bids": bids, "asks": asks}, patho)
+
         vix = max(9.0, self._drift("vix", base["vix"], vol, 0.5))
         vvix = max(60.0, self._drift("vvix", base["vvix"], vol, 1.5))
         await self._emit(state, "cboe", "vix", round(vix, 2), patho)

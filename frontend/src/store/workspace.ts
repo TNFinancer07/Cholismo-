@@ -7,7 +7,7 @@ import { useTerminal } from './terminal'
 
 /** Identifiants canoniques des panneaux disponibles (couverts par panels/registry). */
 export const PANEL_IDS = ['A1', 'A2', 'A3', 'S2P', 'MOCK', 'B1', 'B2', 'B3', 'B4', 'S1S',
-  'C1', 'C2', 'C4', 'MODE'] as const
+  'OB', 'C1', 'C2', 'C4', 'MODE'] as const
 export type PanelId = (typeof PANEL_IDS)[number]
 
 export interface Workspace {
@@ -23,7 +23,7 @@ function builtins(): Workspace[] {
     { id: 'defaut', name: 'DÉFAUT', builtin: true, showBlotter: true,
       columns: [['A1', 'S2P', 'A3', 'MOCK'], ['B4', 'S1S', 'B1'], ['C1', 'C2', 'C4', 'MODE']] },
     { id: 'micro', name: 'MICRO · S1', builtin: true, showBlotter: true,
-      columns: [['S1S', 'B2'], ['B4', 'B1', 'B3'], ['C1', 'C2', 'MOCK']] },
+      columns: [['S1S', 'B2'], ['B4', 'OB', 'B1', 'B3'], ['C1', 'C2', 'MOCK']] },
     { id: 'macro', name: 'MACRO · S2', builtin: true, showBlotter: false,
       columns: [['A1', 'A3'], ['S2P', 'A2'], ['B4', 'B3', 'MOCK']] },
     { id: 'discipline', name: 'DISCIPLINE', builtin: true, showBlotter: true,
@@ -31,7 +31,9 @@ function builtins(): Workspace[] {
   ]
 }
 
-const STORAGE_KEY = () => `cholismo.workspaces.${useTerminal.getState().operator}.v1`
+// v2 : ajout du panneau OB (D-025) aux espaces intégrés — les layouts v1 persistés
+// repartent des intégrés (les PERSO se recréent en un clic ; pas de migration silencieuse).
+const STORAGE_KEY = () => `cholismo.workspaces.${useTerminal.getState().operator}.v2`
 
 interface Persisted { workspaces: Workspace[]; activeId: string }
 

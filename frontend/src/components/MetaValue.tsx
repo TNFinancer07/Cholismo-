@@ -33,6 +33,8 @@ const FLAG_ICONS: Record<string, { icon: typeof Clock3; title: string }> = {
   LATE_FEED: { icon: Clock3, title: 'Flux en retard' },
   CLOCK_DESYNC: { icon: AlertTriangle, title: "Désynchronisation d'horloge source" },
   CROSS_SOURCE_DIVERGENT: { icon: GitCompareArrows, title: 'Sources contradictoires' },
+  CROSSED_BOOK: { icon: GitCompareArrows, title: 'Carnet croisé (best bid ≥ best ask) — pathologie réelle' },
+  MALFORMED: { icon: Unplug, title: 'Structure inexploitable — valeur retirée (fail-closed)' },
 }
 
 export function useDataAge(meta: MetaField | null | undefined): number | null {

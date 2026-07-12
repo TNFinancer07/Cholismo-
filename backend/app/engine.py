@@ -42,7 +42,7 @@ FIELD_SPEC: dict[str, tuple[str, float, float]] = {
     "absorption": ("sierra_chart", *_FAST), "aggressor_ratio": ("sierra_chart", *_FAST),
     "vpoc": ("sierra_chart", *_FAST), "vah": ("sierra_chart", *_FAST),
     "val": ("sierra_chart", *_FAST), "lvn": ("sierra_chart", *_FAST),
-    "chop": ("sierra_chart", *_FAST),
+    "chop": ("sierra_chart", *_FAST), "order_book": ("sierra_chart", *_FAST),
     "vix": ("cboe", *_FAST), "vvix": ("cboe", *_FAST),
     "eurusd": ("fx_feed", *_SLOW), "dx": ("fx_feed", *_SLOW), "dxy": ("fx_feed", *_FAST),
     "dxy_alt": ("cme", *_FAST),
@@ -57,6 +57,26 @@ FIELD_SPEC: dict[str, tuple[str, float, float]] = {
         "cycle_div_delta", "leading_turn", "rr_zscore", "spot_momentum")},
 }
 DXY_CONTRADICTION_TOLERANCE = 0.5  # cross-source divergence threshold (D-012)
+
+
+def _validate_order_book(meta: MetaField) -> None:
+    """Deterministic DOM sanity (D-025). Malformed structure -> value WITHHELD
+    (fail-closed §3: invalid data is no data), flagged MALFORMED. A CROSSED book
+    (best bid >= best ask) is real pathological data: shown but flagged."""
+    if meta.value is None:
+        return
+    try:
+        bids = [(float(p), float(s)) for p, s in meta.value["bids"]]
+        asks = [(float(p), float(s)) for p, s in meta.value["asks"]]
+        if not bids or not asks:
+            raise ValueError("empty book side")
+    except (TypeError, ValueError, KeyError):
+        meta.value = None
+        meta.freshness = Freshness.ABSENT
+        meta.flags.append("MALFORMED")
+        return
+    if bids[0][0] >= asks[0][0]:
+        meta.flags.append("CROSSED_BOOK")
 
 
 class Engine:
@@ -171,6 +191,8 @@ class Engine:
             raws = await self.state.read_raw_many(list(FIELD_SPEC.keys()))
 
         # s1_state
+        order_book = await self._meta("order_book", raws, now)
+        _validate_order_book(order_book)
         s1 = S1State(
             svs_score=await self._meta("svs_score", raws, now),
             order_flow=OrderFlow(
@@ -183,6 +205,7 @@ class Engine:
                 val=await self._meta("val", raws, now),
                 lvn=await self._meta("lvn", raws, now)),
             chop=await self._meta("chop", raws, now),
+            order_book=order_book,
         )
         self.schema.s1_state = s1
 
