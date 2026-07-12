@@ -284,6 +284,36 @@ Nouveau bloc du schéma (domaine Sony « order flow » §3, canal rapide) + pann
   n'affecte aucune contrainte dure §2/§3, aucune donnée inventée). Correctif chrome global
   différé (commit séparé — « une feature par commit »).
 
+## D-027 · Calendrier économique (`econ_calendar.events`, panneau `EC`) — PLACEHOLDER
+Nouveau bloc du schéma + panneau. Hypothèses (Loop 1 étape 1) :
+- **Bloc SYSTÉMIQUE, pas opérateur** : le calendrier macro/géo impacte la liquidité pour
+  LES DEUX opérateurs (la fenêtre « news Tier 1 ±30 min » est un filtre Phase 0 de Sony —
+  AUTORITÉ `reference/MANIFEST §Sony·SVS` — et les publications pèsent sur l'EUR/USD de
+  Youssef). Accent `none` → badge `SYSTÈME`, pas de couleur opérateur (D-024).
+- **Canal LENT** (`SLOW_BLOCKS`) : un planning évolue en minutes, pas en sous-seconde (§6).
+  Source dédiée `econ_feed` (coupable via API comme les autres → STALE→ABSENT réels).
+- **Événement** = `{ts, name, tier ∈ 1|2|3, region}` ; tier = impact liquidité
+  (1 fort / 2 modéré / 3 faible) — nomenclature PLACEHOLDER, mapping réel (Forex Factory,
+  BLS…) à trancher quand un vrai feed existera.
+- **Compte à rebours HONNÊTE** : le `ts` de chaque événement est une heure programmée
+  CONNUE → le countdown est une dérivation CLIENT de `serverNow` (précis, ré-affiché
+  chaque seconde). Contraste assumé avec B2/GEX (§8.2) où la péremption est INCONNUE et
+  où l'on affiche l'âge : ici le compte à rebours est légitime, là il serait un mensonge.
+- **Validation déterministe serveur** (`_validate_econ_calendar`) : leçon du /devil Tape
+  appliquée D'EMBLÉE — robustesse PAR-ÉVÉNEMENT (un événement cassé écarté SEUL),
+  dédup par `(ts, name, region)` (clés React stables), tri chronologique (le plus proche
+  en tête — c'est un planning), borné `CAL_WINDOW=12` ; plus rien d'exploitable →
+  RETIRÉ (ABSENT + `MALFORMED`, §3). Le mock injecte ~3 % d'événements cassés (§4).
+- **Fenêtre T1 ±30 min SIGNALÉE, PAS CÂBLÉE** : le panneau affiche une bannière factuelle
+  quand un Tier 1 est à ±30 min (surface le filtre Sony), mais le moteur Phase 0 ne
+  consomme PAS encore ce champ — câblage déterministe = feature séparée (une feature par
+  commit) ; l'UI ne prononce jamais OUVERT/BLOQUÉ ici (§2.2).
+- **Affichage** : tier JAMAIS par la couleur seule — carrés pleins `▣▣▣/▣▣/▣` (forme) +
+  code texte `T1/T2/T3` + libellé (§3) ; passé récent (< 30 min) conservé estompé (le
+  blackout est symétrique), passé lointain masqué ; prochain événement surligné.
+  Layouts localStorage bumpés v4 (EC dans DÉFAUT, MICRO, MACRO).
+- **Aucun chemin d'exécution** (§2.1) : événements OBSERVÉS/annoncés, rien à décider ici.
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.

@@ -27,8 +27,9 @@ from .phase0 import Phase0Input, evaluate_phase0
 from .projections import loss_streak
 from .redis_state import RedisState
 from .schema import (BridgeVariables, Cascade, ContextSchema, Decision, DecisionWindow,
-                     MasterState, OperationalMode, OrderFlow, Phase0State, S1State, S2State,
-                     SessionIdentity, SessionMarker, Structure, SyncState, SyncVerdict)
+                     EconCalendar, MasterState, OperationalMode, OrderFlow, Phase0State,
+                     S1State, S2State, SessionIdentity, SessionMarker, Structure, SyncState,
+                     SyncVerdict)
 from .scoring import compute_unified_signal
 from .sse import broadcaster
 from .strategies.sony import evaluate_strategies
@@ -53,6 +54,7 @@ FIELD_SPEC: dict[str, tuple[str, float, float]] = {
     "real_rates": ("macro_feed", *_SLOW), "bridgewater_matrix": ("macro_feed", *_SLOW),
     "gex": ("greeks_engine", config.GEX_STALE_SECONDS, config.GEX_STALE_SECONDS * 4),
     "rms": ("rms_engine", *_FAST),
+    "econ_calendar": ("econ_feed", *_SLOW),  # systemic macro/geo schedule (D-027)
     # Simulated N1/N2A outputs (Youssef pipeline inputs — slow cadence, D-021)
     **{field: ("macro_feed", *_SLOW) for field in (
         "g_momentum", "pi_momentum", "d1", "d2", "d3", "d4", "d5",
@@ -64,6 +66,7 @@ DXY_CONTRADICTION_TOLERANCE = 0.5  # cross-source divergence threshold (D-012)
 
 BOOK_DEPTH = 10   # displayed levels per side (D-025)
 TAPE_WINDOW = 40  # displayed prints, most recent first (D-026)
+CAL_WINDOW = 12   # displayed scheduled events, soonest first (D-027)
 
 
 def _validate_tape(meta: MetaField) -> None:
@@ -139,6 +142,44 @@ def _validate_order_book(meta: MetaField) -> None:
     meta.value = {"bids": bids, "asks": asks}
     if bids[0][0] >= asks[0][0]:
         meta.flags.append("CROSSED_BOOK")
+
+
+def _validate_econ_calendar(meta: MetaField) -> None:
+    """Deterministic economic-calendar normalization (D-027).
+
+    PER-EVENT robustness (Tape /devil lesson carried forward): each event is validated
+    alone — a FINITE scheduled `ts`, a `tier` in {1,2,3}, a non-empty `name`; a broken
+    event (missing key, non-numeric ts, bad tier) is DROPPED ALONE, never discards the
+    calendar (garbage is not data, §3). Events are DEDUPED by (ts, name, region) so React
+    keys stay unique. Sorted CHRONOLOGICALLY (soonest first — it is a schedule) and bounded
+    to CAL_WINDOW. No usable event left -> value WITHHELD (ABSENT + MALFORMED). The `ts`
+    is a KNOWN scheduled time, so the client countdown is honest & precise (contrast the
+    B2 GEX unknown-expiry case, §8.2). Observed/announced events, never an order (§2.1)."""
+    if meta.value is None:
+        return
+    if not isinstance(meta.value, list):
+        meta.value = None
+        meta.freshness = Freshness.ABSENT
+        meta.flags.append("MALFORMED")
+        return
+    by_key: dict[tuple, dict] = {}
+    for e in meta.value:
+        try:
+            ts = float(e["ts"])
+            tier = int(e["tier"])
+            name = str(e["name"]).strip()
+            region = str(e.get("region", "")).strip()
+        except (TypeError, ValueError, KeyError):
+            continue  # drop this event alone, keep the rest
+        if math.isfinite(ts) and tier in (1, 2, 3) and name:
+            by_key[(round(ts, 3), name, region)] = {"ts": ts, "name": name,
+                                                    "tier": tier, "region": region}
+    if not by_key:
+        meta.value = None
+        meta.freshness = Freshness.ABSENT
+        meta.flags.append("MALFORMED")
+        return
+    meta.value = sorted(by_key.values(), key=lambda e: e["ts"])[:CAL_WINDOW]
 
 
 class Engine:
@@ -376,6 +417,7 @@ class Engine:
     async def _assemble_slow(self, now: float) -> None:
         raws = await self.state.read_raw_many(
             ["nq_es", "vix", "zn", "dx", "eurusd", "real_rates", "bridgewater_matrix",
+             "econ_calendar",
              "g_momentum", "pi_momentum", "d1", "d2", "d3", "d4", "d5",
              "taylor_ois_delta", "phillips_tips_delta", "beer_z", "carry_net",
              "cycle_div_delta", "leading_turn", "rr_zscore", "spot_momentum"])
@@ -399,7 +441,12 @@ class Engine:
         pipeline = compute_pipeline(self._regime_tier, raws)
         self.schema.s2_state = S2State(cascade=cascade, bridgewater_matrix=matrix_meta,
                                        s2_macro_score=macro, pipeline=pipeline)
-        broadcaster.publish("slow", "s2_state", self.schema.model_dump(mode="json")["s2_state"])
+        econ = await self._meta("econ_calendar", raws, now)
+        _validate_econ_calendar(econ)
+        self.schema.econ_calendar = EconCalendar(events=econ)
+        dump = self.schema.model_dump(mode="json")
+        broadcaster.publish("slow", "s2_state", dump["s2_state"])
+        broadcaster.publish("slow", "econ_calendar", dump["econ_calendar"])
 
     async def _fast_loop(self) -> None:
         while True:

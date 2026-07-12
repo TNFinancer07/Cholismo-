@@ -222,6 +222,22 @@ export interface UnifiedSignalOutput {
   decision_window: DecisionWindow
 }
 
+// --- econ_calendar → panneau EC (SYSTÉMIQUE, macro/géo) [lent] ---
+
+/** Événement macro/géo programmé. `ts` = heure prévue CONNUE → compte à rebours honnête
+ *  (dérivation client, contraste B2 §8.2). `tier` = impact liquidité (1 fort / 2 modéré /
+ *  3 faible). */
+export interface EconEvent {
+  ts: number
+  name: string
+  tier: 1 | 2 | 3
+  region: string
+}
+
+export interface EconCalendar {
+  events: MetaField<EconEvent[]>
+}
+
 export interface ContextSchema {
   session_identity: SessionIdentity
   s1_state: S1State
@@ -229,6 +245,7 @@ export interface ContextSchema {
   bridge_variables: BridgeVariables
   sync_state: SyncState
   unified_signal_output: UnifiedSignalOutput
+  econ_calendar: EconCalendar
 }
 
 // --- hors-schéma : extras opérationnels poussés sur le canal rapide ---

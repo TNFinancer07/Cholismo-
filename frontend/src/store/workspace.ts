@@ -6,8 +6,8 @@ import { create } from 'zustand'
 import { useTerminal } from './terminal'
 
 /** Identifiants canoniques des panneaux disponibles (couverts par panels/registry). */
-export const PANEL_IDS = ['A1', 'A2', 'A3', 'S2P', 'MOCK', 'B1', 'B2', 'B3', 'B4', 'S1S',
-  'OB', 'TP', 'C1', 'C2', 'C4', 'MODE'] as const
+export const PANEL_IDS = ['A1', 'A2', 'A3', 'EC', 'S2P', 'MOCK', 'B1', 'B2', 'B3', 'B4',
+  'S1S', 'OB', 'TP', 'C1', 'C2', 'C4', 'MODE'] as const
 export type PanelId = (typeof PANEL_IDS)[number]
 
 export interface Workspace {
@@ -21,20 +21,20 @@ export interface Workspace {
 function builtins(): Workspace[] {
   return [
     { id: 'defaut', name: 'DÉFAUT', builtin: true, showBlotter: true,
-      columns: [['A1', 'S2P', 'A3', 'MOCK'], ['B4', 'S1S', 'B1'], ['C1', 'C2', 'C4', 'MODE']] },
+      columns: [['A1', 'S2P', 'A3', 'MOCK'], ['B4', 'S1S', 'B1'], ['EC', 'C1', 'C2', 'C4', 'MODE']] },
     { id: 'micro', name: 'MICRO · S1', builtin: true, showBlotter: true,
-      columns: [['S1S', 'B2'], ['B4', 'OB', 'B1'], ['TP', 'B3', 'C1', 'C2', 'MOCK']] },
+      columns: [['S1S', 'B2'], ['B4', 'OB', 'B1'], ['TP', 'EC', 'B3', 'C1', 'C2', 'MOCK']] },
     { id: 'macro', name: 'MACRO · S2', builtin: true, showBlotter: false,
-      columns: [['A1', 'A3'], ['S2P', 'A2'], ['B4', 'B3', 'MOCK']] },
+      columns: [['A1', 'A3', 'EC'], ['S2P', 'A2'], ['B4', 'B3', 'MOCK']] },
     { id: 'discipline', name: 'DISCIPLINE', builtin: true, showBlotter: true,
       columns: [['C1', 'C2'], ['B4', 'C4'], ['MODE', 'MOCK']] },
   ]
 }
 
-// v3 : ajout du panneau TP (tape, D-026) aux espaces intégrés — bump de clé : les layouts
-// persistés antérieurs repartent des intégrés (les PERSO se recréent ; pas de migration
-// silencieuse d'un panneau invisible).
-const STORAGE_KEY = () => `cholismo.workspaces.${useTerminal.getState().operator}.v3`
+// v4 : ajout du panneau EC (calendrier économique, D-027) aux espaces intégrés — bump de
+// clé : les layouts persistés antérieurs repartent des intégrés (les PERSO se recréent ;
+// pas de migration silencieuse d'un panneau invisible).
+const STORAGE_KEY = () => `cholismo.workspaces.${useTerminal.getState().operator}.v4`
 
 interface Persisted { workspaces: Workspace[]; activeId: string }
 

@@ -8,6 +8,7 @@ import { CascadePanel } from '@/panels/zoneA/CascadePanel'
 import { BridgewaterMatrix } from '@/panels/zoneA/BridgewaterMatrix'
 import { MacroScorePanel } from '@/panels/zoneA/MacroScorePanel'
 import { PipelinePanel } from '@/panels/zoneA/PipelinePanel'
+import { EconCalendarPanel } from '@/panels/zoneA/EconCalendarPanel'
 import { StrategiesPanel } from '@/panels/zoneB/StrategiesPanel'
 import { ScenarioPanel } from '@/panels/harness/ScenarioPanel'
 import { S1S2Panel } from '@/panels/zoneB/S1S2Panel'
@@ -31,6 +32,7 @@ export const PANEL_REGISTRY: Record<PanelId, PanelDef> = {
   A1: { id: 'A1', label: 'Cascade macro', component: CascadePanel },
   A2: { id: 'A2', label: 'Matrice Bridgewater', component: BridgewaterMatrix },
   A3: { id: 'A3', label: 'Score macro (A3)', component: MacroScorePanel },
+  EC: { id: 'EC', label: 'Calendrier éco · Macro/Géo', component: EconCalendarPanel },
   S2P: { id: 'S2P', label: 'Pipeline macro Youssef', component: PipelinePanel },
   S1S: { id: 'S1S', label: 'Stratégies exécution Sony', component: StrategiesPanel },
   MOCK: { id: 'MOCK', label: 'Scénarios & pathologies', component: ScenarioPanel },

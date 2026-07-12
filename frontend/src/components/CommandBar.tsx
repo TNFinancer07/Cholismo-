@@ -76,7 +76,7 @@ function useStaticCommands(): Command[] {
     return [
       focus('A', 'zone A — cascade macro'), focus('B', 'zone B — Router'),
       focus('C', 'zone C — discipline'), focus('D', 'zone D — decision log'),
-      panel('A1', 'A'), panel('A2', 'A'), panel('A3', 'A'),
+      panel('A1', 'A'), panel('A2', 'A'), panel('A3', 'A'), panel('EC', 'A'),
       panel('B1', 'B'), panel('B2', 'B'), panel('B3', 'B'), panel('B4', 'B'),
       panel('OB', 'B'), panel('TP', 'B'),
       panel('C1', 'C'), panel('C2', 'C'), panel('C4', 'C'),

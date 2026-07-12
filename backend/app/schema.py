@@ -259,6 +259,21 @@ class UnifiedSignalOutput(BaseModel):
     decision_window: DecisionWindow = Field(default_factory=DecisionWindow)
 
 
+# --- econ_calendar → panneau EC (SYSTÉMIQUE, macro/géo) [slow] ---
+
+class EconCalendar(BaseModel):
+    """Calendrier économique/géopolitique — feed SYSTÉMIQUE (impacte la liquidité pour LES
+    DEUX opérateurs : la fenêtre Tier-1 ±30 min est un filtre Phase 0 de Sony,
+    reference/MANIFEST §Sony·SVS ; les publications macro pèsent aussi sur l'EUR/USD de
+    Youssef). `events.value` = liste d'événements PROGRAMMÉS {ts, name, tier, region},
+    tier = impact liquidité (1 fort / 2 modéré / 3 faible). Un panneau lit `events`.
+    Le compte à rebours est une dérivation CLIENT du `ts` CONNU de chaque événement —
+    honnête et précis, contrairement au TTL GEX de B2 (péremption inconnue, §8.2). La
+    fenêtre T1 ±30 min est SURFACÉE ici, PAS (encore) câblée dans le moteur déterministe
+    Phase 0 (feature séparée) : l'UI n'y prononce jamais OPEN/BLOQUÉ (§2.2)."""
+    events: MetaField = Field(default_factory=MetaField)  # value: list[{ts, name, tier, region}]
+
+
 # --- Full schema (conceptual object; transported as partial per-block SSE events) ---
 
 class ContextSchema(BaseModel):
@@ -268,7 +283,8 @@ class ContextSchema(BaseModel):
     bridge_variables: BridgeVariables = Field(default_factory=BridgeVariables)
     sync_state: SyncState = Field(default_factory=SyncState)
     unified_signal_output: UnifiedSignalOutput = Field(default_factory=UnifiedSignalOutput)
+    econ_calendar: EconCalendar = Field(default_factory=EconCalendar)
 
 
 FAST_BLOCKS = ("session_identity", "s1_state", "bridge_variables", "sync_state", "unified_signal_output")
-SLOW_BLOCKS = ("s2_state",)
+SLOW_BLOCKS = ("s2_state", "econ_calendar")

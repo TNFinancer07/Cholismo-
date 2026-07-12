@@ -3,9 +3,9 @@
  *  hormis l'état d'instance (opérateur, focus clavier, vue) et les projections Zone D. */
 import { create } from 'zustand'
 import type {
-  BlotterRow, BridgeVariables, Calibration, ContextSchema, Extras, OperationalMode,
-  Operator, OrchestratorPayload, S1State, S2State, SessionIdentity, SyncState,
-  UnifiedSignalOutput,
+  BlotterRow, BridgeVariables, Calibration, ContextSchema, EconCalendar, Extras,
+  OperationalMode, Operator, OrchestratorPayload, S1State, S2State, SessionIdentity,
+  SyncState, UnifiedSignalOutput,
 } from '@/types/schema'
 
 export type ZoneKey = 'A' | 'B' | 'C' | 'D'
@@ -32,6 +32,7 @@ interface TerminalStore {
   bridge_variables: BridgeVariables | null
   sync_state: SyncState | null
   unified_signal_output: UnifiedSignalOutput | null
+  econ_calendar: EconCalendar | null
   extras: Extras | null
 
   // santé des canaux (fail-closed UI : canal muet => BLOQUÉ affiché)
@@ -75,6 +76,7 @@ export const useTerminal = create<TerminalStore>((set) => ({
   s1_state: null,
   s2_state: null,
   bridge_variables: null,
+  econ_calendar: null,
   sync_state: null,
   unified_signal_output: null,
   extras: null,
@@ -131,6 +133,7 @@ export const useTerminal = create<TerminalStore>((set) => ({
           return { bridge_variables: bridge, history: push(state.history, 'gex', bridge.gex.value) }
         }
         case 'sync_state': return { sync_state: payload as SyncState }
+        case 'econ_calendar': return { econ_calendar: payload as EconCalendar }
         case 'unified_signal_output': {
           const signal = payload as UnifiedSignalOutput
           return { unified_signal_output: signal, history: push(state.history, 'score', signal.score) }

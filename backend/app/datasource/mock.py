@@ -35,6 +35,7 @@ SOURCES = {
                    "taylor_ois_delta", "phillips_tips_delta", "beer_z", "carry_net",
                    "cycle_div_delta", "leading_turn", "rr_zscore", "spot_momentum"],
     "rms_engine": ["rms"],
+    "econ_feed": ["econ_calendar"],   # systemic macro/geo schedule (D-027)
 }
 
 
@@ -45,6 +46,7 @@ class MockDataSource(MarketDataSource):
         self._walk: dict[str, float] = {}
         self._tape: deque = deque(maxlen=40)   # rolling window of observed prints (D-026)
         self._tape_seq = 0
+        self._econ: list[dict] = []            # scheduled macro/geo events (D-027)
 
     # -- helpers --
 
@@ -204,3 +206,37 @@ class MockDataSource(MarketDataSource):
         ):
             await self._emit(state, "macro_feed", key,
                              round(self._drift(key, base_value, vol, scale), 3), patho)
+
+        # --- Economic/geo calendar (D-027): a rolling schedule of scheduled events, each
+        # with a KNOWN ts (honest client countdown) and a liquidity-impact tier. Reseeded
+        # when empty or fully elapsed. Events are OBSERVED/announced, never orders (§2.1). ---
+        now = time.time()
+        if not self._econ or all(e["ts"] < now - 120 for e in self._econ):
+            self._econ = self._seed_econ(now)
+        emitted = [dict(e) for e in self._econ]
+        # Pathologie §4 : rarement, un événement structurellement cassé se glisse dans le
+        # flux — le moteur doit l'écarter SEUL (jamais un calendrier inventé).
+        if rng.random() < patho.get("nan_p", 0.0) + 0.03:
+            emitted.append(rng.choice([
+                {"ts": math.nan, "name": "Corrompu", "tier": 1, "region": "US"},
+                {"name": "SansTs", "tier": 2, "region": "EU"},
+                {"ts": now + 600, "name": "TierInvalide", "tier": 7, "region": "US"},
+            ]))
+        await self._emit(state, "econ_feed", "econ_calendar", emitted, patho)
+
+    @staticmethod
+    def _seed_econ(now: float) -> list[dict]:
+        """Rolling demo schedule spanning Tier 1/2/3, macro & geo, around `now`. Offsets in
+        seconds; a Tier-1 inside ±30 min (blackout window) and one beyond, to exercise the
+        Sony filter surfacing without wiring Phase 0 (D-027)."""
+        plan = [
+            (-95,       "IPC zone euro (final)",   2, "EU"),   # vient de passer
+            (40,        "Ventes au détail US",     2, "US"),
+            (12 * 60,   "NFP — emplois US",        1, "US"),   # T1 dans la fenêtre ±30 min
+            (33 * 60,   "Décision Fed — taux",     1, "US"),   # T1 hors ±30 min
+            (58 * 60,   "Stocks pétrole EIA",      3, "US"),
+            (95 * 60,   "Discours BCE (Lagarde)",  2, "EU"),
+            (150 * 60,  "Tensions géo — sommet",   3, "GEO"),
+        ]
+        return [{"ts": round(now + off, 0), "name": name, "tier": tier, "region": region}
+                for off, name, tier, region in plan]
