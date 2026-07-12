@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import math
 import time
 import uuid
 from datetime import datetime, timezone, timedelta
@@ -59,22 +60,43 @@ FIELD_SPEC: dict[str, tuple[str, float, float]] = {
 DXY_CONTRADICTION_TOLERANCE = 0.5  # cross-source divergence threshold (D-012)
 
 
+BOOK_DEPTH = 10  # displayed levels per side (D-025)
+
+
 def _validate_order_book(meta: MetaField) -> None:
-    """Deterministic DOM sanity (D-025). Malformed structure -> value WITHHELD
-    (fail-closed §3: invalid data is no data), flagged MALFORMED. A CROSSED book
-    (best bid >= best ask) is real pathological data: shown but flagged."""
+    """Deterministic DOM normalization (D-025, hardened by /devil).
+
+    Malformed structure or ANY non-finite / non-positive level -> value WITHHELD
+    (fail-closed §3: garbage is not data), flagged MALFORMED. Valid books are
+    CANONICALIZED, never invented: duplicate prices aggregated (same level, sizes
+    summed), sides sorted (bids desc / asks asc — a real feed may send unsorted),
+    depth capped to the BOOK_DEPTH best levels (display contract; also stops
+    SSE/DOM flooding from extreme feeds). A CROSSED book (best bid >= best ask)
+    is real pathological data: shown + flagged."""
     if meta.value is None:
         return
-    try:
-        bids = [(float(p), float(s)) for p, s in meta.value["bids"]]
-        asks = [(float(p), float(s)) for p, s in meta.value["asks"]]
-        if not bids or not asks:
+
+    def canonical_side(levels, descending: bool) -> list[list[float]]:
+        aggregated: dict[float, float] = {}
+        for price, size in levels:
+            price, size = float(price), float(size)
+            if not (math.isfinite(price) and math.isfinite(size)) or price <= 0 or size <= 0:
+                raise ValueError("invalid level")
+            aggregated[price] = aggregated.get(price, 0.0) + size
+        if not aggregated:
             raise ValueError("empty book side")
+        ordered = sorted(aggregated.items(), reverse=descending)
+        return [[price, size] for price, size in ordered[:BOOK_DEPTH]]
+
+    try:
+        bids = canonical_side(meta.value["bids"], descending=True)
+        asks = canonical_side(meta.value["asks"], descending=False)
     except (TypeError, ValueError, KeyError):
         meta.value = None
         meta.freshness = Freshness.ABSENT
         meta.flags.append("MALFORMED")
         return
+    meta.value = {"bids": bids, "asks": asks}
     if bids[0][0] >= asks[0][0]:
         meta.flags.append("CROSSED_BOOK")
 

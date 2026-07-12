@@ -119,3 +119,55 @@ def test_crossed_book_is_flagged_and_malformed_book_is_withheld():
         finally:
             await state.close()
     _run(scenario())
+
+
+# ---------- /devil — flux extrêmes et normalisation (Loop 4) ----------
+
+def test_extreme_book_is_capped_sorted_and_deduped():
+    async def scenario():
+        state = RedisState()
+        engine = Engine(MockDataSource(), state)
+        try:
+            now = time.time()
+            # Feed hostile : 500 niveaux, NON triés, avec doublons de prix.
+            bids = [[5000.0 - 0.25 * k, 10] for k in range(500)]
+            bids.reverse()                                   # tri inversé volontaire
+            bids.append([4999.75, 5])                        # doublon de prix
+            asks = [[5000.25 + 0.25 * k, 10] for k in range(500)]
+            asks.reverse()
+            await state.write_raw("order_book", {"bids": bids, "asks": asks},
+                                  "sierra_chart", ts=now)
+            await engine._assemble_fast(now)
+            ob = engine.schema.s1_state.order_book
+            assert ob.freshness == Freshness.FRESH
+            assert len(ob.value["bids"]) == 10 and len(ob.value["asks"]) == 10  # borné
+            prices = [p for p, _ in ob.value["bids"]]
+            assert prices == sorted(prices, reverse=True)    # canonisé décroissant
+            assert prices[0] == 5000.0                       # les MEILLEURS niveaux gardés
+            assert ob.value["asks"][0][0] == 5000.25
+            # doublon agrégé : 4999.75 apparaît UNE fois, taille sommée 10+5
+            dup = [s for p, s in ob.value["bids"] if p == 4999.75]
+            assert dup == [15]
+        finally:
+            await state.close()
+    _run(scenario())
+
+
+def test_non_finite_or_non_positive_levels_withhold_the_book():
+    async def scenario():
+        state = RedisState()
+        engine = Engine(MockDataSource(), state)
+        try:
+            now = time.time()
+            for bad in ({"bids": [[float("nan"), 10]], "asks": [[5000.25, 8]]},
+                        {"bids": [[5000.0, 0]], "asks": [[5000.25, 8]]},
+                        {"bids": [[5000.0, -4]], "asks": [[5000.25, 8]]},
+                        {"bids": [[float("inf"), 10]], "asks": [[5000.25, 8]]}):
+                await state.write_raw("order_book", bad, "sierra_chart", ts=now)
+                await engine._assemble_fast(now)
+                ob = engine.schema.s1_state.order_book
+                assert ob.freshness == Freshness.ABSENT and ob.value is None, bad
+                assert "MALFORMED" in ob.flags
+        finally:
+            await state.close()
+    _run(scenario())

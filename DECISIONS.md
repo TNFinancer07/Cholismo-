@@ -233,6 +233,15 @@ Nouveau bloc du schéma (domaine Sony, canal rapide) + panneau DOM. Hypothèses 
   colorés vert/rouge par convention de marché mais TOUJOURS libellés `BID`/`ASK` (§3).
 - Mock : pathologies dédiées — profondeur partielle, spread élargi, croisement sur la
   probabilité `contradict_p` du scénario. Layouts localStorage bumpés v2 (OB visible).
+- **Durci par `/devil` (Loop 4)** : le moteur CANONISE sans inventer — niveaux non finis
+  (NaN/inf) ou ≤ 0 ⇒ carnet entier RETIRÉ (`MALFORMED`, pas de demi-vérité) ; doublons de
+  prix agrégés (tailles sommées) ; côtés triés (un feed réel peut arriver non trié) ;
+  **profondeur bornée aux 10 meilleurs niveaux** (contrat d'affichage + anti-inondation
+  SSE/DOM sur feed extrême). Côté UI : **mute du canal SSE** (≠ coupure de source) ⇒
+  bandeau « FLUX MUET — dernière image Xs » + carnet grisé — le dernier payload gardait
+  un `freshness` FRESH figé qui aurait menti. Débordement horizontal < 1100 px corrigé à
+  la racine (`min-w-0` entête `Panel` + zones de grille — défaut préexistant aggravé par
+  les badges D-024, trouvé par l'attaque resize).
 
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events

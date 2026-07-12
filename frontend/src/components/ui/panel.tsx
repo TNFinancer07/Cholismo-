@@ -71,10 +71,13 @@ export function Panel({
           accent === 'router' && 'border-b-router/60',
         )}
       >
-        <div className="flex items-baseline gap-1.5 overflow-hidden">
+        {/* min-w-0 partout : un flex-child sans lui refuse de rétrécir sous la largeur
+            de son contenu → l'entête élargirait la colonne entière (débordement
+            horizontal en fenêtre étroite, trouvé par /devil). */}
+        <div className="flex min-w-0 flex-1 items-baseline gap-1.5 overflow-hidden">
           <span
             className={cn(
-              'text-xxs font-bold',
+              'shrink-0 text-xxs font-bold',
               accent === 'sony' && 'text-sony',
               accent === 'youssef' && 'text-youssef',
               accent === 'router' && 'text-router',
@@ -83,8 +86,8 @@ export function Panel({
           >
             {code}
           </span>
-          <h2 className="truncate text-xxs uppercase tracking-wider text-term-text">{title}</h2>
-          {block && <span className="truncate text-xxs text-term-faint">{block}</span>}
+          <h2 className="min-w-0 truncate text-xxs uppercase tracking-wider text-term-text">{title}</h2>
+          {block && <span className="min-w-0 truncate text-xxs text-term-faint">{block}</span>}
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
           {right}

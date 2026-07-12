@@ -28,7 +28,7 @@ function Zone({ zone, className, children }: {
 }) {
   const focused = useTerminal((s) => s.focusZone === zone)
   return (
-    <div className={cn('flex min-h-0 flex-col gap-1.5', focused && 'zone-focus', className)}
+    <div className={cn('flex min-h-0 min-w-0 flex-col gap-1.5', focused && 'zone-focus', className)}
       role="region" aria-label={`Zone ${zone}`}>
       {children}
     </div>

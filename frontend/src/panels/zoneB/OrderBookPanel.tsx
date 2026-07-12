@@ -77,7 +77,13 @@ function Ladder({ book }: { book: OrderBookValue }) {
 
 export function OrderBookPanel() {
   const meta = useTerminal((s) => s.s1_state?.order_book)
+  // Micro-coupure du CANAL SSE (≠ coupure de source) : le dernier payload garde un
+  // freshness FRESH figé — sans ce garde, le carnet aurait l'air vivant pendant un
+  // mute. L'UI ne laisse jamais une image fraîche mentir (§2.2/§3, /devil).
+  const channelMute = useTerminal((s) =>
+    s.lastFastEventAt === 0 || s.nowTick - s.lastFastEventAt > 5)
   const age = useDataAge(meta)
+  const degraded = meta?.freshness === 'STALE' || channelMute
 
   return (
     <Panel code="OB" title="Carnet d'ordres ES" block="s1_state.order_book" accent="sony"
@@ -87,8 +93,12 @@ export function OrderBookPanel() {
           <span className="absent-pulse font-mono text-xs font-bold text-absent">PAS DE DONNÉES</span>
         </div>
       ) : (
-        <div className={cn(meta.freshness === 'STALE' && 'opacity-60')}>
-          {meta.freshness === 'STALE' && (
+        <div className={cn(degraded && 'opacity-60')}>
+          {channelMute ? (
+            <p className="mb-1 border border-absent/60 px-1 py-0.5 text-center font-mono text-xxs uppercase text-absent">
+              flux muet — dernière image {fmtAge(age)}
+            </p>
+          ) : meta.freshness === 'STALE' && (
             <p className="mb-1 border border-stale/50 px-1 py-0.5 text-center font-mono text-xxs uppercase text-stale">
               carnet périmé {fmtAge(age)} — dernière image connue
             </p>
