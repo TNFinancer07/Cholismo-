@@ -263,6 +263,27 @@ Nouveau bloc du schéma (domaine Sony « order flow » §3, canal rapide) + pann
   dédiée (§3). `order_book`/`tape` ajoutés à `SOURCES["sierra_chart"]` (panneau MOCK).
   Layouts localStorage bumpés v3 (TP visible dans MICRO · S1).
 
+**Durcissement /devil (Loop 4)** — 3 attaques, toutes gérées (tests dans `test_tape.py`) :
+1. **Rafale hostile** (5000 prints, `seq` mélangés) → `_validate_tape` borne à
+   `TAPE_WINDOW=40` via `heapq.nlargest` par `seq` (pas de tri O(n log n) complet) : sortie
+   = 40 plus récents, triés, DOM/SSE protégés. Test `test_burst_is_bounded_to_window_and_ordered`.
+2. **Séquences désordonnées / `seq` dupliqués** (feed multi-thread) → dédup par
+   `dict[seq]` (dernière écriture gagne), garantissant des **clés React uniques** (`key={p.seq}`
+   dans `TapePanel`) : plus de warning « same key » ni de ligne fantôme. Tests
+   `test_duplicate_seq_is_deduped_stable_react_keys`.
+3. **Robustesse par-print** : un print structurellement cassé (prix non numérique, clé
+   manquante) est écarté SEUL — `try/except` intra-boucle + `continue`, la fenêtre valide
+   survit. Corrige un bug trouvé à l'attaque : le `try/except` grossier précédent jetait TOUTE
+   la fenêtre sur un seul print pourri (aurait masqué le flux entier — anti-§3). Test
+   `test_one_structurally_broken_print_does_not_discard_the_window`.
+- **Redimensionnement** (E2E Playwright, 1600→720px) : le panneau Tape **ne déborde jamais de
+  lui-même** à toute largeur et reste rendu ; body sain jusqu'à 820px (mini réaliste d'un
+  terminal dense). En deçà de ~786px, le seul débordement horizontal vient de la **barre de
+  statut Zone 0** (`Zone0StatusBar`, chrome global mono-ligne dense) — **hors panneau Tape**,
+  tracé ici comme risque assumé (viewport phone irréaliste pour un terminal classe Bloomberg ;
+  n'affecte aucune contrainte dure §2/§3, aucune donnée inventée). Correctif chrome global
+  différé (commit séparé — « une feature par commit »).
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.

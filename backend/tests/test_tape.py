@@ -127,3 +127,72 @@ def test_malformed_prints_are_dropped_and_empty_tape_is_withheld():
         finally:
             await state.close()
     _run(scenario())
+
+
+# ---------- /devil — rafales, désordre, robustesse par-print (Loop 4) ----------
+
+def test_burst_is_bounded_to_window_and_ordered(monkeypatch):
+    """Rafale hostile 5000 prints, seq mélangés → sortie = 40 plus récents, triés."""
+    import random as _r
+    async def scenario():
+        state = RedisState()
+        engine = Engine(MockDataSource(), state)
+        try:
+            now = time.time()
+            burst = [{"ts": now, "price": 5000.0 + (s % 8) * 0.25, "size": 1 + s % 5,
+                      "side": "BUY" if s % 2 else "SELL", "seq": s} for s in range(1, 5001)]
+            _r.Random(1).shuffle(burst)
+            await state.write_raw("tape", burst, "sierra_chart", ts=now)
+            await engine._assemble_fast(now)
+            tape = engine.schema.s1_state.tape
+            assert tape.freshness == Freshness.FRESH
+            assert len(tape.value) == TAPE_WINDOW                 # DOM borné
+            seqs = [p["seq"] for p in tape.value]
+            assert seqs == sorted(seqs, reverse=True)             # plus récent en tête
+            assert seqs[0] == 5000                                # les plus récents gardés
+        finally:
+            await state.close()
+    _run(scenario())
+
+
+def test_duplicate_seq_is_deduped_stable_react_keys():
+    """seq dupliqué (feed multi-thread) → une seule occurrence (clés React uniques)."""
+    async def scenario():
+        state = RedisState()
+        engine = Engine(MockDataSource(), state)
+        try:
+            now = time.time()
+            await state.write_raw("tape", [
+                {"ts": now, "price": 5000.0, "size": 3, "side": "BUY", "seq": 5},
+                {"ts": now, "price": 5000.5, "size": 7, "side": "SELL", "seq": 5},  # doublon
+                {"ts": now, "price": 5001.0, "size": 2, "side": "BUY", "seq": 6},
+            ], "sierra_chart", ts=now)
+            await engine._assemble_fast(now)
+            tape = engine.schema.s1_state.tape
+            seqs = [p["seq"] for p in tape.value]
+            assert len(seqs) == len(set(seqs)), f"seq dupliqués dans la sortie : {seqs}"
+        finally:
+            await state.close()
+    _run(scenario())
+
+
+def test_one_structurally_broken_print_does_not_discard_the_window():
+    """Un print sans clé / prix non numérique est écarté SEUL — les valides survivent."""
+    async def scenario():
+        state = RedisState()
+        engine = Engine(MockDataSource(), state)
+        try:
+            now = time.time()
+            await state.write_raw("tape", [
+                {"ts": now, "price": 5000.0, "size": 3, "side": "BUY", "seq": 1},
+                {"ts": now, "price": "oops", "size": 3, "side": "SELL", "seq": 2},  # ValueError
+                {"size": 3, "side": "BUY", "seq": 3},                                # KeyError price
+                {"ts": now, "price": 5001.0, "size": 2, "side": "SELL", "seq": 4},
+            ], "sierra_chart", ts=now)
+            await engine._assemble_fast(now)
+            tape = engine.schema.s1_state.tape
+            assert tape.freshness == Freshness.FRESH
+            assert sorted(p["seq"] for p in tape.value) == [1, 4]  # les 2 valides survivent
+        finally:
+            await state.close()
+    _run(scenario())

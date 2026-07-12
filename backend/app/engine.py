@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import heapq
 import logging
 import math
 import time
@@ -66,29 +67,40 @@ TAPE_WINDOW = 40  # displayed prints, most recent first (D-026)
 
 
 def _validate_tape(meta: MetaField) -> None:
-    """Deterministic Time & Sales normalization (D-026). Each print must have a finite
-    positive price/size and a valid side; bad prints are DROPPED (garbage is not data,
-    §3). No usable print left -> value WITHHELD (ABSENT + MALFORMED). Valid prints are
-    sorted most-recent-first (by seq) and capped to TAPE_WINDOW."""
+    """Deterministic Time & Sales normalization (D-026, hardened by /devil).
+
+    PER-PRINT robustness: each print is validated in isolation — a finite positive
+    price/size and a valid side; a structurally broken print (missing key, non-numeric)
+    is DROPPED ALONE, never discards the whole window (garbage is not data, §3). Prints
+    are DEDUPED by seq (seq is a unique print id; a duplicate would collide React keys) —
+    last occurrence wins. `seq` is the ordering key on purpose: `ts` can be clock-desynced
+    (a real pathology), seq is the source's monotonic append id. Bounded to the
+    TAPE_WINDOW most recent via heapq (O(n log k), a burst can't blow the hot path §7).
+    No usable print left -> value WITHHELD (ABSENT + MALFORMED)."""
     if meta.value is None:
         return
-    clean: list[dict] = []
-    try:
-        for p in meta.value:
-            price, size = float(p["price"]), float(p["size"])
-            if (math.isfinite(price) and math.isfinite(size) and price > 0 and size > 0
-                    and p["side"] in ("BUY", "SELL")):
-                clean.append({"ts": p.get("ts"), "price": price, "size": size,
-                              "side": p["side"], "seq": int(p["seq"])})
-    except (TypeError, ValueError, KeyError):
-        clean = []
-    if not clean:
+    if not isinstance(meta.value, list):
         meta.value = None
         meta.freshness = Freshness.ABSENT
         meta.flags.append("MALFORMED")
         return
-    clean.sort(key=lambda p: p["seq"], reverse=True)
-    meta.value = clean[:TAPE_WINDOW]
+    by_seq: dict[int, dict] = {}
+    for p in meta.value:
+        try:
+            price, size, seq = float(p["price"]), float(p["size"]), int(p["seq"])
+            side = p["side"]
+        except (TypeError, ValueError, KeyError):
+            continue  # drop this print alone, keep the rest
+        if math.isfinite(price) and math.isfinite(size) and price > 0 and size > 0 \
+                and side in ("BUY", "SELL"):
+            by_seq[seq] = {"ts": p.get("ts"), "price": price, "size": size,
+                           "side": side, "seq": seq}
+    if not by_seq:
+        meta.value = None
+        meta.freshness = Freshness.ABSENT
+        meta.flags.append("MALFORMED")
+        return
+    meta.value = heapq.nlargest(TAPE_WINDOW, by_seq.values(), key=lambda p: p["seq"])
 
 
 def _validate_order_book(meta: MetaField) -> None:
