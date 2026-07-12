@@ -14,6 +14,7 @@ from __future__ import annotations
 import math
 import random
 import time
+from collections import deque
 
 from ..redis_state import RedisState
 from . import scenarios
@@ -22,7 +23,7 @@ from .base import MarketDataSource
 # Simulated upstream sources -> the fields they own.
 SOURCES = {
     "sierra_chart": ["svs_score", "cvd", "absorption", "aggressor_ratio",
-                     "vpoc", "vah", "val", "lvn", "chop"],
+                     "vpoc", "vah", "val", "lvn", "chop", "order_book", "tape"],
     "cboe": ["vix", "vvix"],
     "cme": ["nq_es", "zn", "dxy_alt"],
     "fx_feed": ["eurusd", "dx", "dxy"],
@@ -42,6 +43,8 @@ class MockDataSource(MarketDataSource):
         self._rng = random.Random(42)
         self._gex_next_compute = 0.0
         self._walk: dict[str, float] = {}
+        self._tape: deque = deque(maxlen=40)   # rolling window of observed prints (D-026)
+        self._tape_seq = 0
 
     # -- helpers --
 
@@ -110,6 +113,21 @@ class MockDataSource(MarketDataSource):
                  max(1, int(rng.gauss(60, 35)))] for k in range(depth)]
         await self._emit(state, "sierra_chart", "order_book",
                          {"bids": bids, "asks": asks}, patho)
+
+        # Tape / Time & Sales — 1 à 4 prints par tick autour du mid, sens agresseur biaisé
+        # par l'aggressor_ratio (>0.5 = acheteurs à l'offre). Fenêtre glissante côté source
+        # (le tape EST le champ). NaN/taille≤0 injectés = pathologies, écartés par le moteur.
+        for _ in range(rng.randint(1, 4)):
+            self._tape_seq += 1
+            side = "BUY" if rng.random() < aggressor else "SELL"
+            price = mid + (half_spread if side == "BUY" else -half_spread) \
+                + 0.25 * rng.randint(0, 2) * (1 if side == "BUY" else -1)
+            size = max(1, int(rng.lognormvariate(1.4, 0.9)))
+            if rng.random() < patho["nan_p"]:
+                price = math.nan  # pathologie : écartée en aval (jamais un prix inventé)
+            self._tape.append({"ts": time.time(), "price": round(price, 2),
+                               "size": size, "side": side, "seq": self._tape_seq})
+        await self._emit(state, "sierra_chart", "tape", list(self._tape), patho)
 
         vix = max(9.0, self._drift("vix", base["vix"], vol, 0.5))
         vvix = max(60.0, self._drift("vvix", base["vvix"], vol, 1.5))

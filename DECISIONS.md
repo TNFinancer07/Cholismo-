@@ -243,6 +243,26 @@ Nouveau bloc du schéma (domaine Sony, canal rapide) + panneau DOM. Hypothèses 
   la racine (`min-w-0` entête `Panel` + zones de grille — défaut préexistant aggravé par
   les badges D-024, trouvé par l'attaque resize).
 
+## D-026 · Tape / Time & Sales (`s1_state.tape`, panneau `TP`) — PLACEHOLDER
+Nouveau bloc du schéma (domaine Sony « order flow » §3, canal rapide) + panneau. Hypothèses :
+- **Fenêtre glissante SERVEUR** : le champ `tape` porte les `TAPE_WINDOW=40` prints les
+  plus récents (plus récent en tête). Choix vs buffer client : le champ EST le tape, donc
+  sur coupure il vieillit STALE→ABSENT et disparaît honnêtement (un buffer client
+  garderait des prints périmés à l'air vivant — violation §3). Cohérent avec `order_book`.
+- **Print** = `{ts, price, size, side ∈ BUY|SELL, seq}`. `side` = sens agresseur (BUY à
+  l'offre / SELL au bid), biaisé par `aggressor_ratio` dans le mock — PLACEHOLDER.
+- **Lecture seule absolue** (§2.1) : ce sont les prints OBSERVÉS du marché, pas les ordres
+  de l'opérateur ; aucun handler, aucun chemin d'exécution.
+- **Pas critique Phase 0 en v1** (affichage/lecture).
+- **Validation déterministe serveur** (`_validate_tape`) : prix/taille non fini ou ≤ 0,
+  side invalide ⇒ print écarté ; plus aucun print exploitable ⇒ tape RETIRÉ (ABSENT +
+  `MALFORMED`, fail-closed §3). Tri par `seq` décroissant, borné à `TAPE_WINDOW`
+  (anti-inondation SSE/DOM).
+- **Gros print** : seuil = 90e centile de la fenêtre courante, dérivation PURE d'affichage
+  (surlignage) — rien d'inventé. Sens jamais par la couleur seule : glyphe ▲/▼ + colonne
+  dédiée (§3). `order_book`/`tape` ajoutés à `SOURCES["sierra_chart"]` (panneau MOCK).
+  Layouts localStorage bumpés v3 (TP visible dans MICRO · S1).
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.

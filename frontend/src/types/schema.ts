@@ -83,12 +83,22 @@ export interface OrderBookValue {
   asks: [number, number][]
 }
 
+/** Tape / Time & Sales (D-026) — prints observés, plus récent en tête. */
+export interface TapePrint {
+  ts: number
+  price: number
+  size: number
+  side: 'BUY' | 'SELL'
+  seq: number
+}
+
 export interface S1State {
   svs_score: MetaField<number>
   order_flow: OrderFlow
   structure: Structure
   chop: MetaField<number>
   order_book: MetaField<OrderBookValue>
+  tape: MetaField<TapePrint[]>
   strategies: S1Strategies | null
 }
 

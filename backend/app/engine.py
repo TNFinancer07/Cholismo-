@@ -44,6 +44,7 @@ FIELD_SPEC: dict[str, tuple[str, float, float]] = {
     "vpoc": ("sierra_chart", *_FAST), "vah": ("sierra_chart", *_FAST),
     "val": ("sierra_chart", *_FAST), "lvn": ("sierra_chart", *_FAST),
     "chop": ("sierra_chart", *_FAST), "order_book": ("sierra_chart", *_FAST),
+    "tape": ("sierra_chart", *_FAST),
     "vix": ("cboe", *_FAST), "vvix": ("cboe", *_FAST),
     "eurusd": ("fx_feed", *_SLOW), "dx": ("fx_feed", *_SLOW), "dxy": ("fx_feed", *_FAST),
     "dxy_alt": ("cme", *_FAST),
@@ -60,7 +61,34 @@ FIELD_SPEC: dict[str, tuple[str, float, float]] = {
 DXY_CONTRADICTION_TOLERANCE = 0.5  # cross-source divergence threshold (D-012)
 
 
-BOOK_DEPTH = 10  # displayed levels per side (D-025)
+BOOK_DEPTH = 10   # displayed levels per side (D-025)
+TAPE_WINDOW = 40  # displayed prints, most recent first (D-026)
+
+
+def _validate_tape(meta: MetaField) -> None:
+    """Deterministic Time & Sales normalization (D-026). Each print must have a finite
+    positive price/size and a valid side; bad prints are DROPPED (garbage is not data,
+    §3). No usable print left -> value WITHHELD (ABSENT + MALFORMED). Valid prints are
+    sorted most-recent-first (by seq) and capped to TAPE_WINDOW."""
+    if meta.value is None:
+        return
+    clean: list[dict] = []
+    try:
+        for p in meta.value:
+            price, size = float(p["price"]), float(p["size"])
+            if (math.isfinite(price) and math.isfinite(size) and price > 0 and size > 0
+                    and p["side"] in ("BUY", "SELL")):
+                clean.append({"ts": p.get("ts"), "price": price, "size": size,
+                              "side": p["side"], "seq": int(p["seq"])})
+    except (TypeError, ValueError, KeyError):
+        clean = []
+    if not clean:
+        meta.value = None
+        meta.freshness = Freshness.ABSENT
+        meta.flags.append("MALFORMED")
+        return
+    clean.sort(key=lambda p: p["seq"], reverse=True)
+    meta.value = clean[:TAPE_WINDOW]
 
 
 def _validate_order_book(meta: MetaField) -> None:
@@ -215,6 +243,8 @@ class Engine:
         # s1_state
         order_book = await self._meta("order_book", raws, now)
         _validate_order_book(order_book)
+        tape = await self._meta("tape", raws, now)
+        _validate_tape(tape)
         s1 = S1State(
             svs_score=await self._meta("svs_score", raws, now),
             order_flow=OrderFlow(
@@ -228,6 +258,7 @@ class Engine:
                 lvn=await self._meta("lvn", raws, now)),
             chop=await self._meta("chop", raws, now),
             order_book=order_book,
+            tape=tape,
         )
         self.schema.s1_state = s1
 
