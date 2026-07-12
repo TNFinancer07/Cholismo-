@@ -6,7 +6,9 @@
  *  carrés pleins (forme) + texte T1/T2/T3 + libellé (§3). Fenêtre news T1 ±30 min
  *  SIGNALÉE (filtre Sony, AUTORITÉ) — factuelle, PAS un verdict Phase 0 (l'UI ne prononce
  *  jamais OUVERT/BLOQUÉ ici, §2.2). Fail-closed : périmé = grisé + âge ; absent = PAS DE
- *  DONNÉES ; jamais un événement inventé. */
+ *  DONNÉES ; canal lent muet = bannière « flux muet » (sans elle, un backend mort
+ *  laisserait des countdowns décroître sur un panneau FRESH — stale ANIMÉ, /devil) ;
+ *  jamais un événement inventé. */
 import { cn } from '@/lib/utils'
 import { fmtAge } from '@/lib/format'
 import { serverNow, useTerminal } from '@/store/terminal'
@@ -60,6 +62,13 @@ export function EconCalendarPanel() {
   const now = useTerminal(serverNow)      // temps serveur estimé → countdown live précis
   const age = useDataAge(meta)
   const stale = meta?.freshness === 'STALE'
+  // Canal LENT muet (> ~2,5 ticks de 15 s) : sans ce garde, un backend mort laisserait un
+  // panneau FRESH aux countdowns qui décroissent — du stale ANIMÉ, pire que du stale
+  // (trouvé par /devil). Les countdowns restent affichés (le ts programmé reste vrai) ;
+  // c'est la LISTE qui devient suspecte (ajouts/annulations invisibles) → bannière + grisé.
+  const channelMute = useTerminal((s) =>
+    s.lastSlowEventAt === 0 || s.nowTick - s.lastSlowEventAt > 40)
+  const degraded = stale || channelMute
   // « Événements PRÉVUS » : à venir + passé récent encore dans la fenêtre ±30 min (le
   // blackout T1 est symétrique) ; le passé lointain (hors fenêtre) est masqué, pas
   // pertinent pour la liquidité. Tri chronologique déjà fait côté moteur.
@@ -78,8 +87,12 @@ export function EconCalendarPanel() {
           <span className="absent-pulse font-mono text-xs font-bold text-absent">PAS DE DONNÉES</span>
         </div>
       ) : (
-        <div className={cn('flex min-h-0 flex-col', stale && 'opacity-60')}>
-          {stale && (
+        <div className={cn('flex min-h-0 flex-col', degraded && 'opacity-60')}>
+          {channelMute ? (
+            <p className="mb-1 border border-absent/60 px-1 py-0.5 text-center font-mono text-xxs uppercase text-absent">
+              flux muet — planning possiblement obsolète, dernière image {fmtAge(age)}
+            </p>
+          ) : stale && (
             <p className="mb-1 border border-stale/50 px-1 py-0.5 text-center font-mono text-xxs uppercase text-stale">
               calendrier périmé {fmtAge(age)} — dernière image connue
             </p>

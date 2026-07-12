@@ -129,3 +129,78 @@ def test_malformed_events_dropped_and_empty_withheld():
         finally:
             await state.close()
     _run(scenario())
+
+
+# ---------- /devil — désync, planning passé, rafale simultanée (Loop 4) ----------
+
+def test_far_past_events_never_starve_upcoming_ones():
+    """20 événements passés lointains + 3 à venir (dont un T1) → les à-venir SURVIVENT
+    au cap CAL_WINDOW. Un cap naïf « 12 plus anciens » cacherait un NFP imminent."""
+    async def scenario():
+        state = RedisState()
+        engine = Engine(MockDataSource(), state)
+        try:
+            now = time.time()
+            past = [{"ts": now - 7200 - i * 60, "name": f"Ancien {i}", "tier": 3,
+                     "region": "US"} for i in range(20)]
+            upcoming = [
+                {"ts": now + 600, "name": "NFP — emplois US", "tier": 1, "region": "US"},
+                {"ts": now + 1200, "name": "Fed", "tier": 1, "region": "US"},
+                {"ts": now + 1800, "name": "EIA", "tier": 3, "region": "US"},
+            ]
+            await state.write_raw("econ_calendar", past + upcoming, "econ_feed", ts=now)
+            await engine._assemble_slow(now)
+            cal = engine.schema.econ_calendar.events
+            assert cal.freshness == Freshness.FRESH
+            names = [e["name"] for e in cal.value]
+            assert "NFP — emplois US" in names, f"le T1 imminent a été jeté : {names}"
+            assert {"Fed", "EIA"} <= set(names), f"les à-venir ont été jetés : {names}"
+        finally:
+            await state.close()
+    _run(scenario())
+
+
+def test_fully_elapsed_schedule_is_empty_fresh_not_malformed():
+    """Planning entièrement passé (au-delà de la grâce ±30 min) → FRESH + liste VIDE
+    (« aucun événement dans la fenêtre »), PAS un faux PAS DE DONNÉES : le feed vit,
+    il n'a juste rien de pertinent. MALFORMED reste réservé aux données pourries."""
+    async def scenario():
+        state = RedisState()
+        engine = Engine(MockDataSource(), state)
+        try:
+            now = time.time()
+            await state.write_raw("econ_calendar", [
+                {"ts": now - 7200, "name": "Vieux 1", "tier": 2, "region": "EU"},
+                {"ts": now - 3600, "name": "Vieux 2", "tier": 1, "region": "US"},
+            ], "econ_feed", ts=now)
+            await engine._assemble_slow(now)
+            cal = engine.schema.econ_calendar.events
+            assert cal.freshness == Freshness.FRESH
+            assert cal.value == [], f"attendu liste vide, reçu : {cal.value}"
+            assert "MALFORMED" not in cal.flags
+        finally:
+            await state.close()
+    _run(scenario())
+
+
+def test_simultaneous_burst_is_deduped_bounded_with_unique_keys():
+    """Rafale : 30 publications DISTINCTES à la même seconde + doublons exacts →
+    doublons fusionnés, distinctes conservées jusqu'au cap, clés (ts,name,region) uniques."""
+    async def scenario():
+        state = RedisState()
+        engine = Engine(MockDataSource(), state)
+        try:
+            now = time.time()
+            burst = [{"ts": now + 900, "name": f"Publication {i}", "tier": 1 + i % 3,
+                      "region": "US"} for i in range(30)]
+            burst += burst[:5]   # doublons exacts (feed qui bégaie)
+            await state.write_raw("econ_calendar", burst, "econ_feed", ts=now)
+            await engine._assemble_slow(now)
+            cal = engine.schema.econ_calendar.events
+            assert cal.freshness == Freshness.FRESH
+            assert len(cal.value) == CAL_WINDOW                     # borné
+            keys = [(e["ts"], e["name"], e["region"]) for e in cal.value]
+            assert len(keys) == len(set(keys)), "clés React dupliquées"
+        finally:
+            await state.close()
+    _run(scenario())

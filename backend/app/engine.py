@@ -66,7 +66,8 @@ DXY_CONTRADICTION_TOLERANCE = 0.5  # cross-source divergence threshold (D-012)
 
 BOOK_DEPTH = 10   # displayed levels per side (D-025)
 TAPE_WINDOW = 40  # displayed prints, most recent first (D-026)
-CAL_WINDOW = 12   # displayed scheduled events, soonest first (D-027)
+CAL_WINDOW = 12         # displayed scheduled events, soonest first (D-027)
+CAL_PAST_GRACE = 30 * 60  # keep recent past (symmetric T1 blackout window); older dropped
 
 
 def _validate_tape(meta: MetaField) -> None:
@@ -144,17 +145,22 @@ def _validate_order_book(meta: MetaField) -> None:
         meta.flags.append("CROSSED_BOOK")
 
 
-def _validate_econ_calendar(meta: MetaField) -> None:
-    """Deterministic economic-calendar normalization (D-027).
+def _validate_econ_calendar(meta: MetaField, now: float) -> None:
+    """Deterministic economic-calendar normalization (D-027, hardened by /devil).
 
     PER-EVENT robustness (Tape /devil lesson carried forward): each event is validated
     alone — a FINITE scheduled `ts`, a `tier` in {1,2,3}, a non-empty `name`; a broken
     event (missing key, non-numeric ts, bad tier) is DROPPED ALONE, never discards the
     calendar (garbage is not data, §3). Events are DEDUPED by (ts, name, region) so React
-    keys stay unique. Sorted CHRONOLOGICALLY (soonest first — it is a schedule) and bounded
-    to CAL_WINDOW. No usable event left -> value WITHHELD (ABSENT + MALFORMED). The `ts`
-    is a KNOWN scheduled time, so the client countdown is honest & precise (contrast the
-    B2 GEX unknown-expiry case, §8.2). Observed/announced events, never an order (§2.1)."""
+    keys stay unique. The far past (beyond CAL_PAST_GRACE, the symmetric T1 blackout) is
+    dropped BEFORE the cap — a naive "CAL_WINDOW oldest" cap would let elapsed events
+    starve an imminent Tier-1 out of the window (found by /devil). Then sorted
+    CHRONOLOGICALLY (soonest first — it is a schedule) and bounded to CAL_WINDOW.
+    Two DISTINCT empty outcomes, kept honest: no VALID event at all -> value WITHHELD
+    (ABSENT + MALFORMED, the feed is garbage); valid events but all elapsed -> value []
+    kept FRESH (the feed lives, nothing relevant — the panel says so, no fake outage).
+    The `ts` is a KNOWN scheduled time, so the client countdown is honest & precise
+    (contrast the B2 GEX unknown-expiry case, §8.2). Never an order (§2.1)."""
     if meta.value is None:
         return
     if not isinstance(meta.value, list):
@@ -179,7 +185,8 @@ def _validate_econ_calendar(meta: MetaField) -> None:
         meta.freshness = Freshness.ABSENT
         meta.flags.append("MALFORMED")
         return
-    meta.value = sorted(by_key.values(), key=lambda e: e["ts"])[:CAL_WINDOW]
+    relevant = [e for e in by_key.values() if e["ts"] > now - CAL_PAST_GRACE]
+    meta.value = sorted(relevant, key=lambda e: e["ts"])[:CAL_WINDOW]
 
 
 class Engine:
@@ -442,7 +449,7 @@ class Engine:
         self.schema.s2_state = S2State(cascade=cascade, bridgewater_matrix=matrix_meta,
                                        s2_macro_score=macro, pipeline=pipeline)
         econ = await self._meta("econ_calendar", raws, now)
-        _validate_econ_calendar(econ)
+        _validate_econ_calendar(econ, now)
         self.schema.econ_calendar = EconCalendar(events=econ)
         dump = self.schema.model_dump(mode="json")
         broadcaster.publish("slow", "s2_state", dump["s2_state"])

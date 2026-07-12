@@ -314,6 +314,42 @@ Nouveau bloc du schéma + panneau. Hypothèses (Loop 1 étape 1) :
   Layouts localStorage bumpés v4 (EC dans DÉFAUT, MICRO, MACRO).
 - **Aucun chemin d'exécution** (§2.1) : événements OBSERVÉS/annoncés, rien à décider ici.
 
+**Durcissement /devil (Loop 4)** — 3 attaques demandées, 4 failles réelles trouvées, toutes
+corrigées (tests dans `test_econ_calendar.py`, E2E 8/8) :
+1. **Désync d'horloge client** (E2E : `Date.now` skewé **+2 h** avant boot) → la correction
+   `clockOffset` (re-dérivée à chaque event `session_identity`, sub-seconde) tient : les
+   countdowns restent sains, pas de faux « tout passé ». Géré par conception ; quand le
+   canal est mort, c'est la bannière muette (2.) qui couvre.
+2. **Stale ANIMÉ** : le panneau n'avait AUCUNE détection de canal lent muet — backend mort
+   = countdowns qui continuent de décroître sur un panneau à l'air FRESH (pire que du
+   stale : du périmé qui bouge). Corrigé : bannière « flux muet — planning possiblement
+   obsolète » (seuil 40 s ≈ 2,5 ticks lents) + grisage. Les countdowns CONTINUENT
+   volontairement : le `ts` programmé reste vrai ; c'est la LISTE (ajouts/annulations)
+   qui devient suspecte — c'est ce que dit la bannière.
+3. **Famine du cap par le passé** : `sorted[:CAL_WINDOW]` gardait les 12 plus ANCIENS —
+   20 événements écoulés pouvaient évincer un NFP T1 imminent pendant que le client
+   affichait « aucun événement » (fail-silent dangereux). Corrigé : `CAL_PAST_GRACE`
+   (±30 min, la fenêtre blackout symétrique) appliquée AVANT tri+cap ; et distinction
+   honnête entre deux vides — feed pourri ⇒ ABSENT + `MALFORMED` ; feed vivant sans rien
+   de pertinent ⇒ FRESH + liste vide (« aucun événement dans la fenêtre », pas une fausse
+   panne). Le filtre client ±30 min reste en défense-en-profondeur (grâce serveur à
+   cadence 15 s, sortie de fenêtre à la seconde côté client).
+4. **Reconnexion SSE inexistante (SYSTÉMIQUE, tout le terminal)** : `connectSSE` créait les
+   `EventSource` une fois, sans retry. Deux pannes distinctes prouvées au débogueur réseau :
+   (a) réponse non-200 du proxy (backend mort) → la spec HTML ferme DÉFINITIVEMENT, zéro
+   retry natif ; (b) pire : connexion PENDUE silencieusement par le proxy quand l'upstream
+   meurt en cours de stream — aucun `onerror`, jamais (les pings sse-starlette sont des
+   commentaires invisibles côté JS). Tout redémarrage du backend laissait donc le terminal
+   muet jusqu'au reload manuel. Corrigé dans `lib/sse.ts` : `resilientSource` (retry 4 s
+   sur erreur) + **watchdog de vivacité** (pattern `RUNTIME_LOOPS` : canal déjà productif
+   silencieux > 10 s fast / > 45 s slow ⇒ recycler la source ; un backend encore mort
+   bascule alors sur la boucle d'erreur). Prouvé E2E : kill réel du backend → bannières
+   muettes honnêtes → relance → flux repris sans reload (~3 s fast, ~5 s slow après retour).
+- **Rafale simultanée** (data dump 8h30 : 30 publications distinctes à la même seconde +
+  doublons) : dédup `(ts, name, region)`, cap `CAL_WINDOW`, clés React uniques — passait
+  déjà, figé par test. Tous les événements du même `ts` sont surlignés « prochain »
+  ensemble (comportement voulu : ils SONT tous imminents).
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.
