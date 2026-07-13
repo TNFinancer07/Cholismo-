@@ -350,6 +350,43 @@ corrigées (tests dans `test_econ_calendar.py`, E2E 8/8) :
   déjà, figé par test. Tous les événements du même `ts` sont surlignés « prochain »
   ensemble (comportement voulu : ils SONT tous imminents).
 
+## D-028 · Architecture LangGraph — détection Liquidity Sweep (`app/graph/liquidity_sweep.py`)
+Initialisation de la couche graph-state (CLAUDE §4, priorité « en dernier » §10, demandée par
+l'opérateur). Hypothèses (Loop 1 étape 1) :
+- **LangGraph installé** (`langgraph>=1.2,<2`, requirements.txt) — cohérent stack §4, Loop 0
+  résolu. Rétrograde `websockets` 16→15 (contrainte langgraph-sdk) : deps serveur + suite
+  existante revérifiées vertes (42 tests).
+- **Détection STRICTEMENT DÉTERMINISTE** — le graphe *orchestre* (nœuds `detect`→`emit`,
+  arête conditionnelle), la *décision* est du code à seuils booléens. AUCUN LLM dans le
+  chemin (« sans hallucination », §2.8/§7) : reproductible bit-à-bit (test dédié). C'est
+  l'interprétation cardinale de la demande — un LLM qui « devine » un sweep serait une
+  violation directe.
+- **GraphState** : `delta_volume` (imbalance agresseur nette sur la fenêtre tape),
+  `spread_width` (ticks = (best_ask−best_bid)/0.25), `best_bid_ask_depth` (tailles aux
+  meilleurs niveaux) + contexte (`tape_burst`, `news_t1_imminent`, `data_ok`) + sorties.
+- **Déclencheur** = `(tape_burst OU spread_width > 2) ET news_t1_imminent`. Le couplage ET
+  est le cœur : anomalie microstructure seule ≠ sweep, news seule ≠ sweep. Seuils v1
+  provisional (`SPREAD_TICKS_THRESHOLD=2`, `BURST_COUNT_THRESHOLD=8`/2 s, `NEWS_T1=±30 min`)
+  isolés en tête de module, calibration owner Sony (§8/§12). Bien calibrés vs mock : spread
+  normal 2 ticks (ignoré), pathologie « spread élargi » 4 ticks (déclenche).
+- **Câblage réel** (`build_sweep_inputs`) : lit `s1_state.order_book`, `s1_state.tape`,
+  `econ_calendar.events` (le bloc D-027) — FAIL-CLOSED sur la fraîcheur : seules les données
+  FRESH sont exploitées, STALE/ABSENT ⇒ `None`, jamais inventé (§3).
+- **Deux vides honnêtes** (anti-hallucination) : `data_ok=True, triggered=False` = « pas de
+  sweep » prouvé ; `data_ok=False` = « impossible à évaluer » (micro OU news non
+  disponible). Un détecteur ne confond jamais « tout va bien » et « je ne sais pas ». Test :
+  données partielles alléchantes (burst+news vrais) mais `data_ok=False` ⇒ AUCUNE alerte.
+- **Checkpointing §4** : `build_graph(checkpointer=…)` accepte un saver (MemorySaver en test,
+  SqliteSaver en prod) → architecture checkpoint-ready ; le détecteur `SWEEP_GRAPH` reste
+  SANS état (chaque appel indépendant, idéal reproductibilité).
+- **N'émet qu'une ALERTE** (événement observé), jamais un ordre (§2.1).
+- **Hors-scope de cette tranche (incréments suivants, une feature par commit)** : câblage
+  périodique dans le moteur (le graphe est déterministe donc *éligible* < 200 ms §7, mais le
+  câblage moteur + champ schéma `liquidity_sweep` + panneau restent à faire) ; SqliteSaver ;
+  robustesse par-print de `delta_volume` (lit un `s1_state.tape` déjà validé D-026, mais un
+  /devil durcira). Essai manuel réel concluant sur schéma d'un VRAI moteur (extraction live,
+  alerte déterministe, reproductible).
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.
