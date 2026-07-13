@@ -78,7 +78,7 @@ function useStaticCommands(): Command[] {
       focus('C', 'zone C — discipline'), focus('D', 'zone D — decision log'),
       panel('A1', 'A'), panel('A2', 'A'), panel('A3', 'A'), panel('EC', 'A'),
       panel('B1', 'B'), panel('B2', 'B'), panel('B3', 'B'), panel('B4', 'B'),
-      panel('OB', 'B'), panel('TP', 'B'), panel('IA', 'B'),
+      panel('OB', 'B'), panel('TP', 'B'), panel('CVD', 'B'), panel('IA', 'B'),
       panel('C1', 'C'), panel('C2', 'C'), panel('C4', 'C'),
       mode('LIVE', 'LIVE'), mode('PRE', 'PRE_SESSION', ['PRESESSION']),
       mode('POST', 'POST_SESSION', ['POSTSESSION']),

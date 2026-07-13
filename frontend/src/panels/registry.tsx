@@ -15,6 +15,7 @@ import { S1S2Panel } from '@/panels/zoneB/S1S2Panel'
 import { OrderBookPanel } from '@/panels/zoneB/OrderBookPanel'
 import { TapePanel } from '@/panels/zoneB/TapePanel'
 import { AiAlertsPanel } from '@/panels/zoneB/AiAlertsPanel'
+import { FootprintPanel } from '@/panels/zoneB/FootprintPanel'
 import { BridgePanel } from '@/panels/zoneB/BridgePanel'
 import { SyncPanel } from '@/panels/zoneB/SyncPanel'
 import { UnifiedSignalPanel } from '@/panels/zoneB/UnifiedSignalPanel'
@@ -41,6 +42,7 @@ export const PANEL_REGISTRY: Record<PanelId, PanelDef> = {
   OB: { id: 'OB', label: "Carnet d'ordres ES", component: OrderBookPanel },
   TP: { id: 'TP', label: 'Tape · Time & Sales', component: TapePanel },
   IA: { id: 'IA', label: 'Alertes IA · Sweep', component: AiAlertsPanel },
+  CVD: { id: 'CVD', label: 'CVD Footprint', component: FootprintPanel },
   B2: { id: 'B2', label: 'Bridge variables', component: BridgePanel },
   B3: { id: 'B3', label: 'Sync S1↔S2', component: SyncPanel },
   B4: { id: 'B4', label: 'Signal unifié', component: UnifiedSignalPanel },

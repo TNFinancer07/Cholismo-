@@ -481,10 +481,23 @@ Nouveau bloc du schéma + accumulation SUR LE HOT PATH. Hypothèses (Loop 1 éta
 - **Bornes** : `CVD_MAX_TRACKED=512` prix suivis (garde-fou coût de tri) ; `CVD_MAX_LEVELS=24`
   affichés (les plus actifs par volume, puis triés par prix). `total_delta` est le net COMPLET
   (tous niveaux), pas seulement les 24 affichés — cohérent, à signaler dans un futur panneau.
-- **Hors-scope de cette tranche** (une feature par commit) : panneau footprint frontend (le
-  champ `s1_state.cvd_by_level` est publié sur le canal rapide + miroir TS `CvdState` prêt) ;
-  câblage du reset sur d'autres événements (ouverture de session, marqueur) ; consommation du
-  flux de trades complet. Essai manuel réel concluant sur schéma d'un VRAI moteur.
+- **Hors-scope de cette tranche** (une feature par commit) : ~~panneau footprint frontend~~
+  (LIVRÉ, voir plus bas) ; câblage du reset sur d'autres événements (ouverture de session,
+  marqueur) ; consommation du flux de trades complet. Essai manuel réel concluant sur schéma
+  d'un VRAI moteur.
+
+**Panneau CVD Footprint** (feature séparée, incrément suivant) : `FootprintPanel` lit UN champ
+(`s1_state.cvd_by_level`, §1). Vue compacte « Prix | Delta » — échelle par prix DÉCROISSANT
+(façon DOM), heatmap THERMIQUE vert (acheteur) / rouge (vendeur), intensité ∝ |delta| relatif ;
+mais JAMAIS la couleur seule : le delta SIGNÉ est incrusté dans chaque cellule (§3, lisible
+sans percevoir la couleur — idiome repris de `BridgewaterMatrix`). Résumé « net cumulé Δ » +
+régime (`reset_reason`/`since_ts`). États fail-closed HONNÊTES : `stale` → « figé » grisé,
+`capped` → « suivi saturé », pas de niveau → PAS DE DONNÉES. Temps réel via sélecteur zustand
+ISOLÉ (`s => s.s1_state?.cvd_by_level`) : ne re-rend que ce panneau, rendu global non bloqué ;
+coût O(≤24) par rendu. Espaces localStorage bumpés v6 (CVD dans MICRO). Vérifié : tsc · vite
+build ; E2E réel 13/13 (échelle peuplée, deltas signés, cellules thermiques, temps réel,
+resize scopé, zéro clé dupliquée) — capture docs/cvd-footprint.png. Flux OBSERVÉ, jamais un
+ordre (§2.1).
 
 **Durcissement /devil (Loop 4)** — 4 attaques, 2 failles réelles corrigées (tests, 11 verts) :
 1. **RÉGRESSION de seq** (redémarrage source, seq repart bas) : le garde `seq <= last_seq`
