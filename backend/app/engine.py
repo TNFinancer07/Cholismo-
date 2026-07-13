@@ -28,9 +28,9 @@ from .meta import Freshness, MetaField, make_meta
 from .phase0 import Phase0Input, evaluate_phase0
 from .projections import loss_streak
 from .redis_state import RedisState
-from .schema import (BridgeVariables, Cascade, ContextSchema, Decision, DecisionWindow,
-                     EconCalendar, LiquiditySweep, LiquiditySweepAlert, MasterState,
-                     OperationalMode, OrderFlow, Phase0State, S1State, S2State,
+from .schema import (BridgeVariables, Cascade, ContextSchema, CvdLevel, CvdState, Decision,
+                     DecisionWindow, EconCalendar, LiquiditySweep, LiquiditySweepAlert,
+                     MasterState, OperationalMode, OrderFlow, Phase0State, S1State, S2State,
                      SessionIdentity, SessionMarker, Structure, SyncState, SyncVerdict)
 from .scoring import compute_unified_signal
 from .sse import broadcaster
@@ -70,6 +70,8 @@ BOOK_DEPTH = 10   # displayed levels per side (D-025)
 TAPE_WINDOW = 40  # displayed prints, most recent first (D-026)
 CAL_WINDOW = 12         # displayed scheduled events, soonest first (D-027)
 CAL_PAST_GRACE = 30 * 60  # keep recent past (symmetric T1 blackout window); older dropped
+CVD_MAX_LEVELS = 24     # displayed price levels (most active), sorted by price (D-029)
+CVD_MAX_TRACKED = 512   # accumulator soft cap — bounds hot-path sort cost (D-029)
 
 
 def _validate_tape(meta: MetaField) -> None:
@@ -201,6 +203,14 @@ class Engine:
         # Détecteur Sweep (D-028) : feed court + clé du dernier événement (anti-inondation).
         self._sweep_recent: deque = deque(maxlen=config.SWEEP_RECENT_MAX)
         self._sweep_last_key: Optional[str] = None
+        # CVD par niveau (D-029) : accumulateur prix -> [buy, sell], seq déjà traité,
+        # clé de l'événement du dernier reset, bornes de la fenêtre courante.
+        self._cvd_levels: dict[float, list[float]] = {}
+        self._cvd_last_seq: int = 0
+        self._cvd_reset_key: Optional[str] = None
+        self._cvd_reset_ts: Optional[float] = None
+        self._cvd_reset_reason: str = ""
+        self._cvd_since_ts: Optional[float] = None
         self._regime_tier = "GREEN"  # D4 hysteresis state (reference/youssef/01)
 
     # ---------- assembly helpers ----------
@@ -297,6 +307,64 @@ class Engine:
         broadcaster.publish("fast", "decision_log_dirty", {"ts": now})
         log.info("C3 expired -> auto NO_GO (timeout)")
 
+    def _build_cvd(self, tape: MetaField, now: float) -> CvdState:
+        """CVD PAR NIVEAU accumulé sur le HOT PATH (déterministe, < 200 ms §7, D-029).
+
+        Reset ÉVÉNEMENTIEL : dès qu'un événement Tier-1 d'`econ_calendar` franchit `now`
+        (`now >= ts`) et diffère de celui du dernier reset, l'accumulateur repart à zéro →
+        profil de delta frais par régime de news. Puis les prints NEUFS du tape (seq > dernier
+        traité) ajoutent leur delta agresseur par prix ; `seq` (id d'ajout de la source)
+        empêche tout double comptage entre ticks. Tape non FRESH → accumulation GELÉE +
+        `stale=True` (jamais un niveau inventé, §3). Borné à `CVD_MAX_TRACKED` prix (coût de
+        tri) et `CVD_MAX_LEVELS` affichés (les plus actifs). Ordre OBSERVÉ, jamais un ordre
+        (§2.1)."""
+        if self._cvd_since_ts is None:
+            self._cvd_since_ts = now
+
+        # --- reset événementiel lié à econ_calendar ---
+        cal = self.schema.econ_calendar.events
+        if cal.freshness == Freshness.FRESH and isinstance(cal.value, list):
+            crossed = [e for e in cal.value if e.get("tier") == 1
+                       and isinstance(e.get("ts"), (int, float)) and e["ts"] <= now]
+            if crossed:
+                latest = max(crossed, key=lambda e: e["ts"])
+                key = f"{latest['ts']}|{latest.get('name', '')}"
+                if key != self._cvd_reset_key:
+                    self._cvd_levels.clear()
+                    self._cvd_reset_key = key
+                    self._cvd_reset_ts = now
+                    self._cvd_reset_reason = str(latest.get("name", ""))
+                    self._cvd_since_ts = now
+
+        # --- accumulation des prints NEUFS (seq > dernier traité), tape déjà validé (D-026) ---
+        stale = tape.freshness != Freshness.FRESH
+        if not stale and isinstance(tape.value, list):
+            max_seq = self._cvd_last_seq
+            for p in tape.value:
+                seq = p.get("seq")
+                if not isinstance(seq, int) or seq <= self._cvd_last_seq:
+                    continue
+                price, size, side = p["price"], p["size"], p["side"]
+                lvl = self._cvd_levels.get(price)
+                if lvl is None:
+                    if len(self._cvd_levels) >= CVD_MAX_TRACKED:
+                        max_seq = max(max_seq, seq)
+                        continue   # soft cap : pas de nouveau niveau suivi (garde-fou perf)
+                    lvl = self._cvd_levels[price] = [0.0, 0.0]
+                lvl[0 if side == "BUY" else 1] += size
+                max_seq = max(max_seq, seq)
+            self._cvd_last_seq = max_seq
+
+        # --- projection : bornée aux plus actifs, triée par prix ---
+        items = list(self._cvd_levels.items())
+        total = sum(b - s for _, (b, s) in items)
+        top = heapq.nlargest(CVD_MAX_LEVELS, items, key=lambda kv: kv[1][0] + kv[1][1])
+        levels = [CvdLevel(price=pr, buy=b, sell=s, delta=b - s)
+                  for pr, (b, s) in sorted(top, key=lambda kv: kv[0])]
+        return CvdState(levels=levels, total_delta=total, since_ts=self._cvd_since_ts,
+                        last_reset_ts=self._cvd_reset_ts, reset_reason=self._cvd_reset_reason,
+                        stale=stale)
+
     # ---------- loops ----------
 
     async def _assemble_fast(self, now: float) -> None:
@@ -321,6 +389,7 @@ class Engine:
                 vah=await self._meta("vah", raws, now),
                 val=await self._meta("val", raws, now),
                 lvn=await self._meta("lvn", raws, now)),
+            cvd_by_level=self._build_cvd(tape, now),  # accumulation par niveau, hot path (D-029)
             chop=await self._meta("chop", raws, now),
             order_book=order_book,
             tape=tape,

@@ -107,10 +107,32 @@ class S1Strategies(BaseModel):
     mean_reversion: ExecutionStrategy
 
 
+class CvdLevel(BaseModel):
+    """Delta agresseur net accumulé à un niveau de prix (D-029)."""
+    price: float
+    delta: float    # buy − sell (net) depuis le dernier reset
+    buy: float
+    sell: float
+
+
+class CvdState(BaseModel):
+    """CVD PAR NIVEAU avec réinitialisation événementielle (D-029). Accumulé sur le HOT PATH
+    (déterministe, < 200 ms §7) à partir des prints OBSERVÉS du tape — jamais un ordre (§2.1).
+    Reset lié aux événements Tier-1 d'`econ_calendar` : profil de delta frais par régime de
+    news. `stale=True` quand le tape n'est plus FRESH → accumulation gelée, honnête (§3)."""
+    levels: list[CvdLevel] = Field(default_factory=list)  # bornés, triés par prix
+    total_delta: float = 0.0
+    since_ts: Optional[float] = None       # début de la fenêtre d'accumulation courante
+    last_reset_ts: Optional[float] = None  # dernier reset ÉVÉNEMENTIEL (None si jamais)
+    reset_reason: str = ""                 # libellé de l'événement déclencheur
+    stale: bool = False
+
+
 class S1State(BaseModel):
     svs_score: MetaField = Field(default_factory=MetaField)
     order_flow: OrderFlow = Field(default_factory=OrderFlow)
     structure: Structure = Field(default_factory=Structure)
+    cvd_by_level: CvdState = Field(default_factory=CvdState)
     chop: MetaField = Field(default_factory=MetaField)
     # DOM ES 10 niveaux (D-025) — value: {"bids": [[price, size]…], "asks": [[price, size]…]},
     # bids décroissants / asks croissants. Affichage lecture seule, PAS critique Phase 0 en v1.

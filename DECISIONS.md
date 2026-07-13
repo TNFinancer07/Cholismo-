@@ -457,6 +457,35 @@ robuste par conception (tests, 55 verts) :
   3 relances (55 verts) ni en isolation. Fragilité d'isolation Redis des tests intégration —
   concern séparé, ne touche pas le détecteur Sweep.
 
+## D-029 · CVD par niveau + réinitialisation événementielle (`s1_state.cvd_by_level`)
+Nouveau bloc du schéma + accumulation SUR LE HOT PATH. Hypothèses (Loop 1 étape 1) :
+- **CVD par niveau** : au lieu d'un CVD scalaire cumulé (`order_flow.cvd`), on accumule le
+  delta agresseur (buy − sell) PAR NIVEAU de prix → profil de footprint. `CvdState` porte
+  `levels` (bornés, triés par prix), `total_delta`, `since_ts`, `last_reset_ts`,
+  `reset_reason`, `stale`. Ordre OBSERVÉ, jamais un ordre (§2.1).
+- **Sur le HOT PATH** (§7) : accumulation déterministe dans `_assemble_fast` (pas d'async —
+  contrairement au Sweep D-028, c'est du calcul pur et cheap). Garde-fou perf MESURÉ :
+  `_build_cvd` ≈ **0,05 ms/tick** (marge ×4000 sous 200 ms) ; `_assemble_fast` COMPLET ≈
+  2,4 ms/tick. Test dédié asserte < 200 ms (et < 10 ms).
+- **Alimentation par les prints NEUFS** : `seq` (id d'ajout monotone de la source) évite le
+  double comptage entre ticks — on traite les prints `seq > dernier traité`. PLACEHOLDER : le
+  vrai CVD consommerait le FLUX de trades complet ; ici on lit le tape (fenêtre glissante 40,
+  D-026) — une rafale > 40 prints ENTRE deux ticks perdrait des prints (le mock émet 1-4/tick,
+  large marge). À revoir avec un vrai feed.
+- **RÉINITIALISATION événementielle liée à `econ_calendar`** : dès qu'un événement Tier-1
+  franchit `now` (`now >= ts`) et diffère du dernier reset (clé `ts|name`), l'accumulateur
+  repart à zéro → profil frais par régime de news. Reset UNE fois par événement (clé trackée).
+  Calendrier absent → pas de reset (accumulation depuis le démarrage, honnête).
+- **Fail-closed** (§3) : tape non FRESH → accumulation GELÉE + `stale=True`, jamais un niveau
+  inventé ; le dernier profil connu est conservé (comme une image, pas une valeur fabriquée).
+- **Bornes** : `CVD_MAX_TRACKED=512` prix suivis (garde-fou coût de tri) ; `CVD_MAX_LEVELS=24`
+  affichés (les plus actifs par volume, puis triés par prix). `total_delta` est le net COMPLET
+  (tous niveaux), pas seulement les 24 affichés — cohérent, à signaler dans un futur panneau.
+- **Hors-scope de cette tranche** (une feature par commit) : panneau footprint frontend (le
+  champ `s1_state.cvd_by_level` est publié sur le canal rapide + miroir TS `CvdState` prêt) ;
+  câblage du reset sur d'autres événements (ouverture de session, marqueur) ; consommation du
+  flux de trades complet. Essai manuel réel concluant sur schéma d'un VRAI moteur.
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.

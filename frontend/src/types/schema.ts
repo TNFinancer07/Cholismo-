@@ -92,10 +92,28 @@ export interface TapePrint {
   seq: number
 }
 
+/** CVD par niveau (D-029) — delta agresseur net accumulé par prix, reset événementiel. */
+export interface CvdLevel {
+  price: number
+  delta: number   // buy − sell
+  buy: number
+  sell: number
+}
+
+export interface CvdState {
+  levels: CvdLevel[]          // bornés, triés par prix
+  total_delta: number
+  since_ts: number | null
+  last_reset_ts: number | null
+  reset_reason: string
+  stale: boolean
+}
+
 export interface S1State {
   svs_score: MetaField<number>
   order_flow: OrderFlow
   structure: Structure
+  cvd_by_level: CvdState
   chop: MetaField<number>
   order_book: MetaField<OrderBookValue>
   tape: MetaField<TapePrint[]>
