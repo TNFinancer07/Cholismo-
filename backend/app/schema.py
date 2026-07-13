@@ -125,7 +125,8 @@ class CvdState(BaseModel):
     since_ts: Optional[float] = None       # début de la fenêtre d'accumulation courante
     last_reset_ts: Optional[float] = None  # dernier reset ÉVÉNEMENTIEL (None si jamais)
     reset_reason: str = ""                 # libellé de l'événement déclencheur
-    stale: bool = False
+    stale: bool = False                    # tape non FRESH → accumulation gelée (§3)
+    capped: bool = False                   # accumulateur saturé (éviction active), honnête
 
 
 class S1State(BaseModel):

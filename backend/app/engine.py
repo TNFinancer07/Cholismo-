@@ -338,7 +338,15 @@ class Engine:
 
         # --- accumulation des prints NEUFS (seq > dernier traité), tape déjà validé (D-026) ---
         stale = tape.freshness != Freshness.FRESH
-        if not stale and isinstance(tape.value, list):
+        if not stale and isinstance(tape.value, list) and tape.value:
+            # Durci /devil : RÉGRESSION de seq (redémarrage source, seq repart bas) → le max
+            # de la fenêtre passe SOUS last_seq. Sans détection, le garde `seq <= last_seq`
+            # ignore tout print futur → GEL SILENCIEUX. On re-baseline (last_seq = 0) pour
+            # reprendre. Un simple traînard (max de fenêtre >= last_seq) n'est PAS une
+            # régression : il reste ignoré (déjà passé).
+            seqs = [p["seq"] for p in tape.value if isinstance(p.get("seq"), int)]
+            if seqs and max(seqs) < self._cvd_last_seq:
+                self._cvd_last_seq = 0
             max_seq = self._cvd_last_seq
             for p in tape.value:
                 seq = p.get("seq")
@@ -348,8 +356,11 @@ class Engine:
                 lvl = self._cvd_levels.get(price)
                 if lvl is None:
                     if len(self._cvd_levels) >= CVD_MAX_TRACKED:
-                        max_seq = max(max_seq, seq)
-                        continue   # soft cap : pas de nouveau niveau suivi (garde-fou perf)
+                        # Durci /devil : accumulateur plein → ÉVICTION du niveau le moins
+                        # actif (au lieu de bloquer les nouveaux) → garde les plus pertinents
+                        # près du marché, jamais un verrou silencieux des vrais niveaux.
+                        victim = min(self._cvd_levels, key=lambda pr: sum(self._cvd_levels[pr]))
+                        del self._cvd_levels[victim]
                     lvl = self._cvd_levels[price] = [0.0, 0.0]
                 lvl[0 if side == "BUY" else 1] += size
                 max_seq = max(max_seq, seq)
@@ -363,7 +374,7 @@ class Engine:
                   for pr, (b, s) in sorted(top, key=lambda kv: kv[0])]
         return CvdState(levels=levels, total_delta=total, since_ts=self._cvd_since_ts,
                         last_reset_ts=self._cvd_reset_ts, reset_reason=self._cvd_reset_reason,
-                        stale=stale)
+                        stale=stale, capped=len(self._cvd_levels) >= CVD_MAX_TRACKED)
 
     # ---------- loops ----------
 

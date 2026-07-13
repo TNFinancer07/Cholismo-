@@ -107,6 +107,7 @@ export interface CvdState {
   last_reset_ts: number | null
   reset_reason: string
   stale: boolean
+  capped: boolean
 }
 
 export interface S1State {

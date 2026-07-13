@@ -486,6 +486,22 @@ Nouveau bloc du schéma + accumulation SUR LE HOT PATH. Hypothèses (Loop 1 éta
   câblage du reset sur d'autres événements (ouverture de session, marqueur) ; consommation du
   flux de trades complet. Essai manuel réel concluant sur schéma d'un VRAI moteur.
 
+**Durcissement /devil (Loop 4)** — 4 attaques, 2 failles réelles corrigées (tests, 11 verts) :
+1. **RÉGRESSION de seq** (redémarrage source, seq repart bas) : le garde `seq <= last_seq`
+   ignorait alors TOUT print futur → GEL SILENCIEUX (tape FRESH mais accumulation morte, le
+   pire — pas signalé par `stale`). Corrigé : si le max de la fenêtre passe SOUS `last_seq`
+   (régression, pas un simple traînard) → re-baseline `last_seq = 0` et reprise. Un traînard
+   isolé (max de fenêtre ≥ last_seq) reste ignoré (déjà passé) — test dédié anti-re-baseline.
+2. **SATURATION du bouchon 512** : le soft-cap SAUTAIT tout nouveau niveau une fois plein →
+   les vrais niveaux près du marché étaient VERROUILLÉS dehors (silencieux). Corrigé :
+   ÉVICTION du niveau le moins actif à saturation (garde les plus pertinents) + flag `capped`
+   honnête. Perf sous saturation+éviction MESURÉE : ~0,20 ms/tick (marge ×1000 sous 200 ms).
+3. **PRIX ABERRANT** (+50 ticks) : géré par conception — tracké mais faible volume → hors du
+   top-24 affiché (cap par volume) ; `total_delta` le reflète (réel) ; aucun crash. Figé par test.
+4. **COURSE reset + prints même tick** : gérée par conception — ordre DÉTERMINISTE (reset
+   d'abord, puis accumulation) : les prints neufs comptent dans l'accumulateur FRAIS
+   (post-reset), jamais perdus. Figé par test.
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.
