@@ -21,6 +21,7 @@ périodique est l'incrément suivant.
 """
 from __future__ import annotations
 
+import math
 from typing import Optional, TypedDict
 
 from langgraph.checkpoint.base import BaseCheckpointSaver
@@ -70,9 +71,35 @@ class SweepGraphState(TypedDict, total=False):
     reason: str
 
 
-def _wide_spread(state: SweepGraphState) -> bool:
+def _finite(x) -> bool:
+    return isinstance(x, (int, float)) and math.isfinite(x)
+
+
+def _spread_anomaly(state: SweepGraphState) -> tuple[bool, Optional[str]]:
+    """(anomalie ?, label) — durci /devil. Un spread doit être FINI pour compter (inf/nan =
+    donnée corrompue → n'anomalise rien, fail-closed §3). Deux dislocations distinctes :
+    spread > 2 ticks = WIDE_SPREAD (liquidité mince) ; spread ≤ 0 = CROSSED_BOOK (bid ≥ ask,
+    marché verrouillé/croisé). Le croisé n'est JAMAIS ignoré en silence — c'est la dislocation
+    la plus extrême, souvent le cœur d'un sweep — mais il est labellisé à part pour que
+    l'humain le vérifie (peut aussi être un glitch de données)."""
     spread = state.get("spread_width")
-    return spread is not None and spread > SPREAD_TICKS_THRESHOLD
+    if not _finite(spread):
+        return (False, None)
+    if spread > SPREAD_TICKS_THRESHOLD:
+        return (True, "WIDE_SPREAD")
+    if spread <= 0:
+        return (True, "CROSSED_BOOK")
+    return (False, None)
+
+
+def _trigger_parts(state: SweepGraphState) -> list[str]:
+    parts = []
+    if bool(state.get("tape_burst")):
+        parts.append("TAPE_BURST")
+    anom, label = _spread_anomaly(state)
+    if anom and label:
+        parts.append(label)
+    return parts
 
 
 def _detect(state: SweepGraphState) -> dict:
@@ -82,32 +109,35 @@ def _detect(state: SweepGraphState) -> dict:
         return {"triggered": False,
                 "reason": "données microstructure/news insuffisantes — fail-closed, aucune alerte"}
     burst = bool(state.get("tape_burst"))
-    wide = _wide_spread(state)
-    if not (burst or wide):
+    anom, _ = _spread_anomaly(state)
+    if not (burst or anom):
         return {"triggered": False,
-                "reason": "pas d'anomalie microstructure (ni rafale de tape ni spread large)"}
+                "reason": "pas d'anomalie microstructure (ni rafale de tape ni spread anormal)"}
     if not state.get("news_t1_imminent"):
         return {"triggered": False,
                 "reason": "anomalie microstructure hors fenêtre news T1 — non couplée, pas de sweep"}
-    parts = [p for p, cond in (("TAPE_BURST", burst), ("WIDE_SPREAD", wide)) if cond]
     return {"triggered": True,
-            "reason": "sweep : " + "+".join(parts) + " couplé à une news T1 imminente"}
+            "reason": "sweep : " + "+".join(_trigger_parts(state))
+            + " couplé à une news T1 imminente"}
 
 
 def _emit(state: SweepGraphState) -> dict:
-    """Nœud d'émission — construit l'alerte à partir des seules entrées (rien d'inventé)."""
+    """Nœud d'émission — construit l'alerte à partir des seules entrées (rien d'inventé).
+    Durci /devil : toute mesure NON FINIE (inf/nan) est retirée (→ None), jamais propagée
+    dans l'alerte (sinon JSON invalide en aval + direction fantôme)."""
     dv = state.get("delta_volume")
+    dv = dv if _finite(dv) else None
     direction = None
     if dv is not None and dv != 0:
         direction = "ASK_SWEEP" if dv > 0 else "BID_SWEEP"  # agression acheteuse balaie l'offre
-    parts = [p for p, cond in (("TAPE_BURST", bool(state.get("tape_burst"))),
-                               ("WIDE_SPREAD", _wide_spread(state))) if cond]
+    spread = state.get("spread_width")
+    spread = spread if _finite(spread) else None
     alert = LiquiditySweepAlert(
         ts=state["now"],
         direction=direction,
-        spread_width=state.get("spread_width"),
+        spread_width=spread,
         delta_volume=dv,
-        trigger="+".join(parts),
+        trigger="+".join(_trigger_parts(state)),
         news_context=state.get("news_label", ""),
         reason=state.get("reason", ""),
     )
@@ -146,7 +176,8 @@ def build_sweep_inputs(schema: ContextSchema, now: float) -> SweepGraphState:
     if ob_fresh:
         bids, asks = ob.value.get("bids"), ob.value.get("asks")
         if bids and asks:
-            spread = (float(asks[0][0]) - float(bids[0][0])) / TICK_SIZE
+            s = (float(asks[0][0]) - float(bids[0][0])) / TICK_SIZE
+            spread = s if math.isfinite(s) else None   # spread corrompu → None, pas propagé
             depth = (float(bids[0][1]), float(asks[0][1]))
 
     # Tape FRESH → rafale (prints dans la fenêtre) + delta_volume (imbalance agresseur).
@@ -154,11 +185,21 @@ def build_sweep_inputs(schema: ContextSchema, now: float) -> SweepGraphState:
     delta_volume: Optional[float] = None
     tp_fresh = tp.freshness == Freshness.FRESH and isinstance(tp.value, list) and bool(tp.value)
     if tp_fresh:
-        recent = sum(1 for p in tp.value
-                     if isinstance(p.get("ts"), (int, float)) and p["ts"] > now - BURST_WINDOW_S)
+        # Durci /devil : fenêtre BORNÉE des deux côtés `]now−W, now]`. Un print daté DANS LE
+        # FUTUR (ts > now, désync d'horloge source) est exclu — son heure d'arrivée réelle
+        # est inconnue, il ne doit pas FABRIQUER une rafale.
+        recent = sum(1 for p in tp.value if _finite(p.get("ts"))
+                     and now - BURST_WINDOW_S < p["ts"] <= now)
         burst = recent >= BURST_COUNT_THRESHOLD
-        delta_volume = float(sum((p["size"] if p.get("side") == "BUY" else -p["size"])
-                                 for p in tp.value))
+        # Durci /devil : taille NON FINIE (inf/nan) écartée par-print — jamais un
+        # delta_volume corrompu (la leçon per-print du /devil Tape, portée ici).
+        dv = 0.0
+        for p in tp.value:
+            sz = p.get("size")
+            if not _finite(sz):
+                continue
+            dv += sz if p.get("side") == "BUY" else -sz
+        delta_volume = dv
 
     # Calendrier FRESH → news Tier-1 imminente (±30 min).
     news = False

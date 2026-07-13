@@ -144,3 +144,84 @@ def test_graph_compiles_with_checkpointer_architecture():
                        config={"configurable": {"thread_id": "test-sweep"}})
     assert out["triggered"] is True
     assert isinstance(LiquiditySweepAlert(**out["alert"]), LiquiditySweepAlert)
+
+
+# ---------- /devil — contradictions, croisé, désync, corruption (Loop 4) ----------
+
+def test_crossed_book_is_flagged_anomaly_not_silently_ignored():
+    # bid > ask → spread NÉGATIF. Dislocation réelle près d'une news : DOIT déclencher,
+    # labellisé CROSSED_BOOK — jamais confondu avec un spread propre, jamais ignoré.
+    out = SWEEP_GRAPH.invoke(_state(spread_width=-2.0, news_t1_imminent=True))
+    assert out["triggered"] is True
+    assert "CROSSED_BOOK" in out["alert"]["trigger"]
+
+
+def test_locked_book_zero_spread_triggers_crossed():
+    out = SWEEP_GRAPH.invoke(_state(spread_width=0.0, news_t1_imminent=True))
+    assert out["triggered"] is True
+    assert "CROSSED_BOOK" in out["alert"]["trigger"]
+
+
+def test_non_finite_spread_never_triggers_nor_leaks():
+    for bad in (float("inf"), float("nan"), float("-inf")):
+        out = SWEEP_GRAPH.invoke(_state(spread_width=bad, tape_burst=False,
+                                        news_t1_imminent=True))
+        assert out["triggered"] is False, f"spread {bad} a déclenché (fail-closed attendu)"
+        assert out["alert"] is None
+
+
+def test_delta_volume_corruption_does_not_leak_into_alert():
+    for bad in (float("inf"), float("nan")):
+        out = SWEEP_GRAPH.invoke(_state(tape_burst=True, spread_width=3.0,
+                                        news_t1_imminent=True, delta_volume=bad))
+        assert out["triggered"] is True
+        a = out["alert"]
+        assert a["delta_volume"] is None, f"delta_volume {bad} a fui dans l'alerte"
+        assert a["direction"] is None            # direction indéterminée sur delta corrompu
+
+
+def test_burst_from_future_dated_prints_is_not_fabricated():
+    now = time.time()
+    schema = ContextSchema()
+    schema.econ_calendar.events = _fresh(
+        [{"ts": now + 300, "name": "NFP", "tier": 1, "region": "US"}], now)
+    # rafale de prints tous DATÉS DANS LE FUTUR (+50 s) — désync d'horloge source.
+    future = [{"ts": now + 50, "price": 5000.0, "size": 2, "side": "BUY", "seq": i}
+              for i in range(BURST_COUNT_THRESHOLD + 5)]
+    schema.s1_state.tape = _fresh(future, now)
+    st = build_sweep_inputs(schema, now)
+    assert st["tape_burst"] is False, "rafale FABRIQUÉE par des prints futurs (désync)"
+
+
+def test_delta_volume_ignores_non_finite_sizes_in_tape():
+    import math as _m
+    now = time.time()
+    schema = ContextSchema()
+    schema.econ_calendar.events = _fresh(
+        [{"ts": now + 100, "name": "FOMC", "tier": 1, "region": "US"}], now)
+    schema.s1_state.tape = _fresh([
+        {"ts": now, "price": 5000.0, "size": 10, "side": "BUY", "seq": 1},
+        {"ts": now, "price": 5000.0, "size": float("inf"), "side": "BUY", "seq": 2},
+        {"ts": now, "price": 5000.0, "size": 4, "side": "SELL", "seq": 3},
+    ], now)
+    st = build_sweep_inputs(schema, now)
+    assert st["delta_volume"] is not None and _m.isfinite(st["delta_volume"])
+    assert st["delta_volume"] == 6.0             # 10 (BUY) − 4 (SELL), l'inf écarté
+
+
+def test_contradiction_orderbook_fresh_tape_absent_no_fabricated_direction():
+    # Order book FRESH large + news, mais tape ABSENT → sweep sur spread SANS direction
+    # inventée (pas de tape pour confirmer l'agresseur).
+    now = time.time()
+    schema = ContextSchema()
+    schema.s1_state.order_book = _fresh(
+        {"bids": [[5000.00, 40.0]], "asks": [[5001.00, 30.0]]}, now)     # 4 ticks
+    schema.econ_calendar.events = _fresh(
+        [{"ts": now + 200, "name": "NFP", "tier": 1, "region": "US"}], now)
+    st = build_sweep_inputs(schema, now)
+    assert st["data_ok"] is True and st["spread_width"] == 4.0
+    assert st["delta_volume"] is None
+    out = run_sweep_detection(schema, now)
+    assert out["triggered"] is True
+    assert out["alert"]["direction"] is None     # pas de tape → pas de direction inventée
+    assert "WIDE_SPREAD" in out["alert"]["trigger"]

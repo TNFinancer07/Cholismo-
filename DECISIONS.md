@@ -387,6 +387,28 @@ l'opérateur). Hypothèses (Loop 1 étape 1) :
   /devil durcira). Essai manuel réel concluant sur schéma d'un VRAI moteur (extraction live,
   alerte déterministe, reproductible).
 
+**Durcissement /devil (Loop 4)** — 4 attaques, 3 failles réelles trouvées et corrigées
+(tests dans `test_liquidity_sweep.py`, 16 verts) :
+1. **Carnet CROISÉ / spread négatif** (bid ≥ ask) : `spread > 2` laissait passer un spread ≤ 0
+   en SILENCE — la dislocation la PLUS extrême (marché verrouillé/croisé) était ignorée.
+   Corrigé : `_spread_anomaly` distingue `WIDE_SPREAD` (> 2 ticks) et `CROSSED_BOOK` (≤ 0) ;
+   le croisé déclenche, labellisé à part (l'humain vérifie — peut aussi être un glitch, §2.1
+   in-the-loop). Prouvé live : carnet −4 ticks → alerte CROSSED_BOOK.
+2. **Rafale FABRIQUÉE par désync d'horloge** : la fenêtre `ts > now − W` comptait les prints
+   datés DANS LE FUTUR (désync source, pathologie CLOCK_DESYNC du mock) → fausse rafale.
+   Corrigé : fenêtre bornée des deux côtés `]now−W, now]` ; un print futur (heure d'arrivée
+   réelle inconnue) est exclu (fail-closed : pas de faux positif ; le spread reste un chemin
+   indépendant).
+3. **Corruption mathématique de `delta_volume`** : une taille inf/nan (ou un `delta_volume`
+   d'état corrompu) fuyait dans l'alerte → JSON invalide en aval + direction fantôme
+   (inf > 0 = True). Corrigé : garde `_finite()` par-print à l'extraction (leçon per-print du
+   /devil Tape) ET au nœud d'émission (frontière de sortie) — toute mesure non finie ⇒ `None`,
+   jamais propagée ; direction indéterminée sur delta corrompu. Idem `spread_width` non fini.
+4. **Contradiction Tape vs Order Book** : GÉRÉE PAR CONCEPTION (déjà, figé par test) — le
+   couplage OR + fail-closed par-source fait contribuer chaque source indépendamment ; source
+   manquante ⇒ `None`, jamais inventée. Order book FRESH large + tape ABSENT ⇒ sweep sur
+   spread SANS direction fantôme (pas de tape pour confirmer l'agresseur).
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.
