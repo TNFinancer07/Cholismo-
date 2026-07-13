@@ -238,6 +238,28 @@ export interface EconCalendar {
   events: MetaField<EconEvent[]>
 }
 
+// --- liquidity_sweep → panneau IA (détecteur LangGraph déterministe, D-028) [rapide] ---
+
+export interface LiquiditySweepAlert {
+  ts: number
+  kind: string
+  direction: 'BID_SWEEP' | 'ASK_SWEEP' | null
+  spread_width: number | null
+  delta_volume: number | null
+  trigger: string          // TAPE_BURST | WIDE_SPREAD | CROSSED_BOOK (combinés par +)
+  news_context: string
+  reason: string
+}
+
+export interface LiquiditySweep {
+  assessable: boolean      // data_ok — sinon « impossible à évaluer », fail-closed honnête
+  triggered: boolean
+  reason: string
+  alert: LiquiditySweepAlert | null
+  last_compute_ts: number | null
+  recent: LiquiditySweepAlert[]
+}
+
 export interface ContextSchema {
   session_identity: SessionIdentity
   s1_state: S1State
@@ -246,6 +268,7 @@ export interface ContextSchema {
   sync_state: SyncState
   unified_signal_output: UnifiedSignalOutput
   econ_calendar: EconCalendar
+  liquidity_sweep: LiquiditySweep
 }
 
 // --- hors-schéma : extras opérationnels poussés sur le canal rapide ---

@@ -4,8 +4,8 @@
 import { create } from 'zustand'
 import type {
   BlotterRow, BridgeVariables, Calibration, ContextSchema, EconCalendar, Extras,
-  OperationalMode, Operator, OrchestratorPayload, S1State, S2State, SessionIdentity,
-  SyncState, UnifiedSignalOutput,
+  LiquiditySweep, OperationalMode, Operator, OrchestratorPayload, S1State, S2State,
+  SessionIdentity, SyncState, UnifiedSignalOutput,
 } from '@/types/schema'
 
 export type ZoneKey = 'A' | 'B' | 'C' | 'D'
@@ -33,6 +33,7 @@ interface TerminalStore {
   sync_state: SyncState | null
   unified_signal_output: UnifiedSignalOutput | null
   econ_calendar: EconCalendar | null
+  liquidity_sweep: LiquiditySweep | null
   extras: Extras | null
 
   // santé des canaux (fail-closed UI : canal muet => BLOQUÉ affiché)
@@ -77,6 +78,7 @@ export const useTerminal = create<TerminalStore>((set) => ({
   s2_state: null,
   bridge_variables: null,
   econ_calendar: null,
+  liquidity_sweep: null,
   sync_state: null,
   unified_signal_output: null,
   extras: null,
@@ -134,6 +136,7 @@ export const useTerminal = create<TerminalStore>((set) => ({
         }
         case 'sync_state': return { sync_state: payload as SyncState }
         case 'econ_calendar': return { econ_calendar: payload as EconCalendar }
+        case 'liquidity_sweep': return { liquidity_sweep: payload as LiquiditySweep }
         case 'unified_signal_output': {
           const signal = payload as UnifiedSignalOutput
           return { unified_signal_output: signal, history: push(state.history, 'score', signal.score) }

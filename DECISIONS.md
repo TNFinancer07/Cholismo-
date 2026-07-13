@@ -409,6 +409,29 @@ l'opérateur). Hypothèses (Loop 1 étape 1) :
    manquante ⇒ `None`, jamais inventée. Order book FRESH large + tape ABSENT ⇒ sweep sur
    spread SANS direction fantôme (pas de tape pour confirmer l'agresseur).
 
+**Intégration au système (incrément suivant, feature séparée)** :
+- **Bloc schéma `liquidity_sweep`** (canal FAST) : `LiquiditySweepAlert` déplacé dans
+  `schema.py` (source unique) — le graphe le réutilise (pas d'import circulaire). Le bloc porte
+  `assessable` (= data_ok, distingue « pas de sweep » de « impossible à évaluer »), `triggered`,
+  `alert` courante, `last_compute_ts` (âge réel comme B2), et un feed `recent` court.
+- **Exécution ASYNC NON-BLOQUANTE** (§2.8/§7) : `_sweep_loop` sur sa propre cadence
+  (`SWEEP_TICK_SECONDS=1 s`), HORS des boucles fast/slow. `_assemble_sweep` lit le schéma
+  SYNCHRONE (snapshot cohérent, pas de torn read) puis OFFLOADE `SWEEP_GRAPH.invoke` via
+  `asyncio.to_thread` → le tick fast < 200 ms n'est JAMAIS bloqué (le détecteur est
+  déterministe mais reste async par contrat).
+- **Feed dédupliqué** par clé `trigger|direction` : condition persistante ⇒ une entrée ;
+  sweep levé puis re-déclenché ⇒ nouvel événement. Advisory, jamais dans l'event store §2.5
+  (détection ≠ décision) — projection volatile.
+- **Panneau `IA` « Alertes IA · Sweep »** (un panneau = un champ) : ergonomie NON-INTRUSIVE
+  (bandeau de statut, jamais de modale ; pas de clignotement). CROSSED_BOOK (rouge, sévère) et
+  WIDE_SPREAD (jaune) distingués par chips typés (icône + texte + bordure, §3) ; direction
+  ▲offre/▼bid ; états fail-closed honnêtes (« impossible à évaluer » ≠ « aucun sweep » ;
+  « détecteur muet » sur silence > 5 s). Badge SYSTÈME, note « détecteur déterministe
+  (LangGraph) — pas un LLM ». Espaces localStorage bumpés v5 (IA dans MICRO).
+- **Vérifié** : 52/52 pytest (dont 3 intégration) · ruff · tsc · vite build ; E2E réel 9/9
+  (statut honnête, sweep déclenché avec chips typés, coupure micro → « impossible à évaluer »,
+  retour) — capture docs/ai-alerts.png.
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.

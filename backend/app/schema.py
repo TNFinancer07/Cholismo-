@@ -274,6 +274,35 @@ class EconCalendar(BaseModel):
     events: MetaField = Field(default_factory=MetaField)  # value: list[{ts, name, tier, region}]
 
 
+# --- liquidity_sweep → panneau IA (détecteur LangGraph, advisory async, D-028) [fast] ---
+
+class LiquiditySweepAlert(BaseModel):
+    """Alerte du détecteur de Liquidity Sweep (app/graph/liquidity_sweep.py). Événement
+    OBSERVÉ, jamais un ordre (§2.1). Tous les champs dérivent déterministiquement des
+    entrées — aucune valeur inventée (« sans hallucination », §2.8)."""
+    ts: float
+    kind: str = "LIQUIDITY_SWEEP"
+    direction: Optional[str] = None       # BID_SWEEP | ASK_SWEEP | None
+    spread_width: Optional[float] = None  # en ticks
+    delta_volume: Optional[float] = None
+    trigger: str = ""                     # TAPE_BURST | WIDE_SPREAD | CROSSED_BOOK (combinés par +)
+    news_context: str = ""
+    reason: str = ""
+
+
+class LiquiditySweep(BaseModel):
+    """Bloc de sortie du détecteur — advisory ASYNC, JAMAIS un verrou hot-path (§2.8).
+    `assessable` distingue « pas de sweep » (True+triggered False) de « impossible à
+    évaluer » (False, données insuffisantes) : un détecteur honnête ne confond pas « tout
+    va bien » et « je ne sais pas ». `recent` = feed court des dernières alertes distinctes."""
+    assessable: bool = False
+    triggered: bool = False
+    reason: str = ""
+    alert: Optional[LiquiditySweepAlert] = None
+    last_compute_ts: Optional[float] = None   # âge RÉEL de la dernière évaluation (comme B2)
+    recent: list[LiquiditySweepAlert] = Field(default_factory=list)
+
+
 # --- Full schema (conceptual object; transported as partial per-block SSE events) ---
 
 class ContextSchema(BaseModel):
@@ -284,7 +313,9 @@ class ContextSchema(BaseModel):
     sync_state: SyncState = Field(default_factory=SyncState)
     unified_signal_output: UnifiedSignalOutput = Field(default_factory=UnifiedSignalOutput)
     econ_calendar: EconCalendar = Field(default_factory=EconCalendar)
+    liquidity_sweep: LiquiditySweep = Field(default_factory=LiquiditySweep)
 
 
-FAST_BLOCKS = ("session_identity", "s1_state", "bridge_variables", "sync_state", "unified_signal_output")
+FAST_BLOCKS = ("session_identity", "s1_state", "bridge_variables", "sync_state",
+               "unified_signal_output", "liquidity_sweep")
 SLOW_BLOCKS = ("s2_state", "econ_calendar")

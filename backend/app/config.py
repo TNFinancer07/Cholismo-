@@ -61,6 +61,10 @@ GROQ_TIMEOUT_SECONDS = 0.1       # AUTORITÉ — < 100 ms, fail-closed
 CLAUDE_SCORING_PERIOD_SECONDS = 300
 GEMINI_AUDIT_EVERY_N_TRADES = 20  # AUTORITÉ
 
+# --- Liquidity Sweep detector (LangGraph, DÉTERMINISTE, advisory async — D-028) ---
+SWEEP_TICK_SECONDS = float(os.getenv("SWEEP_TICK_SECONDS", "1.0"))  # hors hot path (§2.8)
+SWEEP_RECENT_MAX = 8             # longueur du feed d'alertes récentes
+
 # --- Session windows CET (PLACEHOLDER D-006) ---
 LONDON_OBS_CET = (8, 12)      # 08:00–12:00 CET
 OVERLAP_NY_CET = (14.5, 17.5)  # 14:30–17:30 CET

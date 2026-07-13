@@ -26,10 +26,11 @@ from typing import Optional, TypedDict
 
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
-from pydantic import BaseModel
 
 from ..meta import Freshness
-from ..schema import ContextSchema
+# LiquiditySweepAlert vit dans le schéma (source unique) — le graphe le RÉUTILISE, pas de
+# duplication ni d'import circulaire (schema n'importe pas graph).
+from ..schema import ContextSchema, LiquiditySweepAlert
 
 # --- Seuils v1 provisional — calibration owner: Sony. Isolés ici (CLAUDE §8/§12). ---
 TICK_SIZE = 0.25              # ES : 1 tick = 0.25 pt
@@ -37,19 +38,6 @@ SPREAD_TICKS_THRESHOLD = 2.0  # spread STRICTEMENT > 2 ticks = carnet anormaleme
 BURST_WINDOW_S = 2.0          # fenêtre de mesure de la rafale de prints
 BURST_COUNT_THRESHOLD = 8     # ≥ N prints dans la fenêtre = rafale de tape
 NEWS_T1_IMMINENT_S = 30 * 60  # news Tier-1 à ±30 min (fenêtre blackout Sony, D-027)
-
-
-class LiquiditySweepAlert(BaseModel):
-    """Sortie du graphe — un événement OBSERVÉ, jamais un ordre (§2.1). Tous les champs
-    dérivent déterministiquement des entrées : aucune probabilité inventée."""
-    ts: float
-    kind: str = "LIQUIDITY_SWEEP"
-    direction: Optional[str] = None      # BID_SWEEP | ASK_SWEEP | None (delta_volume nul/absent)
-    spread_width: Optional[float] = None  # en ticks
-    delta_volume: Optional[float] = None
-    trigger: str = ""                     # TAPE_BURST | WIDE_SPREAD | TAPE_BURST+WIDE_SPREAD
-    news_context: str = ""                # libellé de la news T1 déclenchante
-    reason: str = ""                      # explication déterministe, lisible
 
 
 class SweepGraphState(TypedDict, total=False):

@@ -14,6 +14,7 @@ import logging
 import math
 import time
 import uuid
+from collections import deque
 from datetime import datetime, timezone, timedelta
 from typing import Any, Optional
 
@@ -21,15 +22,16 @@ from . import config, settings
 from .datasource.base import MarketDataSource
 from .datasource import scenarios
 from .event_store import get_store
+from .graph.liquidity_sweep import SWEEP_GRAPH, build_sweep_inputs
 from .macro_score import compute_s2_macro_score
 from .meta import Freshness, MetaField, make_meta
 from .phase0 import Phase0Input, evaluate_phase0
 from .projections import loss_streak
 from .redis_state import RedisState
 from .schema import (BridgeVariables, Cascade, ContextSchema, Decision, DecisionWindow,
-                     EconCalendar, MasterState, OperationalMode, OrderFlow, Phase0State,
-                     S1State, S2State, SessionIdentity, SessionMarker, Structure, SyncState,
-                     SyncVerdict)
+                     EconCalendar, LiquiditySweep, LiquiditySweepAlert, MasterState,
+                     OperationalMode, OrderFlow, Phase0State, S1State, S2State,
+                     SessionIdentity, SessionMarker, Structure, SyncState, SyncVerdict)
 from .scoring import compute_unified_signal
 from .sse import broadcaster
 from .strategies.sony import evaluate_strategies
@@ -196,6 +198,9 @@ class Engine:
         self.schema = ContextSchema()
         self._tasks: list[asyncio.Task] = []
         self._extras: dict[str, Any] = {"rms": None, "streak": 0, "scenario": None}
+        # Détecteur Sweep (D-028) : feed court + clé du dernier événement (anti-inondation).
+        self._sweep_recent: deque = deque(maxlen=config.SWEEP_RECENT_MAX)
+        self._sweep_last_key: Optional[str] = None
         self._regime_tier = "GREEN"  # D4 hysteresis state (reference/youssef/01)
 
     # ---------- assembly helpers ----------
@@ -481,9 +486,49 @@ class Engine:
             elapsed = time.time() - started
             await asyncio.sleep(max(0.05, config.SLOW_TICK_SECONDS - elapsed))
 
+    async def _assemble_sweep(self, now: float) -> None:
+        """Détection Liquidity Sweep (D-028) — advisory, HORS hot path (§2.8). Lecture du
+        schéma SYNCHRONE (snapshot cohérent, aucun await intermédiaire → pas de torn read
+        vs _assemble_fast), puis invocation du graphe OFFLOADÉE (`to_thread`) : la boucle
+        d'événements — donc le tick fast < 200 ms — n'est JAMAIS bloquée. Le détecteur est
+        déterministe (pas de LLM), mais reste async par contrat. Le feed `recent` est
+        dédupliqué par clé (trigger|direction) : une condition persistante n'inonde pas ;
+        un sweep qui se lève puis re-déclenche = un nouvel événement. Émet une ALERTE
+        observée, jamais un ordre (§2.1)."""
+        state = build_sweep_inputs(self.schema, now)
+        result = await asyncio.to_thread(
+            SWEEP_GRAPH.invoke, state, {"configurable": {"thread_id": "sweep"}})
+        triggered = bool(result.get("triggered"))
+        alert_dict = result.get("alert") if triggered else None
+        key = (f"{alert_dict['trigger']}|{alert_dict.get('direction')}"
+               if alert_dict else None)
+        if key and key != self._sweep_last_key:
+            self._sweep_recent.appendleft(alert_dict)
+        self._sweep_last_key = key   # None quand non déclenché → prochain sweep = neuf
+        self.schema.liquidity_sweep = LiquiditySweep(
+            assessable=bool(result.get("data_ok")),
+            triggered=triggered,
+            reason=result.get("reason", ""),
+            alert=LiquiditySweepAlert(**alert_dict) if alert_dict else None,
+            last_compute_ts=now,
+            recent=[LiquiditySweepAlert(**a) for a in self._sweep_recent])
+        broadcaster.publish("fast", "liquidity_sweep",
+                            self.schema.liquidity_sweep.model_dump(mode="json"))
+
+    async def _sweep_loop(self) -> None:
+        while True:
+            started = time.time()
+            try:
+                await self._assemble_sweep(time.time())
+            except Exception:
+                log.exception("sweep loop tick failed (fail-closed: no alert emitted)")
+            elapsed = time.time() - started
+            await asyncio.sleep(max(0.1, config.SWEEP_TICK_SECONDS - elapsed))
+
     async def start(self) -> None:
         self._tasks = [asyncio.create_task(self._fast_loop()),
-                       asyncio.create_task(self._slow_loop())]
+                       asyncio.create_task(self._slow_loop()),
+                       asyncio.create_task(self._sweep_loop())]
 
     async def stop(self) -> None:
         for task in self._tasks:
