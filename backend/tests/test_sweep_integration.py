@@ -83,3 +83,71 @@ def test_sweep_block_fail_closed_when_data_absent():
         assert sw.triggered is False and sw.alert is None
         assert sw.recent == []
     asyncio.run(scenario())
+
+
+# ---------- /devil — backpressure, race du feed, invariant (Loop 4) ----------
+
+def test_slow_langgraph_invoke_does_not_block_the_event_loop(monkeypatch):
+    """Backpressure : un invoke LENT est OFFLOADÉ (to_thread) → la boucle d'événements
+    reste LIBRE ; le tick fast < 200 ms n'est jamais bloqué (§2.8/§7)."""
+    async def scenario():
+        import app.engine as eng_mod
+        eng = _engine()
+        _wire_wide(eng.schema, time.time())
+
+        class SlowGraph:
+            def invoke(self, state, config):
+                time.sleep(0.4)          # bloque un THREAD, jamais la boucle d'événements
+                state.update({"triggered": True, "alert": {
+                    "ts": state["now"], "kind": "LIQUIDITY_SWEEP", "direction": None,
+                    "spread_width": state.get("spread_width"), "delta_volume": None,
+                    "trigger": "WIDE_SPREAD", "news_context": "", "reason": "lent"}})
+                return state
+
+        monkeypatch.setattr(eng_mod, "SWEEP_GRAPH", SlowGraph())
+        ticks = 0
+
+        async def ticker():
+            nonlocal ticks
+            for _ in range(60):
+                await asyncio.sleep(0.01)
+                ticks += 1
+
+        await asyncio.gather(eng._assemble_sweep(time.time()), ticker())
+        assert ticks >= 50, f"boucle bloquée par l'invoke lent (ticks={ticks})"
+        assert eng.schema.liquidity_sweep.triggered is True   # le résultat arrive quand même
+    asyncio.run(scenario())
+
+
+def test_recent_feed_is_bounded_maxlen_under_many_events():
+    """Le feed ne grossit JAMAIS sans borne : 20 sweeps distincts (levés/re-déclenchés) →
+    borné à SWEEP_RECENT_MAX (deque), pas de fuite mémoire ni de liste géante à rendre."""
+    from app import config
+
+    async def scenario():
+        now = time.time()
+        eng = _engine()
+        eng.schema.econ_calendar.events = _fresh(
+            [{"ts": now + 300, "name": "NFP", "tier": 1, "region": "US"}], now)
+        for i in range(20):
+            eng.schema.s1_state.order_book = _fresh(          # spread large → déclenche
+                {"bids": [[5000.0, 40.0]], "asks": [[5001.0, 30.0]]}, now)
+            await eng._assemble_sweep(now + i * 2)
+            eng.schema.s1_state.order_book = _fresh(          # normal → se lève (reset clé)
+                {"bids": [[5000.0, 40.0]], "asks": [[5000.5, 30.0]]}, now)
+            await eng._assemble_sweep(now + i * 2 + 1)
+        assert len(eng.schema.liquidity_sweep.recent) == config.SWEEP_RECENT_MAX
+    asyncio.run(scenario())
+
+
+def test_triggered_always_carries_an_alert_invariant():
+    """Invariant anti-incohérence du panneau : triggered ⇒ alert présent (jamais un
+    triggered sans alerte, qui ferait afficher « aucun sweep » à tort)."""
+    async def scenario():
+        now = time.time()
+        eng = _engine()
+        _wire_wide(eng.schema, now)
+        await eng._assemble_sweep(now)
+        sw = eng.schema.liquidity_sweep
+        assert (not sw.triggered) or (sw.alert is not None)
+    asyncio.run(scenario())

@@ -51,19 +51,24 @@ function Direction({ d }: { d: string | null }) {
 }
 
 function AlertRow({ a, active }: { a: LiquiditySweepAlert; active: boolean }) {
+  // min-w-0 + overflow-hidden : au redimensionnement extrême, la news (priorité basse)
+  // tronque d'abord (flex-1), le reste est shrink-0 et clippe — jamais de débordement
+  // horizontal du body (leçon /devil OB). Chips en shrink-0 : l'info critique reste visible.
   return (
-    <div className={cn('flex items-center gap-2 border-l-2 py-0.5 pl-1 font-mono text-xxs',
+    <div className={cn('flex min-w-0 items-center gap-2 overflow-hidden border-l-2 py-0.5 pl-1 font-mono text-xxs',
       active ? 'border-l-risk-yellow bg-term-panel2' : 'border-l-term-border')}>
       <span className="shrink-0 tabular-nums text-term-faint">{fmtClock(a.ts)}</span>
-      <TriggerChips trigger={a.trigger} />
-      <Direction d={a.direction} />
+      <span className="shrink-0"><TriggerChips trigger={a.trigger} /></span>
+      <span className="shrink-0"><Direction d={a.direction} /></span>
       {a.spread_width !== null && (
         <span className="shrink-0 tabular-nums text-term-dim" title="spread en ticks (négatif = croisé)">
           {fmtSigned(a.spread_width, 1)}t
         </span>
       )}
       {a.news_context && (
-        <span className="truncate text-term-faint" title={a.news_context}>· {a.news_context}</span>
+        <span className="min-w-0 flex-1 truncate text-term-faint" title={a.news_context}>
+          · {a.news_context}
+        </span>
       )}
     </div>
   )

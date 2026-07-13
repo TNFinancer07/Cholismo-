@@ -432,6 +432,31 @@ l'opérateur). Hypothèses (Loop 1 étape 1) :
   (statut honnête, sweep déclenché avec chips typés, coupure micro → « impossible à évaluer »,
   retour) — capture docs/ai-alerts.png.
 
+**Durcissement /devil (Loop 4)** — 3 attaques, 1 faille visuelle réelle ; backend confirmé
+robuste par conception (tests, 55 verts) :
+- **BACKPRESSURE** (invoke LangGraph lent/bloqué) : GÉRÉE. Boucle `_sweep_loop` AUTO-CADENCÉE
+  (`sleep(max(0.1, TICK − elapsed))` — pas de `create_task` par tick → aucun empilement,
+  RUNTIME_LOOPS Loop D) + `asyncio.to_thread` → un invoke lent bloque un THREAD, JAMAIS la
+  boucle d'événements ; le tick fast < 200 ms reste libre. Prouvé : invoke à 0.4 s, un ticker
+  concurrent avance ≥ 50 fois pendant l'invoke. Si l'invoke traîne > 5 s, le panneau passe
+  « détecteur muet » (fail-closed honnête).
+- **RACE DU FEED** : GÉRÉE. `_sweep_recent`/`_sweep_last_key` mutés dans le SEUL `_assemble_sweep`
+  (tâche unique, awaité un à la fois) ; `build_sweep_inputs` lit le schéma SYNCHRONE (snapshot,
+  pas de torn read vs fast). Feed BORNÉ (deque maxlen `SWEEP_RECENT_MAX`) — prouvé : 20 sweeps
+  distincts ⇒ 8 gardés, pas de fuite. Invariant `triggered ⇒ alert` figé (anti-incohérence UI).
+- **REDIMENSIONNEMENT EXTRÊME** : faille réelle corrigée. `AlertRow` était un `flex` dense
+  SANS `min-w-0` → son min-content forçait la colonne, débordement horizontal du body (leçon
+  /devil OB). Corrigé : news en `min-w-0 flex-1 truncate` (tronque d'abord), reste `shrink-0`,
+  rangée `overflow-hidden` (clippe aux largeurs extrêmes). Prouvé (E2E 1600→640) : le panneau
+  IA ne déborde JAMAIS de lui-même, body sain ≥ 820 px ; le débordement sous ~786 px est le
+  chrome global `Zone0StatusBar` (hors panneau IA, déjà tracé D-026), pas le panneau.
+- **RAFALE DE MISES À JOUR** : feed borné + clés React stables (`ts-trigger-index`) → zéro
+  warning de clé sur toute la session (E2E).
+- **Observation honnête (hors-scope, tracée)** : un test PRÉEXISTANT `test_order_book` a montré
+  UN flake ponctuel en suite complète (état Redis partagé inter-tests), non reproduit sur
+  3 relances (55 verts) ni en isolation. Fragilité d'isolation Redis des tests intégration —
+  concern séparé, ne touche pas le détecteur Sweep.
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.
