@@ -522,6 +522,17 @@ vérifié : absente du bundle) : le test gèle le SSE (backend tué → store fi
 signé (pas de NaN) ; capped=true → bandeau « suivi saturé » ; stale=true → « figé ». Ces deux
 branches ne sont plus « vérifiées par raisonnement » mais par rendu contrôlé.
 
+**Polish /polish (Loop 5)** — hiérarchie visuelle (aucun changement de comportement) :
+- **POC (Point of Control)** = niveau au VOLUME absolu max (`buy + sell`), DISTINCT de
+  l'imbalance `|delta|` de la heatmap. Marqué discrètement : glyphe ▸ + prix en gras souligné
+  (forme + position, §3) — jamais par la couleur. Prouvé : un POC à delta faible (+2) porte le
+  marqueur tout en restant thermiquement discret, pendant qu'un gros delta (+56) s'illumine.
+- **Gradient perceptuel** : alpha = `plancher + (|delta|/maxAbs)^1.6 × plafond` (gamma 1.6).
+  Le gamma > 1 comprime le bas → les deltas marginaux restent discrets, seuls les GROS deltas
+  montent (s'extraient) ; plafond 0.58 → jamais de saturation. Remplace le linéaire précédent.
+- Vérifié : tsc · vite build ; E2E nominal + /devil re-passés (resize scopé, maxAbs=0, capped,
+  stale) — capture docs/cvd-footprint.png (cas contrôlé POC-vs-gros-delta).
+
 **Durcissement /devil (Loop 4)** — 4 attaques, 2 failles réelles corrigées (tests, 11 verts) :
 1. **RÉGRESSION de seq** (redémarrage source, seq repart bas) : le garde `seq <= last_seq`
    ignorait alors TOUT print futur → GEL SILENCIEUX (tape FRESH mais accumulation morte, le

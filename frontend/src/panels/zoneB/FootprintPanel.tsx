@@ -1,7 +1,9 @@
 /** CVD — CVD Footprint lisant UN champ : `s1_state.cvd_by_level` (D-029). Delta agresseur
  *  net PAR NIVEAU de prix, heatmap THERMIQUE vert (acheteur) / rouge (vendeur) : intensité
  *  ∝ |delta| relatif — MAIS jamais la couleur seule, le delta SIGNÉ est incrusté (§3, lisible
- *  sans percevoir la couleur). Échelle par prix décroissant (le plus haut en tête, façon DOM).
+ *  sans percevoir la couleur). Gradient perceptuel (gamma > 1) : les gros deltas s'extraient,
+ *  les marginaux restent discrets, sans saturer (Loop 5). POC (volume absolu max) marqué ▸
+ *  + prix souligné (forme + position, §3). Échelle par prix décroissant (façon DOM).
  *  Reset événementiel (news) affiché ; `capped` (suivi saturé) et `stale` (gelé) signalés
  *  honnêtement ; pas de niveau → PAS DE DONNÉES (§3). Temps réel via sélecteur zustand isolé
  *  (ne re-rend que ce panneau). Flux OBSERVÉ, jamais un ordre (§2.1). */
@@ -13,20 +15,30 @@ import type { CvdLevel } from '@/types/schema'
 
 const GREEN = '52, 211, 153'   // risk-green — acheteur net
 const RED = '248, 113, 113'    // risk-red — vendeur net
+// Gradient PERCEPTUEL (Loop 5) : gamma > 1 comprime le bas → les deltas marginaux restent
+// discrets, seuls les GROS deltas montent en intensité (s'extraient) ; plafond < 1 pour ne
+// jamais saturer la vision. Plancher léger pour que même un petit delta reste visible.
+const HEAT_GAMMA = 1.6
+const HEAT_FLOOR = 0.06
+const HEAT_CEIL = 0.58
 
-function Row({ le, maxAbs }: { le: CvdLevel; maxAbs: number }) {
+function Row({ le, maxAbs, poc }: { le: CvdLevel; maxAbs: number; poc: boolean }) {
   const buy = le.delta >= 0
   // Durci /devil : garde maxAbs=0 (division par zéro) ET delta non fini (inf/nan) →
   // intensité 0, jamais un alpha NaN dans le style (rendu cassé). `maxAbs > 0` couvre aussi
   // maxAbs=NaN (NaN>0 est faux). fmtSigned rend « — » sur NaN (§3 : jamais une valeur inventée).
-  const intensity = Number.isFinite(le.delta) && maxAbs > 0
+  const linear = Number.isFinite(le.delta) && maxAbs > 0
     ? Math.min(1, Math.abs(le.delta) / maxAbs) : 0
+  const alpha = (HEAT_FLOOR + linear ** HEAT_GAMMA * HEAT_CEIL).toFixed(2)
   return (
-    <div className="grid h-[15px] grid-cols-[62px_1fr] items-center gap-x-1 font-mono text-xxs tabular-nums">
-      <span className="text-right text-term-dim">{fmtNum(le.price, 2)}</span>
+    <div className="grid h-[15px] grid-cols-[9px_53px_1fr] items-center gap-x-1 font-mono text-xxs tabular-nums">
+      {/* POC = niveau au volume absolu le plus élevé : marqueur DISCRET (forme + position, §3). */}
+      <span className="text-center text-term-text" aria-hidden>{poc ? '▸' : ''}</span>
+      <span className={cn('text-right', poc ? 'font-bold text-term-text underline decoration-term-dim'
+        : 'text-term-dim')}>{fmtNum(le.price, 2)}</span>
       <div className="relative h-[13px] overflow-hidden rounded-sm border border-term-grid"
-        style={{ backgroundColor: `rgba(${buy ? GREEN : RED}, ${(0.08 + intensity * 0.55).toFixed(2)})` }}
-        title={`${fmtNum(le.price, 2)} : delta ${fmtSigned(le.delta, 0)} `
+        style={{ backgroundColor: `rgba(${buy ? GREEN : RED}, ${alpha})` }}
+        title={`${fmtNum(le.price, 2)}${poc ? ' · POC (volume max)' : ''} : delta ${fmtSigned(le.delta, 0)} `
           + `(buy ${fmtInt(le.buy)} / sell ${fmtInt(le.sell)})`}>
         {/* Delta SIGNÉ incrusté : le signe porte le sens, lisible sans percevoir la couleur (§3). */}
         <span className={cn('absolute inset-0 grid place-items-center font-bold',
@@ -46,6 +58,11 @@ export function FootprintPanel() {
   // maxAbs ignore les deltas non finis → reste fini même si le backend en envoyait un (défense).
   const maxAbs = rows.reduce((m, le) =>
     Number.isFinite(le.delta) ? Math.max(m, Math.abs(le.delta)) : m, 0)
+  // POC (Point of Control) = niveau au VOLUME absolu le plus élevé (buy + sell), distinct de
+  // l'imbalance |delta| de la heatmap. Prix du 1er niveau au volume max (déterministe).
+  const pocPrice = rows.length
+    ? rows.reduce((best, le) => (le.buy + le.sell) > (best.buy + best.sell) ? le : best).price
+    : null
   const sinceAge = cvd?.since_ts != null ? Math.max(0, now - cvd.since_ts) : null
 
   return (
@@ -78,14 +95,14 @@ export function FootprintPanel() {
               suivi saturé — niveaux les plus actifs
             </p>
           )}
-          <div className="grid grid-cols-[62px_1fr] gap-x-1 pb-0.5 font-mono text-xxs uppercase text-term-faint">
-            <span className="text-right">prix</span><span>delta</span>
+          <div className="grid grid-cols-[9px_53px_1fr] gap-x-1 pb-0.5 font-mono text-xxs uppercase text-term-faint">
+            <span></span><span className="text-right">prix</span><span>delta</span>
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto">
-            {rows.map((le) => <Row key={le.price} le={le} maxAbs={maxAbs} />)}
+            {rows.map((le) => <Row key={le.price} le={le} maxAbs={maxAbs} poc={le.price === pocPrice} />)}
           </div>
           <p className="mt-1 border-t border-term-border pt-1 text-xxs text-term-faint">
-            delta agresseur/niveau — vert acheteur ▲ / rouge vendeur ▼ ; flux observé, jamais un ordre (§2.1)
+            delta agresseur/niveau — vert acheteur / rouge vendeur ; ▸ POC (volume max) ; flux observé, jamais un ordre (§2.1)
           </p>
         </div>
       )}
