@@ -152,6 +152,16 @@ export const useTerminal = create<TerminalStore>((set) => ({
   set: (partial) => set(partial),
 }))
 
+// Affordance de test DEV-only (élaguée en prod par Vite : `import.meta.env.DEV` = false) :
+// injecte un `cvd_by_level` fabriqué dans le s1_state courant sans toucher aux autres champs,
+// pour exercer les branches de rendu difficiles à provoquer en live (maxAbs=0, capped) — /devil.
+if (import.meta.env.DEV && typeof window !== 'undefined') {
+  ;(window as unknown as { __setCvd?: (cvd: unknown) => void }).__setCvd = (cvd) => {
+    const s = useTerminal.getState()
+    if (s.s1_state) s.set({ s1_state: { ...s.s1_state, cvd_by_level: cvd as never } })
+  }
+}
+
 /** Temps serveur estimé (pour countdown C3 et âges de donnée). */
 export function serverNow(state: Pick<TerminalStore, 'nowTick' | 'clockOffset'>): number {
   return state.nowTick + state.clockOffset

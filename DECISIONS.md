@@ -514,6 +514,14 @@ ordre (§2.1).
 - **RAFALE haute fréquence** : sélecteur zustand isolé, re-render ~4×/s (cadence data), coût
   O(≤24) ; feed borné ≤ 24, zéro clé dupliquée, zéro erreur console sur toute la session.
 
+**/devil — passe CONTRÔLÉE** : maxAbs=0 (tous deltas nuls) et `capped` étaient impossibles à
+provoquer avec le mock live (deltas non nuls, < 512 prix). Faute de vitest, ajout d'une
+affordance de test DEV-only `window.__setCvd` (gated `import.meta.env.DEV` → ÉLAGUÉE en prod,
+vérifié : absente du bundle) : le test gèle le SSE (backend tué → store figé), injecte un
+`cvd_by_level` fabriqué, et prouve pour de VRAI — maxAbs=0 → 3 cellules, alphas tous finis, «0»
+signé (pas de NaN) ; capped=true → bandeau « suivi saturé » ; stale=true → « figé ». Ces deux
+branches ne sont plus « vérifiées par raisonnement » mais par rendu contrôlé.
+
 **Durcissement /devil (Loop 4)** — 4 attaques, 2 failles réelles corrigées (tests, 11 verts) :
 1. **RÉGRESSION de seq** (redémarrage source, seq repart bas) : le garde `seq <= last_seq`
    ignorait alors TOUT print futur → GEL SILENCIEUX (tape FRESH mais accumulation morte, le
