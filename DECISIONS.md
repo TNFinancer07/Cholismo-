@@ -499,6 +499,21 @@ build ; E2E réel 13/13 (échelle peuplée, deltas signés, cellules thermiques,
 resize scopé, zéro clé dupliquée) — capture docs/cvd-footprint.png. Flux OBSERVÉ, jamais un
 ordre (§2.1).
 
+**Durcissement /devil (Loop 4)** — 4 attaques, toutes gérées (E2E 13/13) :
+- **maxAbs=0 (division par zéro heatmap)** : DÉJÀ gardé (`maxAbs > 0 ? … : 0` ; `maxAbs > 0`
+  couvre aussi `NaN`). Renforcé défense-en-profondeur : `Number.isFinite(delta)` sur
+  l'intensité ET dans le calcul de `maxAbs` → un `delta` inf/nan (non atteignable du backend
+  fini, mais garde) ⇒ intensité 0, JAMAIS un alpha NaN dans le style (rendu cassé) ;
+  `fmtSigned` rend « — » sur NaN. Invariant E2E : 24 cellules, tous les alpha finis dans [0,1].
+- **RESIZE extrême** (1600→560 px) : le panneau ne déborde JAMAIS de lui-même. Sûr par
+  construction — grille `[62px 1fr]`, barre 1fr qui rétrécit, nombre `absolute inset-0`
+  (centré, jamais de débordement), `overflow-hidden` sur la cellule.
+- **BASCULE d'état fresh → stale → fresh** : branches mutuellement exclusives, l'échelle rend
+  TOUJOURS `cvd.levels` (les bandeaux stale/capped sont additifs) → intégrité préservée.
+  Prouvé : coupure sierra_chart → « figé » + échelle non corrompue → réactivation → repeuplée.
+- **RAFALE haute fréquence** : sélecteur zustand isolé, re-render ~4×/s (cadence data), coût
+  O(≤24) ; feed borné ≤ 24, zéro clé dupliquée, zéro erreur console sur toute la session.
+
 **Durcissement /devil (Loop 4)** — 4 attaques, 2 failles réelles corrigées (tests, 11 verts) :
 1. **RÉGRESSION de seq** (redémarrage source, seq repart bas) : le garde `seq <= last_seq`
    ignorait alors TOUT print futur → GEL SILENCIEUX (tape FRESH mais accumulation morte, le

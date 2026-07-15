@@ -16,7 +16,11 @@ const RED = '248, 113, 113'    // risk-red — vendeur net
 
 function Row({ le, maxAbs }: { le: CvdLevel; maxAbs: number }) {
   const buy = le.delta >= 0
-  const intensity = maxAbs > 0 ? Math.min(1, Math.abs(le.delta) / maxAbs) : 0
+  // Durci /devil : garde maxAbs=0 (division par zéro) ET delta non fini (inf/nan) →
+  // intensité 0, jamais un alpha NaN dans le style (rendu cassé). `maxAbs > 0` couvre aussi
+  // maxAbs=NaN (NaN>0 est faux). fmtSigned rend « — » sur NaN (§3 : jamais une valeur inventée).
+  const intensity = Number.isFinite(le.delta) && maxAbs > 0
+    ? Math.min(1, Math.abs(le.delta) / maxAbs) : 0
   return (
     <div className="grid h-[15px] grid-cols-[62px_1fr] items-center gap-x-1 font-mono text-xxs tabular-nums">
       <span className="text-right text-term-dim">{fmtNum(le.price, 2)}</span>
@@ -39,7 +43,9 @@ export function FootprintPanel() {
   const now = useTerminal(serverNow)
   const levels = cvd?.levels ?? []
   const rows = [...levels].sort((a, b) => b.price - a.price)   // prix décroissant, façon DOM
-  const maxAbs = rows.reduce((m, le) => Math.max(m, Math.abs(le.delta)), 0)
+  // maxAbs ignore les deltas non finis → reste fini même si le backend en envoyait un (défense).
+  const maxAbs = rows.reduce((m, le) =>
+    Number.isFinite(le.delta) ? Math.max(m, Math.abs(le.delta)) : m, 0)
   const sinceAge = cvd?.since_ts != null ? Math.max(0, now - cvd.since_ts) : null
 
   return (
