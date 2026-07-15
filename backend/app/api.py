@@ -19,6 +19,7 @@ from .event_store import get_store
 from .orchestrator import orchestrator_payload
 from .recon import parse_ninjatrader_csv, reconcile
 from .schema import Operator, Phase0State
+from .snapshot import build_snapshot, write_snapshot
 from .sse import broadcaster
 
 router = APIRouter()
@@ -35,6 +36,22 @@ async def health(request: Request) -> dict[str, Any]:
 @router.get("/state")
 async def state(request: Request) -> dict[str, Any]:
     return request.app.state.engine.snapshot()
+
+
+# ---------- Snapshot Déterministe (D-030) ----------
+
+@router.post("/snapshot")
+async def create_snapshot(request: Request) -> dict[str, Any]:
+    """Capture instantanée déterministe des 4 blocs (carnet, CVD, calendrier, alertes IA) →
+    JSON + Markdown dans SNAPSHOT_DIR. Écriture async non-bloquante ; observation, jamais un
+    ordre (§2.1)."""
+    engine = request.app.state.engine
+    now = time.time()
+    si = engine.schema.session_identity
+    operator = si.operator.value
+    snap_id = f"snap_{int(now)}_{operator.lower()}"
+    snap = build_snapshot(engine.schema, snap_id, now, operator, si.session_marker.value)
+    return await write_snapshot(snap, config.SNAPSHOT_DIR)
 
 
 # ---------- SSE — cadence-segmented channels (CLAUDE §6) ----------

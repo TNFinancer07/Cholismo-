@@ -51,6 +51,7 @@ MACRO_CALIBRATED = os.getenv("MACRO_CALIBRATED", "false").lower() == "true"
 # --- Infra ---
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 EVENT_DB_PATH = os.getenv("EVENT_DB_PATH", os.path.join(os.path.dirname(__file__), "..", "data", "events.db"))
+SNAPSHOT_DIR = os.getenv("SNAPSHOT_DIR", os.path.join(os.path.dirname(__file__), "..", "data", "snapshots"))  # D-030
 ENGINE_HEARTBEAT_MAX_AGE = 5.0  # engine itself stale -> fail-closed (D-005)
 
 # --- AI (all async, out of hot path — CLAUDE §2.8/§7) ---

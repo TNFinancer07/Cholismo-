@@ -549,6 +549,32 @@ branches ne sont plus « vérifiées par raisonnement » mais par rendu contrôl
    d'abord, puis accumulation) : les prints neufs comptent dans l'accumulateur FRAIS
    (post-reset), jamais perdus. Figé par test.
 
+## D-030 · Snapshot Déterministe (`app/snapshot.py`, `POST /snapshot`)
+Module d'export : capture instantanée des 4 blocs (carnet, CVD par niveau, calendrier éco,
+alertes IA) en JSON + Markdown, déclenchée par API. Hypothèses (Loop 1 étape 1) :
+- **DÉTERMINISTE** : `build_snapshot` est une pure projection du `ContextSchema` courant
+  (`model_dump`) — même schéma + mêmes id/ts ⇒ contenu identique bit-à-bit (aucun LLM, aucun
+  hasard ; le seul non-déterminisme est l'horodatage, passé en paramètre). Test dédié.
+- **FAIL-CLOSED (§3)** : chaque bloc est capturé TEL QUEL — un bloc absent/périmé garde son
+  `freshness=ABSENT`/`value=None`, et le Markdown affiche « PAS DE DONNÉES ». Jamais un
+  carnet/CVD inventé. Le snapshot est une preuve honnête de « ce que le terminal savait à
+  l'instant T », gaps compris (cohérent objectif « preuve comportementale »).
+- **Écriture ASYNC NON-BLOQUANTE (§7)** : `write_snapshot` sérialise (JSON + Markdown) puis
+  OFFLOADE l'I/O disque via `asyncio.to_thread` (`_write_files`) → la boucle d'événements,
+  donc le hot path, n'est jamais bloquée. Prouvé : écriture lente (0,3 s) + ticker concurrent
+  qui avance (test non-bloquant).
+- **JSON** = capture machine complète (les 4 blocs dumpés + métadonnées) ; **Markdown** =
+  résumé lisible humain (carnet best bid/ask + spread ; CVD net + POC + échelle ; calendrier
+  prochains événements + compte à rebours ; alertes IA statut). Écrits dans `SNAPSHOT_DIR`
+  (`data/snapshots/`, gitignoré — artefacts générés).
+- **Endpoint** `POST /snapshot` : lit `engine.schema`, id `snap_{int(ts)}_{operator}`, écrit,
+  renvoie `{snapshot_id, created_ts, json_path, md_path}`. OBSERVATION, jamais un ordre (§2.1) ;
+  n'écrit PAS dans l'event store append-only (§2.5) — export fichier séparé.
+- **Hors-scope de cette tranche** (une feature par commit) : bouton de déclenchement frontend ;
+  collision d'id si 2 snapshots dans la même seconde (int(ts)) — à durcir au /devil ; liste/
+  téléchargement des snapshots. Essai manuel réel concluant (endpoint live → JSON + Markdown
+  honnêtes avec données live : POC, spread, countdowns, SWEEP ACTIF).
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.
