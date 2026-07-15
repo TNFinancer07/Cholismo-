@@ -66,6 +66,13 @@ GEMINI_AUDIT_EVERY_N_TRADES = 20  # AUTORITÉ
 SWEEP_TICK_SECONDS = float(os.getenv("SWEEP_TICK_SECONDS", "1.0"))  # hors hot path (§2.8)
 SWEEP_RECENT_MAX = 8             # longueur du feed d'alertes récentes
 
+# --- log_scraper : tailer NT8 → auto-snapshot (OBSERVATION seule §2.1 — D-031) ---
+# Désactivé par défaut : aucun log NT8 en démo. Activer avec un vrai dossier NT8
+# (Documents/NinjaTrader 8/log). Fail-closed si le dossier/log du jour est absent.
+LOG_SCRAPER_ENABLED = os.getenv("LOG_SCRAPER_ENABLED", "false").lower() == "true"
+NT8_LOG_DIR = os.getenv("NT8_LOG_DIR", "")
+LOG_SCRAPER_POLL_SECONDS = float(os.getenv("LOG_SCRAPER_POLL_SECONDS", "1.0"))  # hors hot path
+
 # --- Session windows CET (PLACEHOLDER D-006) ---
 LONDON_OBS_CET = (8, 12)      # 08:00–12:00 CET
 OVERLAP_NY_CET = (14.5, 17.5)  # 14:30–17:30 CET

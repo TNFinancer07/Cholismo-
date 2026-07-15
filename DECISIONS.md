@@ -575,6 +575,37 @@ alertes IA) en JSON + Markdown, déclenchée par API. Hypothèses (Loop 1 étape
   téléchargement des snapshots. Essai manuel réel concluant (endpoint live → JSON + Markdown
   honnêtes avec données live : POC, spread, countdowns, SWEEP ACTIF).
 
+## D-031 · log_scraper — tailer NT8 → auto-snapshot (`app/log_scraper.py`)
+Tailer du log quotidien de NinjaTrader 8 : sur un fill DÉJÀ passé par l'humain dans NT8,
+déclenche automatiquement une capture de snapshot (D-030). Hypothèses (Loop 1 étape 1) :
+- **OBSERVATION seule (§2.1)** : le module lit les logs d'exécution que NT8 a produits
+  lui-même — il ne fait que *constater* qu'un fill a eu lieu. Il ne passe, ne modifie ni ne
+  route JAMAIS d'ordre. Le seul effet de bord est une capture de snapshot (fichier), jamais
+  une action marché.
+- **ASYNC NON-BLOQUANT (§7)** : la lecture disque (`_read_new`) est OFFLOADÉE via
+  `asyncio.to_thread` ; la boucle d'événements n'est jamais bloquée par l'I/O. Prouvé : lecture
+  lente (0,3 s) + ticker concurrent qui avance (test non-bloquant). Boucle auto-cadencée
+  (RUNTIME_LOOPS Loop D) : `sleep(max(0.05, poll − elapsed))`, ne meurt jamais sur exception.
+- **FAIL-CLOSED (§3)** : dossier/log absent ou illisible → `_read_new` renvoie `None`, aucun
+  trigger, jamais un fill inventé. Le tailer démarre en FIN de fichier (première vue) → ne
+  rejoue PAS l'historique. Rotation quotidienne détectée par changement d'inode → repart en
+  fin du nouveau fichier ; troncature en place → repart en fin (aucun replay). Tests dédiés
+  couvrent : nouvelle ligne, skip historique, fichier absent, rotation, non-bloquant.
+- **DÉTERMINISTE** : détection par Regex sur mots-clés NT8 (`Execution=`, `filled`,
+  `State=Filled`) + extraction des champs présents (instrument, prix, quantité) ; ligne de
+  bruit → `None`. Aucun LLM. `nt8_daily_log_path` cible `log.YYYYMMDD*.txt` du jour (le plus
+  récent) ou `None` (fail-closed).
+- **Câblage** : `main.py` lifespan construit le tailer si `LOG_SCRAPER_ENABLED=true` ET
+  `NT8_LOG_DIR` fourni (sinon `None` — désactivé par défaut, aucun log NT8 en démo). Le
+  callback appelle `capture_snapshot(engine, now)` — helper partagé extrait de `POST /snapshot`
+  (chemin unique : projection déterministe + écriture async). Toute erreur de capture est
+  isolée (le tailer survit). Essai manuel réel concluant : fill NT8 appendé → 1 snapshot
+  JSON + MD auto-créé ; historique et lignes de bruit → aucun trigger.
+- **Amélioration vs D-030** : id snapshot horodaté à la **milliseconde** (`snap_{int(ts*1000)}_
+  {op}`) — réduit la collision sous rafale de fills. Résiduel hors-scope (v1) : deux fills dans
+  la même milliseconde s'écraseraient encore (invraisemblable pour un trader discrétionnaire
+  human-in-the-loop) ; démarrage/arrêt/monitoring du scraper via API non exposés.
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.

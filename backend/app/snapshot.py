@@ -151,3 +151,19 @@ async def write_snapshot(snap: Snapshot, directory: str) -> dict:
     jpath, mpath = await asyncio.to_thread(_write_files, directory, snap.snapshot_id, payload, md)
     return {"snapshot_id": snap.snapshot_id, "created_ts": snap.created_ts,
             "json_path": jpath, "md_path": mpath}
+
+
+# ---------- déclencheur partagé (endpoint /snapshot ET auto-trigger log_scraper) ----------
+
+async def capture_snapshot(engine, now: float, *, snapshot_id: str | None = None,
+                           directory: str | None = None) -> dict:
+    """Capture + écrit le snapshot du schéma courant. Chemin UNIQUE partagé par l'endpoint
+    `POST /snapshot` et l'auto-déclenchement du log_scraper : projection déterministe, écriture
+    async non-bloquante (§7). L'id horodaté à la milliseconde limite la collision sous rafale
+    de fills ; passer `snapshot_id` pour un id explicite."""
+    from . import config
+    si = engine.schema.session_identity
+    operator = si.operator.value
+    snap_id = snapshot_id or f"snap_{int(now * 1000)}_{operator.lower()}"
+    snap = build_snapshot(engine.schema, snap_id, now, operator, si.session_marker.value)
+    return await write_snapshot(snap, directory or config.SNAPSHOT_DIR)
