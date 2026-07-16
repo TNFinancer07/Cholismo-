@@ -9,7 +9,7 @@ import { useWorkspaces } from '@/store/workspace'
 import { refreshSelfcheck } from './sse'
 
 const VIEWS: ViewKey[] = ['TERMINAL', 'RECAP', 'LIVE', 'JOURNAL', 'ORCHESTRATEUR',
-  'PROMPTS', 'PARAMS']
+  'PROMPTS', 'PARAMS', 'JBORD']
 
 export function useKeyboardNav() {
   useEffect(() => {

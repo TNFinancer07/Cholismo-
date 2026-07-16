@@ -69,6 +69,9 @@ export const api = {
   importSettings: (payload: unknown, unlockLive: boolean) =>
     request('/settings/import', {
       method: 'POST', body: JSON.stringify({ payload, unlock_live: unlockLive }) }),
+  snapshotsList: () => request<unknown>('/snapshots/list'),
+  snapshot: (id: string) => request<unknown>(`/snapshots/${encodeURIComponent(id)}`),
+  captureSnapshot: () => request<unknown>('/snapshot', { method: 'POST' }),
   liveContext: () => request<unknown>('/live/context'),
   liveAsk: (question: string, operator: string) =>
     request<unknown>('/live/ask', { method: 'POST', body: JSON.stringify({ question, operator }) }),

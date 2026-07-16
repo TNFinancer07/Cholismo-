@@ -4,6 +4,7 @@ No endpoint places an order — Go/No-Go only APPENDS a DecisionEvent (CLAUDE §
 """
 from __future__ import annotations
 
+import asyncio
 import time
 import uuid
 from typing import Any, Optional
@@ -19,7 +20,7 @@ from .event_store import get_store
 from .orchestrator import orchestrator_payload
 from .recon import parse_ninjatrader_csv, reconcile
 from .schema import Operator, Phase0State
-from .snapshot import capture_snapshot
+from .snapshot import capture_snapshot, list_snapshots, read_snapshot
 from .sse import broadcaster
 
 router = APIRouter()
@@ -46,6 +47,29 @@ async def create_snapshot(request: Request) -> dict[str, Any]:
     JSON + Markdown dans SNAPSHOT_DIR. Écriture async non-bloquante ; observation, jamais un
     ordre (§2.1)."""
     return await capture_snapshot(request.app.state.engine, time.time())
+
+
+# ---------- Journal de Bord — index + lecture des snapshots passés (D-032) ----------
+# Note d'ordre : `/snapshots/list` est déclaré AVANT `/snapshots/{snapshot_id}` pour que
+# « list » ne soit pas capté comme un identifiant. Lecture disque offloadée (to_thread).
+
+@router.get("/snapshots/list")
+async def snapshots_index(limit: int = 200) -> dict[str, Any]:
+    """Index des snapshots (récent → ancien), pour le panneau Journal de Bord. Fail-closed :
+    dossier absent → liste vide, jamais une erreur (§3)."""
+    limit = max(1, min(limit, 1000))
+    items = await asyncio.to_thread(list_snapshots, config.SNAPSHOT_DIR, limit)
+    return {"directory": config.SNAPSHOT_DIR, "count": len(items), "snapshots": items}
+
+
+@router.get("/snapshots/{snapshot_id}")
+async def snapshot_content(snapshot_id: str) -> dict[str, Any]:
+    """Contenu d'UN snapshot (JSON parsé + Markdown) pour le visualiseur. Id invalide ou
+    inconnu → 404 (garde anti-traversal côté `read_snapshot`)."""
+    snap = await asyncio.to_thread(read_snapshot, config.SNAPSHOT_DIR, snapshot_id)
+    if snap is None:
+        raise HTTPException(404, "snapshot introuvable ou identifiant invalide")
+    return snap
 
 
 # ---------- SSE — cadence-segmented channels (CLAUDE §6) ----------

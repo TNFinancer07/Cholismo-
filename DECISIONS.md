@@ -651,6 +651,35 @@ Attaques : fichier verrouillé Windows · encodage corrompu / lignes tronquées 
   apparaît, on bascule (le changement d'inode cale la lecture en fin). Nom non conforme →
   ignoré. Test : bascule J1→J2 à horloge figée + fichier parasite ignoré.
 
+## D-032 · Journal de Bord — index + visualiseur des snapshots (vue frontend)
+Vue plein écran (pas un panneau SSE) qui archive et rejoue les snapshots déterministes (D-030).
+`GET /snapshots/list` (index) + `GET /snapshots/{id}` (contenu) → vue `JBORD`. Hypothèses/décisions :
+- **VUE, pas PANNEAU (traçabilité §1)** : un *panneau* live doit mapper un bloc du
+  ContextSchema (§1) ; ici on relit des projections PASSÉES écrites sur disque → c'est une VUE
+  d'archive (comme JOURNAL/RECAP/PARAMS), pas un panneau de signal. Le contenu reste traçable au
+  schéma (chaque snapshot EST une projection déterministe). OBSERVATION seule (§2.1).
+- **Backend** : `list_snapshots(dir, limit)` indexe par NOM de fichier + `stat` (aucune lecture
+  de contenu → rapide sur des centaines de fills), récent→ancien, capé (défaut 200, max 1000).
+  `read_snapshot(dir, id)` renvoie JSON parsé + Markdown. **Sécurité** : `id` doit matcher
+  `^snap_\d+_[a-z]+(-\d+)?$` — garde anti-traversal (rejette `../`, séparateurs) AVANT toute
+  lecture ; id invalide/inconnu → 404. Route `/snapshots/list` déclarée AVANT `/{id}`. Lecture
+  offloadée (`to_thread`). Fail-closed (§3) : dossier absent → `[]`, jamais une erreur.
+- **Frontend** : liste **VIRTUALISÉE** maison (fenêtre de lignes `ROW_H=30`, overscan) — fluide
+  sur des centaines de snapshots SANS dépendance (pas de react-window ajouté ; contrainte proxy
+  + « lisibilité > décoration »). Visualiseur bascule **Markdown / JSON** (`<pre>` monospace :
+  le .md est lisible tel quel — pas de rendu HTML, évite une lib markdown + tout risque
+  d'injection). Poll index 8 s (hors hot path). Bouton **Capturer** (POST /snapshot) →
+  sélectionne le nouveau snapshot (« je capture, je le vois »). Bouton **Actualiser**.
+- **Ergonomie (§polish)** : badge opérateur couleur JAMAIS seule (§3) — texte `S1·SONY` /
+  `S2·YOUSSEF` ; ligne sélectionnée = liseré gauche or + fond (pas la couleur seule). État vide
+  HONNÊTE et actionnable (« Aucun snapshot — clique Capturer ou déclenche un fill NT8 »). Nav
+  clavier : liste `role=listbox` focusable, `ArrowUp/Down/Home/End` déplacent la sélection avec
+  scroll-into-view. Découvrable : mnémonique `BORD` (alias SNAP/JB/SNAPSHOTS) dans la barre de
+  commande + cycle `V` + entrée HELP. Colonne manquante d'un snapshot (`⚠ md`/`⚠ json`) signalée.
+- **Vérif** : 6 tests backend (index récent→ancien, limite, dossier absent, lecture contenu,
+  anti-traversal) — 95 passed, ruff clean ; `tsc`+`vite build` OK ; essai Playwright réel
+  (capture → ligne → viewer MD/JSON → nav clavier) + captures d'écran.
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.

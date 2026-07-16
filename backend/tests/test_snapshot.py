@@ -18,8 +18,8 @@ import time
 from app.meta import Freshness, MetaField
 from app.schema import (ContextSchema, CvdLevel, CvdState, LiquiditySweep,
                         LiquiditySweepAlert)
-from app.snapshot import (build_snapshot, capture_snapshot, render_markdown,
-                          write_snapshot)
+from app.snapshot import (build_snapshot, capture_snapshot, list_snapshots,
+                          read_snapshot, render_markdown, write_snapshot)
 
 
 def _wired(now: float) -> ContextSchema:
@@ -103,6 +103,55 @@ def test_capture_snapshot_no_collision_same_millisecond(tmp_path):
         assert os.path.exists(r1["json_path"]) and os.path.exists(r2["json_path"])
         assert r1["json_path"] != r2["json_path"]            # deux fichiers, rien d'écrasé
     asyncio.run(scenario())
+
+
+# ---------- Journal de Bord — index + lecture (D-032) ----------
+
+def _write(directory, snap_id, ts):
+    import asyncio as _a
+    snap = build_snapshot(_wired(ts), snap_id, ts, "SONY", "OVERLAP_NY")
+    _a.run(write_snapshot(snap, directory))
+
+
+def test_list_snapshots_indexes_newest_first(tmp_path):
+    _write(str(tmp_path), "snap_1000000_sony", 1000.0)
+    _write(str(tmp_path), "snap_3000000_sony", 3000.0)
+    _write(str(tmp_path), "snap_2000000_sony", 2000.0)
+    idx = list_snapshots(str(tmp_path))
+    assert [e["snapshot_id"] for e in idx] == \
+        ["snap_3000000_sony", "snap_2000000_sony", "snap_1000000_sony"]  # récent → ancien
+    assert idx[0]["created_ts"] == 3000.0 and idx[0]["operator"] == "SONY"
+    assert idx[0]["has_json"] and idx[0]["has_md"] and idx[0]["bytes"] > 0
+
+
+def test_list_snapshots_absent_dir_is_empty_not_error(tmp_path):
+    assert list_snapshots(str(tmp_path / "n_existe_pas")) == []   # fail-closed, pas d'erreur
+
+
+def test_list_snapshots_respects_limit(tmp_path):
+    for i in range(1, 6):
+        _write(str(tmp_path), f"snap_{i}000000_sony", float(i * 1000))
+    idx = list_snapshots(str(tmp_path), limit=2)
+    assert len(idx) == 2
+    assert [e["snapshot_id"] for e in idx] == ["snap_5000000_sony", "snap_4000000_sony"]
+
+
+def test_read_snapshot_returns_json_and_markdown(tmp_path):
+    _write(str(tmp_path), "snap_1000000_sony", 1000.0)
+    r = read_snapshot(str(tmp_path), "snap_1000000_sony")
+    assert r is not None
+    assert r["json"]["snapshot_id"] == "snap_1000000_sony"
+    assert r["json"]["cvd_by_level"]["total_delta"] == 12.0
+    assert r["markdown"].startswith("# Snapshot")
+    assert "NFP" in r["markdown"]
+
+
+def test_read_snapshot_rejects_path_traversal_and_bad_ids(tmp_path):
+    # jamais lire hors du dossier snapshots (§ sécurité / fail-closed)
+    assert read_snapshot(str(tmp_path), "../../etc/passwd") is None
+    assert read_snapshot(str(tmp_path), "snap_1_sony/../secret") is None
+    assert read_snapshot(str(tmp_path), "not_a_snapshot") is None
+    assert read_snapshot(str(tmp_path), "snap_1_sony") is None    # bien formé mais absent
 
 
 def test_write_snapshot_is_non_blocking(tmp_path, monkeypatch):

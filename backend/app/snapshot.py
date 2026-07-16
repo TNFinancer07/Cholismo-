@@ -12,10 +12,15 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 
 from pydantic import BaseModel
 
 from .schema import ContextSchema
+
+# Id snapshot bien formé : `snap_<ms>_<operator>[-<seq>]`. Sert AUSSI de garde anti-traversal
+# (pas de « / », « .. », séparateur de chemin) avant toute lecture disque (§ sécurité).
+_SNAP_ID_RE = re.compile(r"^snap_(\d+)_([a-z]+)(?:-\d+)?$")
 
 
 class Snapshot(BaseModel):
@@ -185,3 +190,70 @@ async def capture_snapshot(engine, now: float, *, snapshot_id: str | None = None
     snap_id = snapshot_id or _unique_snapshot_id(now, operator)
     snap = build_snapshot(engine.schema, snap_id, now, operator, si.session_marker.value)
     return await write_snapshot(snap, directory or config.SNAPSHOT_DIR)
+
+
+# ---------- Journal de Bord — index + lecture (D-032) ----------
+
+def list_snapshots(directory: str, limit: int = 200) -> list[dict]:
+    """Indexe les snapshots présents dans `directory`, du plus RÉCENT au plus ancien, capé à
+    `limit`. Purement à partir des NOMS de fichiers + `stat` (aucune lecture du contenu → rapide
+    même sur beaucoup de fichiers). Fail-closed : dossier absent/illisible → `[]`, jamais une
+    erreur ni une entrée inventée (§3). Bloquant → appeler via `asyncio.to_thread`."""
+    try:
+        names = os.listdir(directory)
+    except OSError:
+        return []
+    by_id: dict[str, dict] = {}
+    for name in names:
+        if name.endswith(".json"):
+            snap_id, kind = name[:-5], "json"
+        elif name.endswith(".md"):
+            snap_id, kind = name[:-3], "md"
+        else:
+            continue
+        entry = by_id.setdefault(snap_id, {"snapshot_id": snap_id, "has_json": False,
+                                           "has_md": False, "bytes": 0})
+        entry[f"has_{kind}"] = True
+        try:
+            st = os.stat(os.path.join(directory, name))
+        except OSError:
+            continue
+        entry["bytes"] += st.st_size
+        # created_ts : dérivé du stamp ms de l'id (id = snap_<ms>_<op>) ; sinon mtime de secours.
+        m = _SNAP_ID_RE.match(snap_id)
+        if m is not None:
+            entry["created_ts"] = int(m.group(1)) / 1000.0
+            entry["operator"] = m.group(2).upper()
+        else:
+            entry.setdefault("created_ts", st.st_mtime)
+            entry.setdefault("operator", "?")
+    items = sorted(by_id.values(), key=lambda e: (e.get("created_ts", 0.0), e["snapshot_id"]),
+                   reverse=True)
+    return items[:limit]
+
+
+def read_snapshot(directory: str, snapshot_id: str) -> dict | None:
+    """Lit le contenu (JSON parsé + Markdown) d'UN snapshot. `snapshot_id` DOIT matcher
+    `_SNAP_ID_RE` — sinon `None` (garde anti-traversal : jamais lire hors du dossier snapshots).
+    `None` aussi si aucun fichier n'existe pour cet id (§3). Bloquant → via `asyncio.to_thread`."""
+    if _SNAP_ID_RE.match(snapshot_id) is None:
+        return None
+    jpath = os.path.join(directory, f"{snapshot_id}.json")
+    mpath = os.path.join(directory, f"{snapshot_id}.md")
+    payload = None
+    markdown = None
+    try:
+        with open(jpath, encoding="utf-8") as f:
+            payload = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        payload = None
+    try:
+        with open(mpath, encoding="utf-8") as f:
+            markdown = f.read()
+    except OSError:
+        markdown = None
+    if payload is None and markdown is None:
+        return None
+    return {"snapshot_id": snapshot_id, "json": payload, "markdown": markdown,
+            "json_path": jpath if payload is not None else None,
+            "md_path": mpath if markdown is not None else None}
