@@ -37,6 +37,14 @@ def test_parse_execution_detects_filled_state():
     assert parse_execution("... order filled at market ...") is not None
 
 
+def test_parse_execution_extracts_side_when_present():
+    # côté embarqué dans le snapshot pour le Trade Reconciliator (D-033) ; None si absent
+    assert parse_execution("Execution='x' Buy Instrument='ES 12-24' Price=1 Quantity=1").side == "BUY"
+    assert parse_execution("Execution='x' Sell Instrument='ES' Price=1 Quantity=1").side == "SELL"
+    assert parse_execution("Execution='x' BuyToCover Instrument='NQ' Price=1").side == "BUY"
+    assert parse_execution("Execution='x' Instrument='ES' Price=1 Quantity=1").side is None
+
+
 def test_parse_execution_ignores_noise():
     assert parse_execution("2024-11-15 09:00:00|Connected to data feed") is None
     assert parse_execution("") is None

@@ -34,11 +34,13 @@ class Snapshot(BaseModel):
     cvd_by_level: dict      # s1_state.cvd_by_level dumpé
     econ_calendar: dict     # econ_calendar dumpé
     liquidity_sweep: dict   # liquidity_sweep dumpé
+    fill: dict | None = None  # fill NT8 DÉCLENCHEUR (log_scraper) — None pour une capture de contexte
 
 
 def build_snapshot(schema: ContextSchema, snapshot_id: str, created_ts: float,
-                   operator: str, session_marker: str) -> Snapshot:
-    """Projette les 4 blocs du schéma courant. Déterministe : dépend uniquement des entrées."""
+                   operator: str, session_marker: str, fill: dict | None = None) -> Snapshot:
+    """Projette les 4 blocs du schéma courant (+ le fill déclencheur s'il y en a un).
+    Déterministe : dépend uniquement des entrées."""
     dump = schema.model_dump(mode="json")
     return Snapshot(
         snapshot_id=snapshot_id, created_ts=created_ts,
@@ -47,6 +49,7 @@ def build_snapshot(schema: ContextSchema, snapshot_id: str, created_ts: float,
         cvd_by_level=dump["s1_state"]["cvd_by_level"],
         econ_calendar=dump["econ_calendar"],
         liquidity_sweep=dump["liquidity_sweep"],
+        fill=fill,
     )
 
 
@@ -178,8 +181,9 @@ def _unique_snapshot_id(now: float, operator: str) -> str:
 
 
 async def capture_snapshot(engine, now: float, *, snapshot_id: str | None = None,
-                           directory: str | None = None) -> dict:
-    """Capture + écrit le snapshot du schéma courant. Chemin UNIQUE partagé par l'endpoint
+                           directory: str | None = None, fill: dict | None = None) -> dict:
+    """Capture + écrit le snapshot du schéma courant (+ le `fill` déclencheur s'il y en a un —
+    embarqué pour le Trade Reconciliator, D-033). Chemin UNIQUE partagé par l'endpoint
     `POST /snapshot` et l'auto-déclenchement du log_scraper : projection déterministe, écriture
     async non-bloquante (§7). L'id est horodaté à la milliseconde ET désambiguïsé par un
     compteur monotone → deux fills dans la même ms produisent deux fichiers distincts, jamais
@@ -188,7 +192,7 @@ async def capture_snapshot(engine, now: float, *, snapshot_id: str | None = None
     si = engine.schema.session_identity
     operator = si.operator.value
     snap_id = snapshot_id or _unique_snapshot_id(now, operator)
-    snap = build_snapshot(engine.schema, snap_id, now, operator, si.session_marker.value)
+    snap = build_snapshot(engine.schema, snap_id, now, operator, si.session_marker.value, fill=fill)
     return await write_snapshot(snap, directory or config.SNAPSHOT_DIR)
 
 

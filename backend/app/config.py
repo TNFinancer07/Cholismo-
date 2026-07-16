@@ -66,6 +66,12 @@ GEMINI_AUDIT_EVERY_N_TRADES = 20  # AUTORITÉ
 SWEEP_TICK_SECONDS = float(os.getenv("SWEEP_TICK_SECONDS", "1.0"))  # hors hot path (§2.8)
 SWEEP_RECENT_MAX = 8             # longueur du feed d'alertes récentes
 
+# --- Trade Reconciliator (analytics FIFO sur snapshots — D-033) ---
+# $/point par contrat. ES/MES = AUTORITÉ (spec) ; NQ/MNQ ajoutés (valeurs CME standard).
+# Instrument inconnu → P&L USD non calculé (fail-closed §3, jamais inventé). Le risque de
+# référence R réutilise R_UNIT_USD (défaut 100 $) — source unique, pas de double définition.
+CONTRACT_POINT_VALUE = {"ES": 50.0, "MES": 5.0, "NQ": 20.0, "MNQ": 2.0}
+
 # --- log_scraper : tailer NT8 → auto-snapshot (OBSERVATION seule §2.1 — D-031) ---
 # Désactivé par défaut : aucun log NT8 en démo. Activer avec un vrai dossier NT8
 # (Documents/NinjaTrader 8/log). Fail-closed si le dossier/log du jour est absent.

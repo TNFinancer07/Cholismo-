@@ -33,6 +33,8 @@ _EXEC_KEYWORDS = re.compile(r"Execution\s*=|\bfilled\b", re.IGNORECASE)
 _RE_INSTRUMENT = re.compile(r"Instrument='([^']*)'")
 _RE_PRICE = re.compile(r"Price=([-+]?\d+(?:\.\d+)?)")
 _RE_QUANTITY = re.compile(r"Quantity=([-+]?\d+)")
+# Côté du fill (v1 provisional — dépend du format exact NT8) : action Buy/Sell explicite.
+_RE_SIDE = re.compile(r"\b(Buy(?:ToCover)?|Sell(?:Short)?)\b")
 _RE_DAILY_STAMP = re.compile(r"log\.(\d{8})")     # NT8 : log.YYYYMMDD*.txt
 _BUFFER_MAX = 1_000_000                            # garde-fou : ligne jamais terminée → drop
 
@@ -40,11 +42,14 @@ _BUFFER_MAX = 1_000_000                            # garde-fou : ligne jamais te
 @dataclass
 class ExecutionMatch:
     """Un fill détecté dans le log NT8. Champs optionnels : une ligne peut matcher le mot-clé
-    sans exposer tous les champs — on capture ce qui est présent, jamais on n'invente (§3)."""
+    sans exposer tous les champs — on capture ce qui est présent, jamais on n'invente (§3).
+    `side` (BUY/SELL) est None si le log ne l'expose pas → le réconciliateur le traite comme
+    non résolu (jamais deviné)."""
     raw: str
     instrument: Optional[str] = None
     price: Optional[float] = None
     quantity: Optional[int] = None
+    side: Optional[str] = None
 
 
 def parse_execution(line: str) -> Optional[ExecutionMatch]:
@@ -56,11 +61,16 @@ def parse_execution(line: str) -> Optional[ExecutionMatch]:
     mi = _RE_INSTRUMENT.search(line)
     mp = _RE_PRICE.search(line)
     mq = _RE_QUANTITY.search(line)
+    ms = _RE_SIDE.search(line)
+    side = None
+    if ms is not None:
+        side = "BUY" if ms.group(1).lower().startswith("buy") else "SELL"
     return ExecutionMatch(
         raw=line,
         instrument=mi.group(1) if mi else None,
         price=float(mp.group(1)) if mp else None,
         quantity=int(mq.group(1)) if mq else None,
+        side=side,
     )
 
 

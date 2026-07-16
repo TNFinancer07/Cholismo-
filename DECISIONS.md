@@ -680,6 +680,38 @@ Vue plein écran (pas un panneau SSE) qui archive et rejoue les snapshots déter
   anti-traversal) — 95 passed, ruff clean ; `tsc`+`vite build` OK ; essai Playwright réel
   (capture → ligne → viewer MD/JSON → nav clavier) + captures d'écran.
 
+## D-033 · Trade Reconciliator — moteur analytique FIFO (`app/trade_reconciliator.py`)
+Moteur hors-ligne qui apparie les fills entrée↔sortie et calcule P&L USD + R-Multiple, exposé
+via `GET /analyses/trades`. Hypothèses/décisions (Loop 1) :
+- **Contradiction de spec résolue (source des fills)** : la requête demande de « charger
+  l'historique des snapshots » et « apparier les fills », mais les snapshots (D-030) ne
+  portaient QUE le contexte marché (carnet, CVD, calendrier, alertes) — PAS le fill. Résolution
+  non ambiguë (§12) : **embarquer le fill déclencheur DANS le snapshot**. Le log_scraper tenait
+  déjà le fill (ExecutionMatch) et le jetait ; désormais `capture_snapshot(..., fill=…)` l'écrit
+  dans le bloc `fill` du snapshot (None pour une capture de contexte via `POST /snapshot`). Le
+  snapshot devient auto-descriptif (« déclenché par ce fill »).
+- **Côté du fill** : `parse_execution` extrait BUY/SELL (`Buy|BuyToCover|Sell|SellShort`) — noté
+  `v1 provisional` (dépend du format exact NT8, à valider sur une install réelle). Absent → côté
+  None → le réconciliateur compte le fill « non résolu », jamais deviné (§3).
+- **FIFO net avec flips** : `reconcile_fills` tient un carnet de lots par RACINE d'instrument
+  (`normalize_instrument` : « ES 12-24 » → « ES »). Un fill de même sens ouvre/ajoute ; de sens
+  opposé ferme les lots les plus anciens (FIFO) et tout surplus RETOURNE la position. Chaque
+  appariement = un `CompletedTrade` (direction, qty appariée, prix E/S, ts E/S).
+- **P&L & R** : `CONTRACT_POINT_VALUE` (config) = $/pt — **ES=50, MES=5 AUTORITÉ (spec)**,
+  NQ=20/MNQ=2 ajoutés. `pnl_usd = pnl_points × qty × point_value` ; `r_multiple = pnl_usd /
+  R_UNIT_USD` (réutilise le 100 $ existant — source unique, pas de double définition).
+  `exposure_seconds = exit_ts − entry_ts`.
+- **FAIL-CLOSED (§3)** : contrat hors dictionnaire → `point_value`/`pnl_usd`/`r_multiple` =
+  None, P&L en POINTS seulement (jamais un $ inventé) ; dossier absent → résultat vide ; fill
+  incomplet → non résolu. `open_lots`/`unresolved_fills` remontés honnêtement dans le résumé.
+- **ANALYTIQUE, jamais un ordre (§2.1)** ; lecture disque offloadée (`to_thread`), hors hot path.
+- **Vérif** : 12 tests engine (FIFO, flip partiel, short, contrat inconnu, côté manquant,
+  résumé, chargement, dossier absent, bout-en-bout) + 1 test parse côté ; 108 passed, ruff
+  clean ; essai réel : 2 fills NT8 (BUY 2 @5000 / SELL 2 @5010) → snapshots avec fill embarqué
+  → `GET /analyses/trades` = 1 trade LONG, **P&L 1000 $, R 10.0**, 0 non résolu.
+- **Hors-scope (une feature = un commit)** : panneau frontend d'analyse (l'endpoint est prêt) ;
+  frais/commissions ; slippage ; risque par-trade réel (R utilise le 100 $ de référence).
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.

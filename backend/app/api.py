@@ -21,6 +21,7 @@ from .orchestrator import orchestrator_payload
 from .recon import parse_ninjatrader_csv, reconcile
 from .schema import Operator, Phase0State
 from .snapshot import capture_snapshot, list_snapshots, read_snapshot
+from .trade_reconciliator import analyze_trades
 from .sse import broadcaster
 
 router = APIRouter()
@@ -70,6 +71,16 @@ async def snapshot_content(snapshot_id: str) -> dict[str, Any]:
     if snap is None:
         raise HTTPException(404, "snapshot introuvable ou identifiant invalide")
     return snap
+
+
+# ---------- Trade Reconciliator — analytics FIFO sur l'historique des snapshots (D-033) ----------
+
+@router.get("/analyses/trades")
+async def analyses_trades() -> dict[str, Any]:
+    """Apparie FIFO les fills embarqués dans les snapshots → P&L USD + R-Multiple par trade.
+    ANALYTIQUE hors-ligne, jamais un ordre (§2.1). Fail-closed : aucun snapshot → résultat vide,
+    contrat inconnu → P&L en points seulement (§3). Lecture disque offloadée."""
+    return await asyncio.to_thread(analyze_trades, config.SNAPSHOT_DIR)
 
 
 # ---------- SSE — cadence-segmented channels (CLAUDE §6) ----------

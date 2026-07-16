@@ -59,14 +59,18 @@ def _build_log_scraper(engine: Engine) -> LogTailer | None:
         return None
 
     async def _on_fill(match) -> None:
-        # Un fill constaté (jamais provoqué) → capture instantanée. Confirmation console
-        # actionnable : l'opérateur voit le fill, le prix, et le CHEMIN écrit (où trouver le
-        # snapshot). Toute erreur de capture est isolée (le tailer survit) et dit quoi vérifier.
+        # Un fill constaté (jamais provoqué) → capture instantanée. Le fill est EMBARQUÉ dans le
+        # snapshot (Trade Reconciliator D-033). Confirmation console actionnable : l'opérateur
+        # voit le côté, l'instrument, le prix, et le CHEMIN écrit. Toute erreur de capture est
+        # isolée (le tailer survit) et dit quoi vérifier.
         price = "?" if match.price is None else match.price
+        now = time.time()
+        fill = {"instrument": match.instrument, "side": match.side, "price": match.price,
+                "quantity": match.quantity, "ts": now, "raw": match.raw}
         try:
-            res = await capture_snapshot(engine, time.time())
-            log.info("log_scraper: fill NT8 détecté (%s @ %s) → snapshot ÉCRIT : %s",
-                     match.instrument or "?", price, res.get("json_path"))
+            res = await capture_snapshot(engine, now, fill=fill)
+            log.info("log_scraper: fill NT8 détecté (%s %s @ %s) → snapshot ÉCRIT : %s",
+                     match.side or "?", match.instrument or "?", price, res.get("json_path"))
         except Exception:
             log.exception("log_scraper: fill détecté (%s @ %s) mais capture de snapshot "
                           "ÉCHOUÉE — vérifier SNAPSHOT_DIR (droits d'écriture / espace disque)",
