@@ -759,6 +759,28 @@ Vue plein écran `PNL` qui consomme `GET /analyses/trades` — **aucune modif ba
   lots ouverts 1, XYZ en « — » ; couleurs vert/rouge vérifiées + capture d'écran. Backend
   inchangé (git : seuls des fichiers frontend modifiés).
 
+### /devil D-034 — durcissement (4 attaques)
+Attaques : 500+ trades · rendu null/None · race sur clics d'actualisation · resize extrême.
+- **500+ trades (bug de perf → corrigé)** : la table rendait TOUTES les lignes (`.map`) et
+  re-triait à chaque frame de scroll. Corrigé : table **VIRTUALISÉE** (fenêtre `ROW_H=22` +
+  overscan, en-tête `sticky`) + tri mémoïsé. Essai réel 500 trades → **30 lignes en DOM**
+  (pas 500), rendu 52 ms, stable au scroll ; agrégats corrects à l'échelle (+25 000 $, +250 R,
+  50 %, R moyen +0,50). Sans dépendance (windowing maison, comme la vue Journal de Bord).
+- **Race sur clics d'actualisation (bug → corrigé)** : `refresh` n'ordonnait pas les réponses
+  concurrentes → une réponse périmée pouvait écraser la fraîche. Corrigé : compteur de requête
+  (`reqSeq`) — seule la réponse de la DERNIÈRE requête est appliquée ; les réponses en vol sont
+  invalidées au démontage (`reqSeq.current++` au cleanup). Essai : 12 clics rapides → état
+  cohérent, **0 erreur JS**.
+- **Rendu null/None** (déjà géré, revérifié) : dataset 100 % instruments inconnus → endpoint
+  0 gagnant/0 perdant, `r_multiple` null partout → tuiles Win Rate / R moyen = « — »,
+  colonnes $/R = « — » (jamais 0 inventé, §3).
+- **Resize extrême (320 px)** : la table PNL défile HORIZONTALEMENT dans son cadre
+  (`overflow-auto` + `min-w-[560px]` ; mesuré : cadre 291 px, contenu 560 px → scroll interne),
+  le corps de page n'est jamais élargi PAR la vue. Les tuiles passent en 2 colonnes, lisibles.
+  **Résiduel hors-scope** : à 320 px le débordement horizontal du `body` (≈786 px) vient de la
+  barre de statut Zone 0 et de la WorkspaceBar (shell global, présent sur TOUTES les vues), pas
+  de la vue PNL — à traiter séparément si le responsive mobile devient une cible.
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.

@@ -3,8 +3,13 @@
  *  (calculés côté client sur la liste des trades) + table chronologique des CompletedTrades.
  *  Code couleur strict VERT (R>0) / ROUGE (R<0) — JAMAIS la couleur seule (§3 : glyphe ▲/▼ +
  *  nombre signé + texte). FAIL-CLOSED : contrat inconnu → $/R affichés « — », jamais 0 inventé.
- *  VUE d'analyse (pas un panneau SSE) — cohérent §1, comme JOURNAL/RECAP. */
-import { useCallback, useEffect, useMemo, useState } from 'react'
+ *  VUE d'analyse (pas un panneau SSE) — cohérent §1, comme JOURNAL/RECAP.
+ *
+ *  Durci /devil : table VIRTUALISÉE (fenêtre de lignes → fluide à 500+ trades sans dépendance) ;
+ *  garde anti-race sur les rafraîchissements (dernière requête gagne, réponses en vol
+ *  invalidées au démontage) ; table à défilement horizontal propre en fenêtre étroite (le corps
+ *  de page ne défile jamais horizontalement). */
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { RefreshCw } from 'lucide-react'
 import { api } from '@/lib/api'
 import { fmtAge, fmtInt, fmtNum, fmtSigned, fmtTs } from '@/lib/format'
@@ -29,9 +34,11 @@ interface TradesPayload {
 }
 
 const POLL_MS = 8000
+const ROW_H = 22        // hauteur de ligne fixe (px) → base de la virtualisation
+const OVERSCAN = 8
 const COLS = 'grid-cols-[70px_1fr_66px_40px_92px_66px_60px]'   // Heure|Instr|Sens|Qté|P&L$|R|Durée
 
-// couleur au SIGNE — jamais seule (§3) : renvoie classe + glyphe directionnel
+// couleur au SIGNE — jamais seule (§3) : classe + glyphe directionnel
 function signStyle(v: number | null): { cls: string; glyph: string } {
   if (v === null || v === 0 || Number.isNaN(v)) return { cls: 'text-term-dim', glyph: '·' }
   return v > 0 ? { cls: 'text-risk-green', glyph: '▲' } : { cls: 'text-risk-red', glyph: '▼' }
@@ -39,21 +46,26 @@ function signStyle(v: number | null): { cls: string; glyph: string } {
 
 function useTrades() {
   const [data, setData] = useState<TradesPayload | null>(null)
+  const reqSeq = useRef(0)   // n° de requête : seule la RÉPONSE de la dernière requête est appliquée
   const refresh = useCallback(async () => {
-    try { setData(await api.analysesTrades() as TradesPayload) } catch { /* bandeau flux couvre */ }
+    const seq = ++reqSeq.current
+    try {
+      const d = await api.analysesTrades() as TradesPayload
+      if (seq === reqSeq.current) setData(d)   // ignore les réponses périmées (race sur clics répétés)
+    } catch { /* bandeau flux couvre */ }
   }, [])
   useEffect(() => {
     void refresh()
     const timer = window.setInterval(() => void refresh(), POLL_MS)
-    return () => window.clearInterval(timer)
+    return () => { reqSeq.current++; window.clearInterval(timer) }   // invalide toute réponse en vol
   }, [refresh])
   return { data, refresh }
 }
 
 function Tile({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="border border-term-border bg-term-panel2 px-1.5 py-1">
-      <span className="block text-xxs uppercase text-term-faint">{label}</span>
+    <div className="min-w-0 border border-term-border bg-term-panel2 px-1.5 py-1">
+      <span className="block truncate text-xxs uppercase text-term-faint">{label}</span>
       {children}
     </div>
   )
@@ -74,15 +86,36 @@ export function AnalysePnlView() {
     return { winRate, avgR, wins, losses }
   }, [data])
 
+  // tri chronologique mémoïsé (pas de re-tri à chaque frame de scroll)
+  const trades = useMemo(
+    () => (data ? [...data.trades].sort((a, b) => a.exit_ts - b.exit_ts) : []),
+    [data])
+
+  // virtualisation : ne rendre que la fenêtre visible
+  const bodyRef = useRef<HTMLDivElement>(null)
+  const [scrollTop, setScrollTop] = useState(0)
+  const [viewportH, setViewportH] = useState(480)
+  useEffect(() => {
+    const el = bodyRef.current
+    if (!el) return
+    const ro = new ResizeObserver(() => setViewportH(el.clientHeight))
+    ro.observe(el)
+    setViewportH(el.clientHeight)
+    return () => ro.disconnect()
+  }, [])
+
   if (data === null) {
     return <div className="grid flex-1 place-items-center text-xs text-term-faint">chargement de l'analyse…</div>
   }
 
   const s = data.summary
-  const trades = [...data.trades].sort((a, b) => a.exit_ts - b.exit_ts)   // chronologique (clôture)
   const pnlSt = signStyle(s.total_pnl_usd)
   const rSt = signStyle(s.total_r)
   const avgSt = signStyle(health.avgR)
+
+  const start = Math.max(0, Math.floor(scrollTop / ROW_H) - OVERSCAN)
+  const end = Math.min(trades.length, Math.ceil((scrollTop + viewportH) / ROW_H) + OVERSCAN)
+  const visible = trades.slice(start, end)
 
   return (
     <div className="flex min-h-0 flex-1 flex-col p-1.5">
@@ -142,50 +175,62 @@ export function AnalysePnlView() {
             </span>
           )}
 
-          {/* ---- table chronologique des trades (points 3 & 4) ---- */}
+          {/* ---- table chronologique virtualisée (points 3 & 4) ----
+               overflow-auto + min-w : en fenêtre étroite la table défile DANS son cadre,
+               le corps de page ne défile jamais horizontalement. */}
           <div className="flex min-h-0 flex-1 flex-col border border-term-border">
-            <div className={cn('grid shrink-0 items-center gap-1 border-b border-term-border bg-term-panel2 px-1.5 py-0.5 text-xxs uppercase text-term-faint', COLS)}>
-              <span>Heure</span><span>Instrument</span><span>Sens</span>
-              <span className="text-right">Qté</span><span className="text-right">P&L $</span>
-              <span className="text-right">R</span><span className="text-right">Durée</span>
-            </div>
-            <div className="min-h-0 flex-1 overflow-y-auto">
-              {trades.length === 0 ? (
-                <div className="grid h-full place-items-center p-4 text-center text-xxs leading-relaxed text-term-faint">
-                  Aucun trade réconcilié.<br />
-                  Un trade apparaît une fois qu'un fill d'entrée ET de sortie ont été capturés
-                  (log_scraper / snapshots).
+            <div ref={bodyRef} onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}
+              className="min-h-0 flex-1 overflow-auto">
+              <div className="min-w-[560px]">
+                <div className={cn('sticky top-0 z-10 grid items-center gap-1 border-b border-term-border bg-term-panel2 px-1.5 py-0.5 text-xxs uppercase text-term-faint', COLS)}>
+                  <span>Heure</span><span>Instrument</span><span>Sens</span>
+                  <span className="text-right">Qté</span><span className="text-right">P&L $</span>
+                  <span className="text-right">R</span><span className="text-right">Durée</span>
                 </div>
-              ) : trades.map((t, i) => {
-                const tr = signStyle(t.r_multiple)
-                const tp = signStyle(t.pnl_usd)
-                // Sens = direction (glyphe ▲/▼ + texte), volontairement NEUTRE : le vert/rouge
-                // est réservé au SIGNE du P&L/R (point 4), jamais surchargé par la direction.
-                const dir = t.direction === 'LONG' ? '▲' : '▼'
-                return (
-                  <div key={i}
-                    className={cn('grid items-center gap-1 border-l-2 px-1.5 py-0.5 text-xxs tabular-nums', COLS,
-                      tr.cls === 'text-risk-green' ? 'border-l-risk-green/50'
-                        : tr.cls === 'text-risk-red' ? 'border-l-risk-red/50' : 'border-l-transparent')}>
-                    <span className="text-term-dim">{fmtTs(t.entry_ts)}</span>
-                    <span className="truncate font-semibold text-term-text" title={`${t.instrument} · ${fmtNum(t.entry_price, 2)} → ${fmtNum(t.exit_price, 2)}`}>
-                      {t.instrument}
-                    </span>
-                    <span className="flex items-center gap-0.5 font-semibold text-term-text">
-                      <span aria-hidden>{dir}</span>{t.direction}
-                    </span>
-                    <span className="text-right text-term-text">{fmtInt(t.quantity)}</span>
-                    <span className={cn('text-right font-semibold', tp.cls)}>
-                      {t.pnl_usd === null ? '—' : fmtSigned(t.pnl_usd, 2)}
-                    </span>
-                    <span className={cn('flex items-center justify-end gap-0.5 font-semibold', tr.cls)}>
-                      {t.r_multiple !== null && <span aria-hidden>{tr.glyph}</span>}
-                      {t.r_multiple === null ? '—' : fmtSigned(t.r_multiple, 2)}
-                    </span>
-                    <span className="text-right text-term-dim">{fmtAge(t.exposure_seconds)}</span>
+                {trades.length === 0 ? (
+                  <div className="grid place-items-center p-4 text-center text-xxs leading-relaxed text-term-faint">
+                    Aucun trade réconcilié.<br />
+                    Un trade apparaît une fois qu'un fill d'entrée ET de sortie ont été capturés
+                    (log_scraper / snapshots).
                   </div>
-                )
-              })}
+                ) : (
+                  <div style={{ height: trades.length * ROW_H, position: 'relative' }}>
+                    {visible.map((t, i) => {
+                      const idx = start + i
+                      const tr = signStyle(t.r_multiple)
+                      const tp = signStyle(t.pnl_usd)
+                      // Sens = direction (glyphe ▲/▼ + texte), NEUTRE : vert/rouge réservé au
+                      // SIGNE du P&L/R (point 4), jamais surchargé par la direction.
+                      const dir = t.direction === 'LONG' ? '▲' : '▼'
+                      return (
+                        <div key={idx}
+                          style={{ position: 'absolute', top: idx * ROW_H, left: 0, right: 0, height: ROW_H }}
+                          className={cn('grid items-center gap-1 border-l-2 px-1.5 text-xxs tabular-nums', COLS,
+                            tr.cls === 'text-risk-green' ? 'border-l-risk-green/50'
+                              : tr.cls === 'text-risk-red' ? 'border-l-risk-red/50' : 'border-l-transparent')}>
+                          <span className="text-term-dim">{fmtTs(t.entry_ts)}</span>
+                          <span className="truncate font-semibold text-term-text"
+                            title={`${t.instrument} · ${fmtNum(t.entry_price, 2)} → ${fmtNum(t.exit_price, 2)}`}>
+                            {t.instrument}
+                          </span>
+                          <span className="flex items-center gap-0.5 font-semibold text-term-text">
+                            <span aria-hidden>{dir}</span>{t.direction}
+                          </span>
+                          <span className="text-right text-term-text">{fmtInt(t.quantity)}</span>
+                          <span className={cn('text-right font-semibold', tp.cls)}>
+                            {t.pnl_usd === null ? '—' : fmtSigned(t.pnl_usd, 2)}
+                          </span>
+                          <span className={cn('flex items-center justify-end gap-0.5 font-semibold', tr.cls)}>
+                            {t.r_multiple !== null && <span aria-hidden>{tr.glyph}</span>}
+                            {t.r_multiple === null ? '—' : fmtSigned(t.r_multiple, 2)}
+                          </span>
+                          <span className="text-right text-term-dim">{fmtAge(t.exposure_seconds)}</span>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
           <p className="border-t border-term-border pt-1 text-xxs text-term-faint">
