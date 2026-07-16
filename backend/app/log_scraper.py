@@ -33,6 +33,8 @@ _EXEC_KEYWORDS = re.compile(r"Execution\s*=|\bfilled\b", re.IGNORECASE)
 _RE_INSTRUMENT = re.compile(r"Instrument='([^']*)'")
 _RE_PRICE = re.compile(r"Price=([-+]?\d+(?:\.\d+)?)")
 _RE_QUANTITY = re.compile(r"Quantity=([-+]?\d+)")
+_RE_DAILY_STAMP = re.compile(r"log\.(\d{8})")     # NT8 : log.YYYYMMDD*.txt
+_BUFFER_MAX = 1_000_000                            # garde-fou : ligne jamais terminée → drop
 
 
 @dataclass
@@ -62,14 +64,31 @@ def parse_execution(line: str) -> Optional[ExecutionMatch]:
     )
 
 
-def nt8_daily_log_path(log_dir: str, now: float) -> Optional[str]:
-    """Cible le log NT8 du JOUR (`log.YYYYMMDD*.txt`). Retourne le plus récent, ou `None` si
-    aucun log du jour n'existe (fail-closed : on ne devine pas un autre fichier)."""
-    stamp = time.strftime("%Y%m%d", time.gmtime(now))
-    matches = glob.glob(os.path.join(log_dir, f"log.{stamp}*.txt"))
-    if not matches:
+def nt8_daily_log_path(log_dir: str, now: float = 0.0) -> Optional[str]:
+    """Cible le log NT8 du JOUR le plus récent PRÉSENT (`log.YYYYMMDD*.txt`), par stamp de date
+    décroissant — donc INDÉPENDANT de l'horloge/fuseau du process (le backend peut tourner en
+    UTC alors que NT8 nomme ses logs en heure locale). Départage un même jour par mtime.
+
+    Cette sélection gère la rotation à minuit sans couture : tant que NT8 n'a pas créé le
+    fichier du nouveau jour, l'ancien (stamp le plus grand présent) reste ciblé → on rattrape sa
+    fin ; dès que le nouveau apparaît, son stamp devient le plus grand → on bascule (le
+    changement d'inode côté `_read_new` cale la lecture en fin du nouveau fichier). Retourne
+    `None` si aucun log daté n'existe (fail-closed — jamais un chemin deviné). `now` est accepté
+    pour compat d'API mais volontairement inutilisé (la sélection ne dépend pas de l'horloge)."""
+    candidates = []
+    for path in glob.glob(os.path.join(log_dir, "log.*.txt")):
+        m = _RE_DAILY_STAMP.search(os.path.basename(path))
+        if m is None:                     # nom non conforme → n'usurpe jamais la sélection
+            continue
+        try:
+            mtime = os.path.getmtime(path)
+        except OSError:
+            continue
+        candidates.append((m.group(1), mtime, path))
+    if not candidates:
         return None
-    return max(matches, key=os.path.getmtime)
+    candidates.sort()                     # (stamp, mtime, path) → dernier = jour le plus récent
+    return candidates[-1][2]
 
 
 class LogTailer:
@@ -87,17 +106,27 @@ class LogTailer:
         self._on_execution = on_execution
         self._poll_seconds = poll_seconds
         self._inode: Optional[tuple[int, int]] = None  # (st_dev, st_ino) du fichier suivi
-        self._offset = 0                                # position de lecture atteinte
+        self._offset = 0                                # position de lecture (OCTETS) atteinte
+        self._buffer = ""                               # fin de ligne incomplète, retenue
         self._task: Optional[asyncio.Task] = None
         self._running = False
 
     def _read_new(self, path: str) -> Optional[list[str]]:
-        """Lit UNIQUEMENT les octets neufs depuis le dernier offset. Bloquant → appelé
-        exclusivement via `asyncio.to_thread`. Retourne la liste des lignes neuves, `[]` si
-        rien de neuf, `None` si le fichier est absent/illisible (fail-closed).
+        """Lit UNIQUEMENT les octets neufs depuis le dernier offset et renvoie les lignes
+        COMPLÈTES (terminées par `\\n`). Bloquant → appelé exclusivement via `asyncio.to_thread`.
+        Retourne `[]` si rien de complet, `None` si le fichier est absent/illisible/verrouillé
+        (fail-closed §3).
 
-        Première vue / rotation (inode différent) → se cale en FIN de fichier et retourne `[]`
-        (l'historique n'est jamais rejoué). Troncature (taille < offset) → repart de la fin."""
+        - Lecture en MODE BINAIRE : l'offset est un vrai décalage d'octets, directement
+          comparable à `st_size` (le `tell()` du mode texte est un cookie opaque, non fiable).
+          Décodage tolérant (`errors='replace'`) : un octet corrompu ne fait jamais crasher, et
+          les mots-clés/nombres NT8 (ASCII) restent détectables.
+        - Ligne TRONQUÉE (NT8 en cours d'écriture, pas encore de `\\n`) : la fin non terminée est
+          RETENUE dans `_buffer` et re-préfixée au prochain cycle → jamais de fill partiel émis.
+        - Première vue / rotation (inode différent) → se cale en FIN de fichier, vide le buffer,
+          retourne `[]` (l'historique n'est jamais rejoué). Troncature (taille < offset) → idem.
+        - On ne lit que jusqu'à la taille vue par `stat` : une écriture concurrente qui grossit
+          le fichier pendant la lecture est rattrapée au cycle suivant (lecture déterministe)."""
         try:
             st = os.stat(path)
         except OSError:
@@ -108,21 +137,28 @@ class LogTailer:
             # première vue ou rotation quotidienne : nouveau fichier → démarre en fin
             self._inode = inode
             self._offset = size
+            self._buffer = ""
             return []
         if size < self._offset:
             # fichier tronqué/réécrit en place → repart de la fin, aucun replay (§3)
             self._offset = size
+            self._buffer = ""
             return []
         if size == self._offset:
             return []
         try:
-            with open(path, "r", encoding="utf-8", errors="replace") as f:
+            with open(path, "rb") as f:
                 f.seek(self._offset)
-                data = f.read()
-                self._offset = f.tell()
+                chunk = f.read(size - self._offset)
         except OSError:
-            return None
-        return data.splitlines()
+            return None                     # verrouillé (Windows/NT8) → aucun replay perdu
+        self._offset += len(chunk)
+        text = self._buffer + chunk.decode("utf-8", errors="replace")
+        parts = text.split("\n")
+        self._buffer = parts.pop()          # dernier morceau = ligne incomplète → retenue
+        if len(self._buffer) > _BUFFER_MAX:
+            self._buffer = ""               # ligne jamais terminée (corruption) → drop honnête
+        return [p.rstrip("\r") for p in parts]  # tolère les fins de ligne Windows (\r\n)
 
     async def _poll_once(self) -> None:
         """Un cycle : lit les lignes neuves (I/O offloadée) puis notifie chaque exécution."""

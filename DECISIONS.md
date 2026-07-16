@@ -593,18 +593,50 @@ déclenche automatiquement une capture de snapshot (D-030). Hypothèses (Loop 1 
   couvrent : nouvelle ligne, skip historique, fichier absent, rotation, non-bloquant.
 - **DÉTERMINISTE** : détection par Regex sur mots-clés NT8 (`Execution=`, `filled`,
   `State=Filled`) + extraction des champs présents (instrument, prix, quantité) ; ligne de
-  bruit → `None`. Aucun LLM. `nt8_daily_log_path` cible `log.YYYYMMDD*.txt` du jour (le plus
-  récent) ou `None` (fail-closed).
+  bruit → `None`. Aucun LLM. `nt8_daily_log_path` cible le log `log.YYYYMMDD*.txt` au stamp de
+  date le plus récent présent (clock-indépendant — voir /devil) ou `None` (fail-closed).
 - **Câblage** : `main.py` lifespan construit le tailer si `LOG_SCRAPER_ENABLED=true` ET
   `NT8_LOG_DIR` fourni (sinon `None` — désactivé par défaut, aucun log NT8 en démo). Le
   callback appelle `capture_snapshot(engine, now)` — helper partagé extrait de `POST /snapshot`
   (chemin unique : projection déterministe + écriture async). Toute erreur de capture est
   isolée (le tailer survit). Essai manuel réel concluant : fill NT8 appendé → 1 snapshot
   JSON + MD auto-créé ; historique et lignes de bruit → aucun trigger.
-- **Amélioration vs D-030** : id snapshot horodaté à la **milliseconde** (`snap_{int(ts*1000)}_
-  {op}`) — réduit la collision sous rafale de fills. Résiduel hors-scope (v1) : deux fills dans
-  la même milliseconde s'écraseraient encore (invraisemblable pour un trader discrétionnaire
-  human-in-the-loop) ; démarrage/arrêt/monitoring du scraper via API non exposés.
+- **Amélioration vs D-030** : id snapshot horodaté à la **milliseconde** + désambiguïsé (voir
+  /devil ci-dessous). Résiduel hors-scope (v1) : démarrage/arrêt/monitoring du scraper via API
+  non exposés.
+
+### /devil D-031 — durcissement (4 attaques)
+Attaques : fichier verrouillé Windows · encodage corrompu / lignes tronquées · rafale de fills
+(collision d'id ms) · rotation de fichier à minuit. Corrigées, chacune avec test de régression.
+- **Fichier verrouillé / illisible (Windows, NT8 tient un handle)** : `_read_new` encadre
+  `os.stat` ET `open` par `except OSError` (dont `PermissionError`) → renvoie `None`, aucun
+  crash, aucun trigger. L'offset n'avance PAS sur échec → la ligne est rattrapée dès le
+  déverrouillage. Test : `open` binaire patché pour lever PermissionError → fail-closed puis
+  récupération.
+- **Lignes tronquées (NT8 écrit un fill par morceaux)** : lecture passée en **MODE BINAIRE**
+  (offset = vrai décalage d'octets, comparable à `st_size` ; le `tell()` texte est un cookie
+  opaque, bug latent corrigé). La fin de ligne non terminée par `\n` est RETENUE dans `_buffer`
+  et re-préfixée au cycle suivant → **jamais** de fill partiel émis, jamais un champ tronqué
+  pris pour réel (§3). Buffer capé (`_BUFFER_MAX=1 Mo`) : ligne jamais terminée (corruption) →
+  drop honnête. Test : ligne partielle sans `\n` → 0 trigger ; complétion → 1 trigger, champs
+  exacts.
+- **Encodage corrompu** : décodage `errors="replace"` → un octet invalide devient U+FFFD, jamais
+  un crash ; les mots-clés/nombres NT8 étant ASCII, la détection reste robuste (hypothèse : les
+  champs pilotes — keyword, prix, quantité — sont ASCII ; un nom d'instrument non-ASCII mal
+  décodé n'empêche pas la capture).
+- **Rafale de fills (collision d'id à la même milliseconde)** : `capture_snapshot` désambiguïse
+  l'id via un **compteur monotone** (`snap_{ms}_{op}` puis `-1`, `-2`… dans la même ms), lu+
+  incrémenté synchronement avant tout `await` (pas de course sur l'event loop coopératif, un
+  opérateur par instance §9) → deux fills simultanés = deux fichiers distincts, **aucun
+  écrasement**. Test unitaire (deux captures au même `ts` → ids distincts) + essai manuel
+  (rafale de 2 fills → 3 snapshots distincts).
+- **Rotation à minuit** : `nt8_daily_log_path` sélectionne désormais le log au **stamp de date
+  le plus grand présent** (départagé par mtime), donc INDÉPENDANT de l'horloge/fuseau du process
+  (le backend peut tourner en UTC alors que NT8 nomme en heure locale — l'ancien `gmtime`
+  ratait le bon fichier plusieurs heures/jour). Sans couture à minuit : tant que NT8 n'a pas
+  créé le fichier du nouveau jour, l'ancien reste ciblé (on rattrape sa fin) ; dès qu'il
+  apparaît, on bascule (le changement d'inode cale la lecture en fin). Nom non conforme →
+  ignoré. Test : bascule J1→J2 à horloge figée + fichier parasite ignoré.
 
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events

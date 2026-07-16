@@ -18,7 +18,8 @@ import time
 from app.meta import Freshness, MetaField
 from app.schema import (ContextSchema, CvdLevel, CvdState, LiquiditySweep,
                         LiquiditySweepAlert)
-from app.snapshot import build_snapshot, render_markdown, write_snapshot
+from app.snapshot import (build_snapshot, capture_snapshot, render_markdown,
+                          write_snapshot)
 
 
 def _wired(now: float) -> ContextSchema:
@@ -87,6 +88,20 @@ def test_write_snapshot_writes_json_and_md(tmp_path):
         assert loaded["cvd_by_level"]["total_delta"] == 12.0
         assert "NFP" in open(res["md_path"], encoding="utf-8").read()
         assert res["snapshot_id"] == "snap_w"
+    asyncio.run(scenario())
+
+
+def test_capture_snapshot_no_collision_same_millisecond(tmp_path):
+    """/devil (D-031) : deux fills capturés au MÊME horodatage (rafale) → deux fichiers
+    DISTINCTS, aucun écrasement (id désambiguïsé par compteur monotone)."""
+    async def scenario():
+        engine = type("E", (), {"schema": _wired(1000.0)})()
+        now = 1000.0
+        r1 = await capture_snapshot(engine, now, directory=str(tmp_path))
+        r2 = await capture_snapshot(engine, now, directory=str(tmp_path))
+        assert r1["snapshot_id"] != r2["snapshot_id"]        # pas de collision
+        assert os.path.exists(r1["json_path"]) and os.path.exists(r2["json_path"])
+        assert r1["json_path"] != r2["json_path"]            # deux fichiers, rien d'écrasé
     asyncio.run(scenario())
 
 

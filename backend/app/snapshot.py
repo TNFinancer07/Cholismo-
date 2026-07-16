@@ -155,15 +155,33 @@ async def write_snapshot(snap: Snapshot, directory: str) -> dict:
 
 # ---------- déclencheur partagé (endpoint /snapshot ET auto-trigger log_scraper) ----------
 
+# Compteur monotone pour désambiguïser deux captures dans la même milliseconde (rafale de
+# fills). Lu+incrémenté SYNCHRONEMENT avant tout `await` → pas de course sur l'event loop
+# coopératif (un seul opérateur par instance, CLAUDE §9).
+_id_seq: dict[str, int] = {"ms": -1, "seq": 0}
+
+
+def _unique_snapshot_id(now: float, operator: str) -> str:
+    ms = int(now * 1000)
+    if _id_seq["ms"] == ms:
+        _id_seq["seq"] += 1
+    else:
+        _id_seq["ms"] = ms
+        _id_seq["seq"] = 0
+    suffix = "" if _id_seq["seq"] == 0 else f"-{_id_seq['seq']}"
+    return f"snap_{ms}_{operator.lower()}{suffix}"
+
+
 async def capture_snapshot(engine, now: float, *, snapshot_id: str | None = None,
                            directory: str | None = None) -> dict:
     """Capture + écrit le snapshot du schéma courant. Chemin UNIQUE partagé par l'endpoint
     `POST /snapshot` et l'auto-déclenchement du log_scraper : projection déterministe, écriture
-    async non-bloquante (§7). L'id horodaté à la milliseconde limite la collision sous rafale
-    de fills ; passer `snapshot_id` pour un id explicite."""
+    async non-bloquante (§7). L'id est horodaté à la milliseconde ET désambiguïsé par un
+    compteur monotone → deux fills dans la même ms produisent deux fichiers distincts, jamais
+    un écrasement. Passer `snapshot_id` pour forcer un id explicite."""
     from . import config
     si = engine.schema.session_identity
     operator = si.operator.value
-    snap_id = snapshot_id or f"snap_{int(now * 1000)}_{operator.lower()}"
+    snap_id = snapshot_id or _unique_snapshot_id(now, operator)
     snap = build_snapshot(engine.schema, snap_id, now, operator, si.session_marker.value)
     return await write_snapshot(snap, directory or config.SNAPSHOT_DIR)
