@@ -127,6 +127,89 @@ def test_load_absent_dir_is_empty(tmp_path):
     assert load_fills_from_snapshots(str(tmp_path / "n_existe_pas")) == []
 
 
+# ---------- /devil (D-033) : durcissement ----------
+
+def test_reconcile_out_of_order_timestamps_are_sorted():
+    # la SORTIE est fournie avant l'ENTRÉE dans la liste → tri interne par ts avant FIFO
+    fills = [Fill("ES 12-24", "SELL", 5010.0, 1, 300.0),
+             Fill("ES 12-24", "BUY", 5000.0, 1, 0.0)]
+    t = reconcile_fills(fills).trades[0]
+    assert t.direction == "LONG" and t.entry_ts == 0.0 and t.exit_ts == 300.0
+    assert t.pnl_usd == 500.0 and t.exposure_seconds == 300.0
+
+
+def test_reconcile_orphan_position_not_closed_no_fabrication():
+    res = reconcile_fills([Fill("ES 12-24", "BUY", 5000.0, 2, 0.0)])   # BUY sans SELL
+    assert res.trades == []                                           # aucun trade inventé
+    assert res.open_lots == 1 and res.summary["open_lots"] == 1
+
+
+def test_reconcile_negative_or_zero_quantity_is_unresolved():
+    res = reconcile_fills([Fill("ES 12-24", "BUY", 5000.0, -2, 0.0),
+                           Fill("ES 12-24", "SELL", 5010.0, 0, 10.0)])
+    assert res.trades == [] and res.unresolved_fills == 2
+
+
+def test_reconcile_ts_none_is_unresolved_not_crash():
+    res = reconcile_fills([Fill("ES 12-24", "BUY", 5000.0, 1, None),   # pas d'horodatage
+                           Fill("ES 12-24", "SELL", 5010.0, 1, 10.0)])
+    assert res.unresolved_fills >= 1                                  # trié sans crash
+
+
+def test_reconcile_zero_reference_risk_gives_none_r(monkeypatch):
+    import app.trade_reconciliator as tr
+    monkeypatch.setattr(tr, "REFERENCE_RISK_USD", 0.0)
+    res = tr.reconcile_fills([Fill("ES 12-24", "BUY", 5000.0, 1, 0.0),
+                              Fill("ES 12-24", "SELL", 5010.0, 1, 10.0)])
+    assert res.trades[0].pnl_usd == 500.0                            # P&L $ calculable
+    assert res.trades[0].r_multiple is None                         # R indéfini si risque 0 → None
+    assert res.summary["total_r"] == 0.0                            # somme robuste, pas de crash
+
+
+def test_load_skips_corrupt_or_non_object_json(tmp_path):
+    d = str(tmp_path)
+    with open(os.path.join(d, "snap_1_sony.json"), "w") as f:
+        f.write("{ pas du json ]")                                  # syntaxe invalide
+    with open(os.path.join(d, "snap_2_sony.json"), "w") as f:
+        f.write("[1, 2, 3]")                                        # JSON valide mais pas un objet
+    _write_snap(d, "snap_3_sony", 3.0,
+                {"instrument": "ES 12-24", "side": "BUY", "price": 5000.0, "quantity": 1, "ts": 3.0})
+    fills = load_fills_from_snapshots(d)
+    assert len(fills) == 1 and fills[0].price == 5000.0             # seul le sain chargé, pas de crash
+
+
+def test_load_skips_fill_with_nonnumeric_values(tmp_path):
+    d = str(tmp_path)
+    _write_snap(d, "snap_1_sony", 1.0,
+                {"instrument": "ES 12-24", "side": "BUY", "price": "abc", "quantity": 1, "ts": 1.0})
+    _write_snap(d, "snap_2_sony", 2.0,
+                {"instrument": "ES 12-24", "side": "SELL", "price": 5010.0, "quantity": "xx", "ts": 2.0})
+    assert load_fills_from_snapshots(d) == []                       # valeurs corrompues → écartées
+
+
+def test_load_deterministic_order_on_timestamp_tie(tmp_path):
+    d = str(tmp_path)
+    _write_snap(d, "snap_2000_sony", 5.0,                           # même ts que l'autre
+                {"instrument": "ES 12-24", "side": "SELL", "price": 5010.0, "quantity": 1, "ts": 5.0})
+    _write_snap(d, "snap_1000_sony", 5.0,
+                {"instrument": "ES 12-24", "side": "BUY", "price": 5000.0, "quantity": 1, "ts": 5.0})
+    fills = load_fills_from_snapshots(d)
+    # départage par snapshot_id (déterministe, indépendant de l'ordre listdir du FS)
+    assert [f.side for f in fills] == ["BUY", "SELL"]
+    assert reconcile_fills(fills).trades[0].direction == "LONG"
+
+
+def test_analyze_unknown_instrument_is_endpoint_safe(tmp_path):
+    d = str(tmp_path)
+    _write_snap(d, "snap_1_sony", 1.0,
+                {"instrument": "XYZ 01-25", "side": "BUY", "price": 10.0, "quantity": 1, "ts": 1.0})
+    _write_snap(d, "snap_2_sony", 2.0,
+                {"instrument": "XYZ 01-25", "side": "SELL", "price": 12.0, "quantity": 1, "ts": 2.0})
+    res = analyze_trades(d)                                         # ne crashe pas
+    t = res["trades"][0]
+    assert t["pnl_points"] == 2.0 and t["pnl_usd"] is None and t["r_multiple"] is None
+
+
 def test_analyze_trades_end_to_end(tmp_path):
     d = str(tmp_path)
     _write_snap(d, "snap_1000_sony", 1.0,

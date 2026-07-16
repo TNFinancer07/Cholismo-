@@ -82,7 +82,16 @@ def reconcile_fills(fills: list[Fill]) -> ReconResult:
     trades: list[CompletedTrade] = []
     unresolved = 0
 
-    for f in sorted(fills, key=lambda x: x.ts):
+    # sans horodatage → impossible d'ordonner : non résolu (jamais placé dans le carnet). Écarter
+    # AVANT le tri, sinon `sorted` compare None et lève (bug trouvé au /devil).
+    usable = []
+    for f in fills:
+        if f.ts is None:
+            unresolved += 1
+        else:
+            usable.append(f)
+
+    for f in sorted(usable, key=lambda x: x.ts):
         if f.side not in ("BUY", "SELL") or f.price is None or f.quantity is None or f.quantity <= 0:
             unresolved += 1
             continue
@@ -98,7 +107,9 @@ def reconcile_fills(fills: list[Fill]) -> ReconResult:
             pnl_points = (exit_price - entry_price) if direction == "LONG" else (entry_price - exit_price)
             pv = POINT_VALUE.get(root)
             pnl_usd = round(pnl_points * matched * pv, 2) if pv is not None else None
-            r_multiple = round(pnl_usd / REFERENCE_RISK_USD, 4) if pnl_usd is not None else None
+            # R indéfini si le risque de référence est nul/absent → None (jamais /0, jamais inventé)
+            r_multiple = (round(pnl_usd / REFERENCE_RISK_USD, 4)
+                          if (pnl_usd is not None and REFERENCE_RISK_USD) else None)
             trades.append(CompletedTrade(
                 instrument=f.instrument, root=root, direction=direction, quantity=matched,
                 entry_price=entry_price, exit_price=exit_price, entry_ts=lot[3], exit_ts=f.ts,
@@ -115,7 +126,8 @@ def reconcile_fills(fills: list[Fill]) -> ReconResult:
     open_lots = sum(len(b) for b in books.values())
     known = [t for t in trades if t.pnl_usd is not None]
     total_usd = round(sum(t.pnl_usd for t in known), 2) if known else 0.0
-    total_r = round(sum(t.r_multiple for t in known), 4) if known else 0.0
+    r_vals = [t.r_multiple for t in known if t.r_multiple is not None]   # None-safe (risque 0)
+    total_r = round(sum(r_vals), 4) if r_vals else 0.0
     summary = {
         "trade_count": len(trades),
         "with_usd": len(known),
@@ -139,7 +151,7 @@ def load_fills_from_snapshots(directory: str) -> list[Fill]:
         names = os.listdir(directory)
     except OSError:
         return []
-    fills: list[Fill] = []
+    keyed: list[tuple[float, str, Fill]] = []   # (ts, snapshot_id) → clé de tri DÉTERMINISTE
     for name in names:
         if not name.endswith(".json"):
             continue
@@ -147,20 +159,26 @@ def load_fills_from_snapshots(directory: str) -> list[Fill]:
             with open(os.path.join(directory, name), encoding="utf-8") as f:
                 data = json.load(f)
         except (OSError, json.JSONDecodeError):
-            continue
+            continue                             # illisible / JSON invalide → écarté (§3)
+        if not isinstance(data, dict):
+            continue                             # JSON valide mais pas un objet (liste/scalaire)
         fill = data.get("fill")
         if not isinstance(fill, dict):
-            continue
-        instrument, price = fill.get("instrument"), fill.get("price")
+            continue                             # snapshot de contexte (pas de fill) ou fill malformé
+        instrument = fill.get("instrument")
+        price = fill.get("price")
         ts = fill.get("ts", data.get("created_ts"))
         if instrument is None or price is None or ts is None:
             continue
         quantity = fill.get("quantity")
-        fills.append(Fill(
-            instrument=str(instrument), side=fill.get("side"), price=float(price),
-            quantity=int(quantity) if quantity is not None else 0, ts=float(ts)))
-    fills.sort(key=lambda x: x.ts)
-    return fills
+        try:                                     # valeurs non numériques → écartées, jamais un crash
+            f_obj = Fill(instrument=str(instrument), side=fill.get("side"), price=float(price),
+                         quantity=int(quantity) if quantity is not None else 0, ts=float(ts))
+        except (ValueError, TypeError):
+            continue
+        keyed.append((f_obj.ts, str(data.get("snapshot_id") or name), f_obj))
+    keyed.sort(key=lambda k: (k[0], k[1]))       # (ts, id) → ordre stable indépendant du FS
+    return [k[2] for k in keyed]
 
 
 def analyze_trades(directory: str) -> dict:

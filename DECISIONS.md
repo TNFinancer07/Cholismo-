@@ -712,6 +712,29 @@ via `GET /analyses/trades`. Hypothèses/décisions (Loop 1) :
 - **Hors-scope (une feature = un commit)** : panneau frontend d'analyse (l'endpoint est prêt) ;
   frais/commissions ; slippage ; risque par-trade réel (R utilise le 100 $ de référence).
 
+### /devil D-033 — durcissement (4 attaques)
+Attaques : timestamps désordonnés · positions orphelines · JSON snapshot corrompu/illisible ·
+instrument inconnu sans crash. Deux **bugs réels de crash d'endpoint** trouvés et corrigés :
+- **JSON corrompu / non-objet (bug → 500)** : `json.load` peut renvoyer une liste/scalaire pour
+  un JSON valide-mais-inattendu (`[1,2,3]`) → `data.get(...)` levait `AttributeError` ; et un
+  `fill` aux valeurs non numériques (`price:"abc"`) faisait crasher `float()`/`int()`. Corrigé :
+  garde `isinstance(data, dict)` + `try/except (ValueError, TypeError)` autour de la coercition →
+  fichier écarté (§3), endpoint reste **200**. Prouvé live (5/8 fichiers hostiles écartés, 200).
+- **Timestamps désordonnés** : `reconcile_fills` triait déjà par ts ; mais un fill à `ts=None`
+  faisait crasher `sorted` (comparaison à None). Corrigé : pré-filtrage des `ts=None` en « non
+  résolu » AVANT le tri. Sortie-avant-entrée dans la liste → réappariée correctement (essai).
+- **Déterminisme (ex æquo de ts)** : deux snapshots au même ts étaient ordonnés selon
+  `os.listdir` (dépendant du FS) → réconciliation non reproductible. Corrigé : tri par
+  `(ts, snapshot_id)` → ordre stable indépendant du système de fichiers.
+- **Risque de référence 0** (`R_UNIT_USD=0`) : `pnl_usd / 0` → `ZeroDivisionError` + `sum(None)`.
+  Corrigé : `r_multiple = None` si risque nul, `total_r` somme seulement les R non-None.
+- **Positions orphelines** (déjà géré, testé explicitement) : un lot non fermé reste dans le
+  carnet → `open_lots`, aucun trade fabriqué. **Instrument inconnu** (déjà géré) : P&L en points,
+  `pnl_usd`/`r_multiple` = None — endpoint sûr (essai : trade XYZ, $/R null, 200).
+- **Vérif** : +9 tests /devil (désordre, orphelin, qty ≤ 0, ts None, risque 0, JSON corrompu/
+  non-objet, valeurs non numériques, ex æquo déterministe, endpoint instrument inconnu) ;
+  117 passed, ruff clean ; essai live sur dossier hostile → **200**, sorties honnêtes.
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.
