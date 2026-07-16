@@ -15,7 +15,7 @@ from .api import router
 from .datasource.mock import MockDataSource
 from .engine import Engine
 from .event_store import get_store
-from .log_scraper import LogTailer, nt8_daily_log_path
+from .log_scraper import LogTailer, nt8_daily_log_path, startup_report
 from .redis_state import RedisState
 from .snapshot import capture_snapshot
 
@@ -36,6 +36,9 @@ async def lifespan(app: FastAPI):
     await app.state.ai.start()
     # log_scraper (D-031): OBSERVATION seule (§2.1) — sur un fill NT8 DÉJÀ passé par l'humain,
     # capture un snapshot déterministe. Async non-bloquant (§7). Désactivé sans dossier NT8.
+    # Diagnostic de démarrage actionnable : dit s'il est actif, quel fichier il suit, sinon
+    # comment l'activer — l'opérateur sait tout de suite sans lire le code (§polish).
+    log.info(startup_report(config.LOG_SCRAPER_ENABLED, config.NT8_LOG_DIR))
     app.state.log_scraper = _build_log_scraper(app.state.engine)
     if app.state.log_scraper is not None:
         await app.state.log_scraper.start()
@@ -56,14 +59,18 @@ def _build_log_scraper(engine: Engine) -> LogTailer | None:
         return None
 
     async def _on_fill(match) -> None:
-        # Un fill constaté (jamais provoqué) → capture instantanée. On log l'exécution pour
-        # traçabilité ; toute erreur de capture est isolée (le tailer ne meurt pas).
+        # Un fill constaté (jamais provoqué) → capture instantanée. Confirmation console
+        # actionnable : l'opérateur voit le fill, le prix, et le CHEMIN écrit (où trouver le
+        # snapshot). Toute erreur de capture est isolée (le tailer survit) et dit quoi vérifier.
+        price = "?" if match.price is None else match.price
         try:
             res = await capture_snapshot(engine, time.time())
-            log.info("log_scraper: fill NT8 %s → snapshot %s",
-                     match.instrument or "?", res.get("snapshot_id"))
+            log.info("log_scraper: fill NT8 détecté (%s @ %s) → snapshot ÉCRIT : %s",
+                     match.instrument or "?", price, res.get("json_path"))
         except Exception:
-            log.exception("log_scraper: capture de snapshot échouée")
+            log.exception("log_scraper: fill détecté (%s @ %s) mais capture de snapshot "
+                          "ÉCHOUÉE — vérifier SNAPSHOT_DIR (droits d'écriture / espace disque)",
+                          match.instrument or "?", price)
 
     return LogTailer(
         lambda: nt8_daily_log_path(config.NT8_LOG_DIR, time.time()) or "",

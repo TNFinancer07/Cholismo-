@@ -91,6 +91,27 @@ def nt8_daily_log_path(log_dir: str, now: float = 0.0) -> Optional[str]:
     return candidates[-1][2]
 
 
+def startup_report(enabled: bool, log_dir: str) -> str:
+    """Diagnostic de démarrage lisible et ACTIONNABLE (opérateur, français §5) : dit si le
+    scraper est actif, QUEL fichier il suit, et — s'il ne l'est pas — comment l'activer. Chaque
+    état non-nominal reste honnête et fail-closed (§3), jamais masqué."""
+    if not enabled:
+        return ("log_scraper DÉSACTIVÉ — aucune capture auto de snapshot sur fill NT8. "
+                "Activer : LOG_SCRAPER_ENABLED=true + NT8_LOG_DIR=<dossier log NinjaTrader 8>.")
+    if not log_dir:
+        return ("log_scraper ACTIVÉ mais NT8_LOG_DIR vide → INACTIF (fail-closed). "
+                "Définir NT8_LOG_DIR=<dossier log NT8, ex. « Documents/NinjaTrader 8/log »>.")
+    if not os.path.isdir(log_dir):
+        return (f"log_scraper ACTIF mais dossier INTROUVABLE : « {log_dir} » → en attente "
+                "(fail-closed). Corriger le chemin NT8_LOG_DIR.")
+    path = nt8_daily_log_path(log_dir)
+    if path is None:
+        return (f"log_scraper ACTIF · dossier « {log_dir} » · aucun log du jour "
+                "(log.YYYYMMDD*.txt) pour l'instant → EN ATTENTE (démarre dès son apparition).")
+    return (f"log_scraper ACTIF · log suivi : « {path} » · démarre en FIN de fichier "
+            "(pas de replay de l'historique) · un snapshot capturé par fill détecté.")
+
+
 class LogTailer:
     """Suit un fichier de log qui grandit et invoque `on_execution` pour chaque nouvelle ligne
     d'exécution. `path_fn` est ré-évalué à chaque poll → suit la rotation quotidienne sans

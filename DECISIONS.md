@@ -605,6 +605,19 @@ déclenche automatiquement une capture de snapshot (D-030). Hypothèses (Loop 1 
   /devil ci-dessous). Résiduel hors-scope (v1) : démarrage/arrêt/monitoring du scraper via API
   non exposés.
 
+### /polish D-031 — diagnostic console actionnable
+Le module est backend-only : la surface UX est la CONSOLE que l'opérateur regarde. Messages
+opérateur en français actionnable (§5) ; les traces internes de résilience restent terses.
+- **Diagnostic de démarrage** `startup_report(enabled, log_dir)` (pur, testé sur 5 états) logué
+  au lancement : dit si le scraper est ACTIF, QUEL fichier il suit, sinon COMMENT l'activer.
+  États non-nominaux honnêtes/fail-closed, jamais masqués : désactivé (→ vars à définir),
+  NT8_LOG_DIR vide (→ INACTIF + quoi définir), dossier introuvable (→ chemin à corriger), pas
+  de log du jour (→ EN ATTENTE), actif (→ chemin exact suivi + rappel « démarre en fin »).
+- **Confirmation d'écriture** : sur fill → snapshot, log INFO actionnable
+  « fill NT8 détecté (instrument @ prix) → snapshot ÉCRIT : <chemin json> » (l'opérateur voit
+  où trouver le fichier) ; échec de capture → log exception disant quoi vérifier (droits
+  SNAPSHOT_DIR / espace disque). Non-bloquant : sur la boucle async du scraper, hors hot path.
+
 ### /devil D-031 — durcissement (4 attaques)
 Attaques : fichier verrouillé Windows · encodage corrompu / lignes tronquées · rafale de fills
 (collision d'id ms) · rotation de fichier à minuit. Corrigées, chacune avec test de régression.

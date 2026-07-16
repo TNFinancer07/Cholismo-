@@ -15,7 +15,8 @@ import asyncio
 import os
 import time
 
-from app.log_scraper import LogTailer, nt8_daily_log_path, parse_execution
+from app.log_scraper import (LogTailer, nt8_daily_log_path, parse_execution,
+                             startup_report)
 
 
 def _run(coro):
@@ -152,6 +153,38 @@ def test_nt8_daily_log_path_targets_todays_file(tmp_path):
     assert path is not None and stamp in os.path.basename(path)
     # dossier sans log du jour → None (fail-closed, pas d'invention)
     assert nt8_daily_log_path(str(tmp_path / "empty"), now) is None
+
+
+# ---------- /polish (D-031) : diagnostic de démarrage actionnable ----------
+
+def test_startup_report_disabled_says_how_to_enable():
+    r = startup_report(enabled=False, log_dir="")
+    assert "DÉSACTIVÉ" in r
+    assert "LOG_SCRAPER_ENABLED=true" in r and "NT8_LOG_DIR" in r  # action concrète
+
+
+def test_startup_report_enabled_but_no_dir_is_actionable():
+    r = startup_report(enabled=True, log_dir="")
+    assert "INACTIF" in r and "NT8_LOG_DIR" in r                   # dit quoi définir
+
+
+def test_startup_report_dir_missing_is_flagged():
+    r = startup_report(enabled=True, log_dir="/n/existe/pas")
+    assert "INTROUVABLE" in r and "/n/existe/pas" in r
+
+
+def test_startup_report_waiting_when_no_daily_log(tmp_path):
+    r = startup_report(enabled=True, log_dir=str(tmp_path))
+    assert "ATTENTE" in r                                          # dossier ok, pas de log du jour
+
+
+def test_startup_report_active_shows_tracked_path(tmp_path):
+    stamp = time.strftime("%Y%m%d", time.gmtime(time.time()))
+    lp = tmp_path / f"log.{stamp}.txt"
+    lp.write_text("x")
+    r = startup_report(enabled=True, log_dir=str(tmp_path))
+    assert "ACTIF" in r and str(lp) in r                          # chemin exact suivi
+    assert "FIN" in r                                             # rappelle : démarre en fin
 
 
 # ---------- /devil (D-031) : durcissement ----------
