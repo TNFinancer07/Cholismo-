@@ -759,6 +759,25 @@ Vue plein écran `PNL` qui consomme `GET /analyses/trades` — **aucune modif ba
   lots ouverts 1, XYZ en « — » ; couleurs vert/rouge vérifiées + capture d'écran. Backend
   inchangé (git : seuls des fichiers frontend modifiés).
 
+### /polish D-034 — tuiles de résumé triables
+Les tuiles **Total P&L / Total R / Durée moyenne** deviennent des contrôles de tri de la table.
+- **Nouvelle tuile** « Durée moyenne » = moyenne de `exposure_seconds` (côté client, `fmtAge`) ;
+  « — » si aucun trade (§3).
+- **Interaction** : clic = cycle **↓ décroissant → ↑ croissant → chronologique** (3ᵉ clic) ;
+  changer de tuile réinitialise en décroissant. Le tri est instantané (mémoïsé, < 100 ms) et
+  ramène la vue en haut de table. Valeurs null (contrat inconnu) TOUJOURS en bas — pas de valeur
+  → pas de rang (§3), quel que soit le sens.
+- **Indicateur (§3 couleur jamais seule)** : la tuile active porte une bordure + flèche **OR**
+  (`router`) et un glyphe ↓/↑ ; les tuiles triables inactives montrent un ↕ estompé
+  (affordance découvrable) ; l'en-tête de la colonne triée reçoit la même flèche or. L'OR =
+  interactif/actif — volontairement DISTINCT du vert/rouge (signe du P&L/R) et des couleurs
+  opérateur. Les tuiles non triables restent des `div` statiques (pas de faux affordance).
+- **Découvrabilité (§5)** : `title` par tuile + astuce en pied de vue ; tuiles = `<button>`
+  (focus clavier, Enter/Espace natifs).
+- **Vérif** : `tsc` + `vite build` OK ; essai Playwright réel (3 trades à P&L/durées indépendants)
+  → chrono 1re ligne = perdant ; clic Total P&L → gagnant en tête (↓) ; re-clic → perdant (↑) ;
+  clic Durée moyenne → plus longue en tête, flèche migrée vers Durée ; 0 erreur JS + capture.
+
 ### /devil D-034 — durcissement (4 attaques)
 Attaques : 500+ trades · rendu null/None · race sur clics d'actualisation · resize extrême.
 - **500+ trades (bug de perf → corrigé)** : la table rendait TOUTES les lignes (`.map`) et

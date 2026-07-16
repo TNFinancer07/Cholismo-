@@ -6,9 +6,10 @@
  *  VUE d'analyse (pas un panneau SSE) — cohérent §1, comme JOURNAL/RECAP.
  *
  *  Durci /devil : table VIRTUALISÉE (fenêtre de lignes → fluide à 500+ trades sans dépendance) ;
- *  garde anti-race sur les rafraîchissements (dernière requête gagne, réponses en vol
- *  invalidées au démontage) ; table à défilement horizontal propre en fenêtre étroite (le corps
- *  de page ne défile jamais horizontalement). */
+ *  garde anti-race sur les rafraîchissements ; table à défilement horizontal propre en fenêtre
+ *  étroite. /polish : tuiles Total P&L / Total R / Durée moyenne CLIQUABLES → tri instantané de
+ *  la table (indicateur ↓/↑ en OR sur la tuile active ; l'or = interactif, distinct du vert/
+ *  rouge sémantique du signe). */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { RefreshCw } from 'lucide-react'
 import { api } from '@/lib/api'
@@ -32,6 +33,9 @@ interface TradesPayload {
   }
   fills_loaded: number; reference_risk_usd: number; contracts: Record<string, number>
 }
+
+type SortKey = 'chrono' | 'pnl' | 'r' | 'duration'
+type SortDir = 'asc' | 'desc'
 
 const POLL_MS = 8000
 const ROW_H = 22        // hauteur de ligne fixe (px) → base de la virtualisation
@@ -62,6 +66,7 @@ function useTrades() {
   return { data, refresh }
 }
 
+// tuile statique (non triable)
 function Tile({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="min-w-0 border border-term-border bg-term-panel2 px-1.5 py-1">
@@ -71,8 +76,37 @@ function Tile({ label, children }: { label: string; children: React.ReactNode })
   )
 }
 
+// tuile CLIQUABLE = contrôle de tri. Indicateur : ↕ (triable, inactif) → ↓/↑ OR (actif).
+function SortTile({ label, active, dir, onClick, children }: {
+  label: string; active: boolean; dir: SortDir; onClick: () => void; children: React.ReactNode
+}) {
+  return (
+    <button type="button" onClick={onClick} aria-pressed={active}
+      title={`Trier la table par ${label}${active ? (dir === 'desc' ? ' (décroissant — cliquer : croissant)' : ' (croissant — cliquer : chronologique)') : ''}`}
+      className={cn('min-w-0 border bg-term-panel2 px-1.5 py-1 text-left transition-colors',
+        active ? 'border-router' : 'border-term-border hover:border-term-dim')}>
+      <span className="flex items-center justify-between gap-1">
+        <span className="truncate text-xxs uppercase text-term-faint">{label}</span>
+        <span className={cn('shrink-0 text-xxs font-bold', active ? 'text-router' : 'text-term-faint/50')} aria-hidden>
+          {active ? (dir === 'desc' ? '↓' : '↑') : '↕'}
+        </span>
+      </span>
+      {children}
+    </button>
+  )
+}
+
 export function AnalysePnlView() {
   const { data, refresh } = useTrades()
+  const [sortKey, setSortKey] = useState<SortKey>('chrono')
+  const [sortDir, setSortDir] = useState<SortDir>('desc')
+
+  // clic tuile : nouvelle clé → décroissant ; même clé : décroissant → croissant → chronologique
+  const clickSort = useCallback((key: SortKey) => {
+    if (sortKey !== key) { setSortKey(key); setSortDir('desc') }
+    else if (sortDir === 'desc') setSortDir('asc')
+    else { setSortKey('chrono'); setSortDir('desc') }
+  }, [sortKey, sortDir])
 
   // indicateurs de santé — calculés à partir de la LISTE des trades (point 2)
   const health = useMemo(() => {
@@ -83,13 +117,28 @@ export function AnalysePnlView() {
     const winRate = wins + losses > 0 ? (wins / (wins + losses)) * 100 : null
     const rs = trades.map((t) => t.r_multiple).filter((r): r is number => r !== null)
     const avgR = rs.length > 0 ? rs.reduce((a, b) => a + b, 0) / rs.length : null
-    return { winRate, avgR, wins, losses }
+    const avgDuration = trades.length > 0
+      ? trades.reduce((a, t) => a + t.exposure_seconds, 0) / trades.length : null
+    return { winRate, avgR, avgDuration, wins, losses }
   }, [data])
 
-  // tri chronologique mémoïsé (pas de re-tri à chaque frame de scroll)
-  const trades = useMemo(
-    () => (data ? [...data.trades].sort((a, b) => a.exit_ts - b.exit_ts) : []),
-    [data])
+  // liste triée (mémoïsée : pas de re-tri à chaque frame de scroll). Valeurs null TOUJOURS en
+  // bas — pas de valeur → pas de rang (§3), quel que soit le sens.
+  const trades = useMemo(() => {
+    const base = data ? [...data.trades] : []
+    if (sortKey === 'chrono') return base.sort((a, b) => a.exit_ts - b.exit_ts)
+    const get = sortKey === 'pnl' ? (t: CompletedTrade) => t.pnl_usd
+      : sortKey === 'r' ? (t: CompletedTrade) => t.r_multiple
+        : (t: CompletedTrade) => t.exposure_seconds
+    const sign = sortDir === 'asc' ? 1 : -1
+    return base.sort((a, b) => {
+      const va = get(a), vb = get(b)
+      if (va === null && vb === null) return 0
+      if (va === null) return 1
+      if (vb === null) return -1
+      return (va - vb) * sign
+    })
+  }, [data, sortKey, sortDir])
 
   // virtualisation : ne rendre que la fenêtre visible
   const bodyRef = useRef<HTMLDivElement>(null)
@@ -103,6 +152,8 @@ export function AnalysePnlView() {
     setViewportH(el.clientHeight)
     return () => ro.disconnect()
   }, [])
+  // un changement de tri ramène la vue en haut de table
+  useEffect(() => { if (bodyRef.current) bodyRef.current.scrollTop = 0 }, [sortKey, sortDir])
 
   if (data === null) {
     return <div className="grid flex-1 place-items-center text-xs text-term-faint">chargement de l'analyse…</div>
@@ -116,6 +167,10 @@ export function AnalysePnlView() {
   const start = Math.max(0, Math.floor(scrollTop / ROW_H) - OVERSCAN)
   const end = Math.min(trades.length, Math.ceil((scrollTop + viewportH) / ROW_H) + OVERSCAN)
   const visible = trades.slice(start, end)
+
+  // flèche OR sur l'en-tête de la colonne triée (renforce quelle métrique ordonne la table)
+  const colArrow = (k: SortKey) => (sortKey === k ? (sortDir === 'desc' ? ' ↓' : ' ↑') : '')
+  const colCls = (k: SortKey) => (sortKey === k ? 'text-router' : '')
 
   return (
     <div className="flex min-h-0 flex-1 flex-col p-1.5">
@@ -134,24 +189,23 @@ export function AnalysePnlView() {
           </div>
         }>
         <div className="flex min-h-0 flex-col gap-2">
-          {/* ---- résumé global + santé (points 1 & 2) ---- */}
-          <div className="grid grid-cols-2 gap-1.5 md:grid-cols-3 lg:grid-cols-6">
-            <Tile label="Total P&L $">
+          {/* ---- résumé global + santé (points 1 & 2). 3 tuiles cliquables = tri (/polish) ---- */}
+          <div className="grid grid-cols-2 gap-1.5 md:grid-cols-4 lg:grid-cols-7">
+            <SortTile label="Total P&L $" active={sortKey === 'pnl'} dir={sortDir} onClick={() => clickSort('pnl')}>
               <span className={cn('flex items-center gap-1 font-mono text-sm font-bold tabular-nums', pnlSt.cls)}>
                 <span aria-hidden>{pnlSt.glyph}</span>{fmtSigned(s.total_pnl_usd, 2)}
               </span>
-            </Tile>
-            <Tile label="Total R-Multiple">
+            </SortTile>
+            <SortTile label="Total R-Multiple" active={sortKey === 'r'} dir={sortDir} onClick={() => clickSort('r')}>
               <span className={cn('flex items-center gap-1 font-mono text-sm font-bold tabular-nums', rSt.cls)}>
                 <span aria-hidden>{rSt.glyph}</span>{fmtSigned(s.total_r, 2)}
               </span>
-            </Tile>
-            <Tile label="Lots ouverts">
-              <span className={cn('font-mono text-sm font-bold tabular-nums',
-                s.open_lots > 0 ? 'text-risk-yellow' : 'text-term-text')}>
-                {fmtInt(s.open_lots)}{s.open_lots > 0 && ' ⚠'}
+            </SortTile>
+            <SortTile label="Durée moyenne" active={sortKey === 'duration'} dir={sortDir} onClick={() => clickSort('duration')}>
+              <span className="font-mono text-sm font-bold tabular-nums text-term-text">
+                {health.avgDuration === null ? '—' : fmtAge(health.avgDuration)}
               </span>
-            </Tile>
+            </SortTile>
             <Tile label="Win Rate">
               <span className="font-mono text-sm font-bold tabular-nums text-term-text">
                 {health.winRate === null ? '—' : `${fmtNum(health.winRate, 1)} %`}
@@ -161,6 +215,12 @@ export function AnalysePnlView() {
               <span className={cn('flex items-center gap-1 font-mono text-sm font-bold tabular-nums', avgSt.cls)}>
                 {health.avgR !== null && <span aria-hidden>{avgSt.glyph}</span>}
                 {health.avgR === null ? '—' : fmtSigned(health.avgR, 2)}
+              </span>
+            </Tile>
+            <Tile label="Lots ouverts">
+              <span className={cn('font-mono text-sm font-bold tabular-nums',
+                s.open_lots > 0 ? 'text-risk-yellow' : 'text-term-text')}>
+                {fmtInt(s.open_lots)}{s.open_lots > 0 && ' ⚠'}
               </span>
             </Tile>
             <Tile label="Gagnants / Perdants">
@@ -175,17 +235,18 @@ export function AnalysePnlView() {
             </span>
           )}
 
-          {/* ---- table chronologique virtualisée (points 3 & 4) ----
-               overflow-auto + min-w : en fenêtre étroite la table défile DANS son cadre,
-               le corps de page ne défile jamais horizontalement. */}
+          {/* ---- table virtualisée (points 3 & 4) ; défilement horizontal propre en fenêtre étroite ---- */}
           <div className="flex min-h-0 flex-1 flex-col border border-term-border">
             <div ref={bodyRef} onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}
               className="min-h-0 flex-1 overflow-auto">
               <div className="min-w-[560px]">
                 <div className={cn('sticky top-0 z-10 grid items-center gap-1 border-b border-term-border bg-term-panel2 px-1.5 py-0.5 text-xxs uppercase text-term-faint', COLS)}>
-                  <span>Heure</span><span>Instrument</span><span>Sens</span>
-                  <span className="text-right">Qté</span><span className="text-right">P&L $</span>
-                  <span className="text-right">R</span><span className="text-right">Durée</span>
+                  <span className={colCls('chrono')}>Heure{colArrow('chrono')}</span>
+                  <span>Instrument</span><span>Sens</span>
+                  <span className="text-right">Qté</span>
+                  <span className={cn('text-right', colCls('pnl'))}>P&L ${colArrow('pnl')}</span>
+                  <span className={cn('text-right', colCls('r'))}>R{colArrow('r')}</span>
+                  <span className={cn('text-right', colCls('duration'))}>Durée{colArrow('duration')}</span>
                 </div>
                 {trades.length === 0 ? (
                   <div className="grid place-items-center p-4 text-center text-xxs leading-relaxed text-term-faint">
@@ -234,8 +295,9 @@ export function AnalysePnlView() {
             </div>
           </div>
           <p className="border-t border-term-border pt-1 text-xxs text-term-faint">
-            R = P&L $ / {fmtInt(data.reference_risk_usd)} $ (risque de référence). Contrat inconnu →
-            P&L en points seulement, $/R affichés « — » (jamais inventés, §3).
+            Astuce : cliquer une tuile <span className="text-router">Total P&L / Total R / Durée moyenne</span> trie
+            la table (↓ décroissant · ↑ croissant · 3ᵉ clic → chronologique). R = P&L $ /
+            {' '}{fmtInt(data.reference_risk_usd)} $. Contrat inconnu → $/R « — » (jamais inventés, §3).
           </p>
         </div>
       </Panel>
