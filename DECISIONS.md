@@ -735,6 +735,30 @@ instrument inconnu sans crash. Deux **bugs réels de crash d'endpoint** trouvés
   non-objet, valeurs non numériques, ex æquo déterministe, endpoint instrument inconnu) ;
   117 passed, ruff clean ; essai live sur dossier hostile → **200**, sorties honnêtes.
 
+## D-034 · Vue Analyse P&L (frontend de D-033, `AnalysePnlView.tsx`)
+Vue plein écran `PNL` qui consomme `GET /analyses/trades` — **aucune modif backend**. Décisions :
+- **VUE, pas panneau (traçabilité §1)** : analytique REST sur des trades réconciliés (projections
+  de snapshots), comme JOURNAL/RECAP/BORD — pas un panneau SSE non traçable. Câblée comme les
+  autres vues : ViewKey `PNL`, branche `App.tsx`, cycle `V`, mnémonique `PNL` (alias PL/ANALYSE/
+  TRADES) + HELP.
+- **Résumé (point 1)** : tuiles Total P&L $, Total R, Lots ouverts — valeurs du `summary` backend.
+  Lots ouverts > 0 → tuile ambre + « ⚠ » (positions non fermées, signalées honnêtement).
+- **Santé (point 2) — calculée côté client depuis la liste** : Win Rate = gagnants/(gagnants+
+  perdants) sur les trades à P&L $ connu ; R moyen = moyenne des R non-None. Aucun trade décidé
+  → « — » (fail-closed §3, jamais 0 % inventé).
+- **Table (point 3)** : trades triés chronologiquement (par `exit_ts`) — Heure, Instrument, Sens,
+  Qté, P&L $, R, Durée (`fmtAge`). Contrat inconnu → P&L $/R affichés « — », jamais 0.
+- **Code couleur (point 4)** : VERT (R/P&L > 0) / ROUGE (< 0), **strictement réservé au signe du
+  P&L/R** — la direction (Sens) est NEUTRE (glyphe ▲/▼ + texte LONG/SHORT) pour ne pas surcharger
+  la sémantique couleur (corrigé en auto-revue : un long perdant ne doit pas montrer un ▲ vert).
+  §3 daltonisme : couleur JAMAIS seule → toujours glyphe + nombre signé + liseré gauche.
+- **Poll 8 s** (hors hot path) ; bouton Actualiser ; état vide honnête et actionnable ;
+  `unresolved_fills` > 0 signalé (fills exclus de l'analyse).
+- **Vérif** : `tsc` + `vite build` OK ; essai Playwright réel avec données seed (2 ES gagnant/
+  perdant + orphelin MES + inconnu XYZ) → Total +750 $, R +7,5, Win Rate 50 %, R moyen +3,75,
+  lots ouverts 1, XYZ en « — » ; couleurs vert/rouge vérifiées + capture d'écran. Backend
+  inchangé (git : seuls des fichiers frontend modifiés).
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.

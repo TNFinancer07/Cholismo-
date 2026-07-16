@@ -10,7 +10,7 @@ import type {
 
 export type ZoneKey = 'A' | 'B' | 'C' | 'D'
 export type ViewKey = 'TERMINAL' | 'RECAP' | 'LIVE' | 'JOURNAL' | 'ORCHESTRATEUR'
-  | 'PROMPTS' | 'PARAMS' | 'JBORD'
+  | 'PROMPTS' | 'PARAMS' | 'JBORD' | 'PNL'
 
 export interface ScenarioInfo {
   current: {

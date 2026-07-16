@@ -14,6 +14,7 @@ import { WorkspaceBar } from '@/components/WorkspaceBar'
 import { Zone0StatusBar } from '@/panels/Zone0StatusBar'
 import { SelfCheckDialog } from '@/panels/zoneC/SelfCheckDialog'
 import { DecisionBlotter } from '@/panels/zoneD/DecisionBlotter'
+import { AnalysePnlView } from '@/panels/views/AnalysePnlView'
 import { JournalDeBordView } from '@/panels/views/JournalDeBordView'
 import { JournalView } from '@/panels/views/JournalView'
 import { LiveView } from '@/panels/views/LiveView'
@@ -102,6 +103,7 @@ export default function App() {
       {view === 'LIVE' && <main className="flex min-h-0 flex-1 flex-col"><LiveView /></main>}
       {view === 'PARAMS' && <main className="flex min-h-0 flex-1 flex-col"><ParamsView /></main>}
       {view === 'JBORD' && <main className="flex min-h-0 flex-1 flex-col"><JournalDeBordView /></main>}
+      {view === 'PNL' && <main className="flex min-h-0 flex-1 flex-col"><AnalysePnlView /></main>}
       {view === 'TERMINAL' && <WorkspaceGrid />}
 
       <FunctionKeyBar />
