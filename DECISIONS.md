@@ -903,6 +903,27 @@ Profondeur HISTORIQUE du carnet L2 rendue en HTML5 Canvas. Décisions/hypothèse
   à chaque tick → ~80 Ko/s en démo localhost, acceptable ; à optimiser en delta si bande passante
   réelle) ; axes de prix/temps annotés ; survol → prix/taille ; agrégation multi-tick par colonne.
 
+### /devil D-036 — durcissement (5 cas limites)
+Attaques : carnet vide · croisé · prix NaN/Inf · afflux massif · resize 0×0. Résultat : le
+frontend ne crashe sur AUCUN (essai Playwright SSE gelé — 0 erreur JS).
+- **NaN/Inf** : la source amont (`_validate_order_book`, D-025) RETIENT déjà tout carnet
+  non-fini (→ ABSENT/MALFORMED), donc aucune valeur non-finie n'atteint le heatmap. Double
+  sécurité ajoutée : `_finite_levels` filtre au niveau du heatmap (garantit un JSON SSE jamais
+  NaN/Inf → pas de parse cassé). Frontend : `draw` ignore tout prix/taille non-fini (Canvas
+  ignore de toute façon les rects NaN). Un côté entièrement non-fini → colonne écartée.
+- **Carnet croisé** (bid ≥ ask) : donnée finie pathologique → colonne CONSERVÉE (honnête, §3 —
+  on n'efface pas une pathologie réelle ; le flag `CROSSED_BOOK` du carnet est propagé). Rendu
+  sans crash (chevauchement vert/rouge).
+- **Carnet vide** : aucune colonne (§3) → panneau « PAS DE DONNÉES ».
+- **Afflux massif** : niveaux tronqués à `BOOK_DEPTH`, colonnes bornées à `HEATMAP_COLS` ;
+  frontend testé jusqu'à 500 colonnes → rendu Canvas < 500 ms, pas de saccade.
+- **Resize 0×0** (panneau masqué) : le `useEffect` de dessin garde `box.w/h === 0` → aucun dessin,
+  pas de crash ; réaffichage → redessine.
+- **Colonnes malformées** (null / champs manquants / mauvais types) : `draw` garde `Array.isArray`
+  par colonne et par côté → ignorées sans crash.
+- Affordance de test DEV-only `window.__setHeatmap` (élaguée en prod par `import.meta.env.DEV`)
+  pour forcer ces états. +4 tests backend (filtre non-fini, croisé, tout-non-fini, massif borné).
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.

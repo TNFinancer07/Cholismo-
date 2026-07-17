@@ -29,10 +29,14 @@ function draw(ctx: CanvasRenderingContext2D, value: HeatmapValue | null | undefi
   // étendue de prix + pas (plus petit écart positif entre prix adjacents → hauteur de cellule).
   let pmin = Infinity, pmax = -Infinity
   const uniq = new Set<number>()
-  for (const c of cols) {
-    for (const [p] of c.bids) { if (Number.isFinite(p)) { if (p < pmin) pmin = p; if (p > pmax) pmax = p; uniq.add(p) } }
-    for (const [p] of c.asks) { if (Number.isFinite(p)) { if (p < pmin) pmin = p; if (p > pmax) pmax = p; uniq.add(p) } }
+  const scan = (levels: [number, number][] | undefined) => {
+    if (!Array.isArray(levels)) return
+    for (const lvl of levels) {
+      const p = lvl?.[0]
+      if (Number.isFinite(p)) { if (p < pmin) pmin = p; if (p > pmax) pmax = p; uniq.add(p) }
+    }
   }
+  for (const c of cols) { scan(c?.bids); scan(c?.asks) }
   if (!Number.isFinite(pmin) || pmax <= pmin) return
   const sorted = [...uniq].sort((a, b) => a - b)
   let tick = Infinity
@@ -46,12 +50,16 @@ function draw(ctx: CanvasRenderingContext2D, value: HeatmapValue | null | undefi
   const cellW = Math.ceil(colW) + 1, cellH = Math.ceil(rowH) + 1
 
   for (let j = 0; j < cols.length; j++) {
-    const x = j * colW, c = cols[j]
+    const c = cols[j]
+    if (!c || !Array.isArray(c.bids) || !Array.isArray(c.asks)) continue   // colonne malformée → ignorée
+    const x = j * colW
     for (const [p, s] of c.bids) {
+      if (!Number.isFinite(p)) continue
       const a = alphaFor(s, maxSize); if (a <= 0) continue
       ctx.fillStyle = `rgba(${GREEN}, ${a})`; ctx.fillRect(x, yOf(p), cellW, cellH)
     }
     for (const [p, s] of c.asks) {
+      if (!Number.isFinite(p)) continue
       const a = alphaFor(s, maxSize); if (a <= 0) continue
       ctx.fillStyle = `rgba(${RED}, ${a})`; ctx.fillRect(x, yOf(p), cellW, cellH)
     }
@@ -59,11 +67,13 @@ function draw(ctx: CanvasRenderingContext2D, value: HeatmapValue | null | undefi
 
   // ligne de mid discrète (dernière colonne) — repère d'orientation, jamais un signal.
   const last = cols[cols.length - 1]
-  if (last.bids.length && last.asks.length) {
-    const mid = (last.bids[0][0] + last.asks[0][0]) / 2
-    const y = h - ((mid - pmin) / tick) * rowH
-    ctx.strokeStyle = 'rgba(201, 212, 227, 0.25)'; ctx.lineWidth = 1
-    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke()
+  const bb = last?.bids?.[0]?.[0], ba = last?.asks?.[0]?.[0]
+  if (Number.isFinite(bb) && Number.isFinite(ba)) {
+    const y = h - (((bb + ba) / 2 - pmin) / tick) * rowH
+    if (Number.isFinite(y)) {
+      ctx.strokeStyle = 'rgba(201, 212, 227, 0.25)'; ctx.lineWidth = 1
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke()
+    }
   }
 }
 

@@ -160,6 +160,12 @@ if (import.meta.env.DEV && typeof window !== 'undefined') {
     const s = useTerminal.getState()
     if (s.s1_state) s.set({ s1_state: { ...s.s1_state, cvd_by_level: cvd as never } })
   }
+  // /devil D-036 : force un `liquidity_heatmap` pathologique (vide, croisé, NaN, massif) pour
+  // vérifier que le rendu Canvas ne crashe jamais.
+  ;(window as unknown as { __setHeatmap?: (hm: unknown) => void }).__setHeatmap = (hm) => {
+    const s = useTerminal.getState()
+    if (s.s1_state) s.set({ s1_state: { ...s.s1_state, liquidity_heatmap: hm as never } })
+  }
 }
 
 /** Temps serveur estimé (pour countdown C3 et âges de donnée). */
