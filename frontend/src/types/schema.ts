@@ -83,15 +83,15 @@ export interface OrderBookValue {
   asks: [number, number][]
 }
 
-// Heatmap de liquidité (D-036) — fenêtre glissante du carnet L2, rendue en Canvas.
+// Heatmap de liquidité (D-036, DELTA) — le backend émet UNE colonne par tick, le frontend
+// accumule la fenêtre glissante et calcule la normalisation couleur.
 export interface HeatmapColumn {
   ts: number
   bids: [number, number][]
   asks: [number, number][]
 }
 export interface HeatmapValue {
-  columns: HeatmapColumn[]     // ancien → récent, borné (HEATMAP_COLS)
-  max_size: number             // normalisation couleur (0 si vide)
+  column: HeatmapColumn | null   // colonne courante (null si carnet non FRESH / vide)
 }
 
 /** Tape / Time & Sales (D-026) — prints observés, plus récent en tête. */

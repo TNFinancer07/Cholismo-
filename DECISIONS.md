@@ -899,9 +899,9 @@ Profondeur HISTORIQUE du carnet L2 rendue en HTML5 Canvas. Décisions/hypothèse
   max_size) ; 147 passed, ruff clean ; `tsc` + `vite build` OK ; essai réel : engine accumule
   12 colonnes/3 s (FRESH, max_size réel), Canvas dessiné (55 % de pixels peints, 24 colonnes),
   0 erreur JS + capture.
-- **Hors-scope (une feature = un commit)** : diffusion en DELTA (v1 pousse l'historique complet
-  à chaque tick → ~80 Ko/s en démo localhost, acceptable ; à optimiser en delta si bande passante
-  réelle) ; axes de prix/temps annotés ; survol → prix/taille ; agrégation multi-tick par colonne.
+- **Hors-scope (une feature = un commit)** : axes de prix/temps annotés ; survol → prix/taille ;
+  agrégation multi-tick par colonne. (La **diffusion en DELTA** — initialement hors-scope — a été
+  faite au /polish ci-dessous.)
 
 ### /devil D-036 — durcissement (5 cas limites)
 Attaques : carnet vide · croisé · prix NaN/Inf · afflux massif · resize 0×0. Résultat : le
@@ -923,6 +923,25 @@ frontend ne crashe sur AUCUN (essai Playwright SSE gelé — 0 erreur JS).
   par colonne et par côté → ignorées sans crash.
 - Affordance de test DEV-only `window.__setHeatmap` (élaguée en prod par `import.meta.env.DEV`)
   pour forcer ces états. +4 tests backend (filtre non-fini, croisé, tout-non-fini, massif borné).
+
+### /polish D-036 — diffusion en DELTA (payload allégé ~60×)
+Le backend n'émet plus la fenêtre entière à chaque tick, mais **la seule colonne courante**
+(`value = {column: {ts, bids, asks} | null}`, `heatmap.py::latest_column`). Le **frontend
+accumule** les colonnes successives dans un tampon local (`bufferRef`, borné à `MAX_COLS=60`,
+dédup par `ts` croissant) et calcule lui-même `max_size` sur la fenêtre. `accumulate_heatmap` +
+l'état `_heatmap_cols` du moteur sont supprimés (le moteur est sans état pour ce bloc).
+- **Gain** : bloc SSE ~**503 octets** (1 colonne, 20 niveaux) vs ~30 Ko (60 colonnes) → ~60×.
+  Cohérent CLAUDE §6 (« events SSE partiels par bloc »).
+- **Tradeoff assumé** : l'historique est côté client → au montage / après reconnexion, la fenêtre
+  se **reconstruit en ~15 s**. `ts = now` (temps du tick) → une colonne par tick même si le carnet
+  ne bouge pas (trame temporelle régulière).
+- **Fraîcheur** : FRESH → accumule ; **STALE** → tampon conservé, grisé + « FIGÉ » ; **ABSENT** →
+  tampon vidé (§3, la donnée a disparu) → « PAS DE DONNÉES ». Fenêtre calée à DROITE (récent au
+  bord droit) pendant le remplissage.
+- **Vérif** : 10 tests backend (colonne courante, ts=tick, None si STALE/ABSENT/vide, troncature,
+  + /devil non-fini/croisé/massif conservés) ; 150 passed, ruff clean ; `tsc` + `vite build` OK ;
+  essai Playwright réel : accumulation 8 → 20 colonnes en 3 s, Canvas dessiné, 1 canvas / 4 div,
+  0 erreur JS + capture.
 
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
