@@ -800,6 +800,38 @@ Attaques : 500+ trades · rendu null/None · race sur clics d'actualisation · r
   barre de statut Zone 0 et de la WorkspaceBar (shell global, présent sur TOUTES les vues), pas
   de la vue PNL — à traiter séparément si le responsive mobile devient une cible.
 
+## D-035 · Cortex Cognitif — bias_detector (Axe 4, `app/bias_detector.py`)
+Analyse post-hoc DÉTERMINISTE des CompletedTrades → 3 biais + Psych-Score /100, injectés dans
+`GET /analyses/trades` (`res["discipline"]`). Décisions/hypothèses (Loop 1) :
+- **ADVISORY, jamais bloquant (§2.1)** : lit des trades DÉJÀ clôturés, annote — aucune décision,
+  aucun ordre, aucun verrou. Ne modifie NI ne bloque le flux d'exécution. Hors hot path
+  (endpoint, `to_thread`). Aucun LLM (booléens de seuil, reproductible).
+- **Enrichissement `entry_delta_anomaly`** : FOMO se définit « suite à anomalie de delta », mais
+  le CompletedTrade ne portait pas le contexte d'entrée. Résolu proprement : le snapshot qui
+  embarque le fill capture AUSSI `liquidity_sweep` → `load_fills` en dérive `Fill.delta_anomaly`
+  (= `liquidity_sweep.triggered`), et `reconcile_fills` reporte l'anomalie du LOT D'ENTRÉE dans
+  `CompletedTrade.entry_delta_anomaly`. Champs optionnels (défaut False) → tests D-033 intacts.
+- **3 détecteurs (v1)** : 1) **FOMO** = `exposure < FOMO_MAX_DURATION_S` (30 s, PLACEHOLDER) ET
+  `entry_delta_anomaly` ; 2) **EXEC_TOO_LONG** = `exposure > EXEC_MAX_DURATION_S` (1800 s,
+  PLACEHOLDER) ; 3) **REVENGE** = entrée < `REVENGE_WINDOW_S` (180 s, **AUTORITÉ** — spec « < 3
+  min ») après la CLÔTURE d'une PERTE (`pnl_usd < 0`). Seuils FOMO/EXEC à calibrer par l'humain
+  (v1 provisional, config).
+- **FAIL-CLOSED (§3)** : champ manquant/None → le détecteur concerné ne se déclenche pas (jamais
+  un biais inventé). FOMO exige une anomalie CONNUE (pas d'anomalie → pas de FOMO).
+- **Psych-Score = PROCESSUS, pas résultat (§2.7)** : `round(100 × trades_sans_biais / total)` —
+  % de trades disciplinés (v1 provisional). Aucun trade → **None** (jamais un faux 100). N'est
+  JAMAIS consolidé avec le P&L (result score) ; les deux coexistent dans le payload, séparés.
+- **Payload** : `discipline = {psych_score, total_trades, biased_trades, clean_trades,
+  biases_by_type, biases:[{type, trade_index, instrument, entry_ts, exit_ts, exposure_seconds,
+  detail}]}`. Un trade à plusieurs biais compte UNE fois dans `biased_trades` (N findings).
+- **Vérif** : 14 tests bias_detector (FOMO + garde anomalie, EXEC seuil, REVENGE fenêtre/gain,
+  Psych 100/50/0/None, multi-biais, sérialisation) + 3 tests reconciliator (extraction anomalie,
+  report d'entrée, endpoint discipline) ; 134 passed, ruff clean ; essai live : 4 trades (perte
+  clean + revenge + FOMO + trop long) → **Psych-Score 25/100**, 3 biais typés, réponse purement
+  descriptive. Backend seul (le payload gagne `discipline` sans casser la vue PNL existante).
+- **Hors-scope (une feature = un commit)** : surface frontend du Psych-Score/biais (panneau
+  « Cortex » — l'endpoint est prêt) ; calibration des seuils ; pondération sévérité par biais.
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.

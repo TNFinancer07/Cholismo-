@@ -24,6 +24,7 @@ from typing import Optional
 from pydantic import BaseModel
 
 from . import config
+from .bias_detector import discipline_report
 
 POINT_VALUE: dict[str, float] = config.CONTRACT_POINT_VALUE
 REFERENCE_RISK_USD: float = config.R_UNIT_USD
@@ -49,6 +50,7 @@ class Fill:
     price: float
     quantity: int
     ts: float
+    delta_anomaly: bool = False   # anomalie microstructure au moment du fill (liquidity_sweep) — D-035
 
 
 class CompletedTrade(BaseModel):
@@ -65,6 +67,7 @@ class CompletedTrade(BaseModel):
     point_value: Optional[float]
     pnl_usd: Optional[float]
     r_multiple: Optional[float]
+    entry_delta_anomaly: bool = False   # anomalie de delta à l'ENTRÉE (Cortex Cognitif, D-035)
 
 
 class ReconResult(BaseModel):
@@ -78,7 +81,7 @@ def reconcile_fills(fills: list[Fill]) -> ReconResult:
     """Apparie les fills en FIFO par racine d'instrument. Position nette : un fill de même sens
     OUVRE/ajoute un lot ; un fill de sens opposé FERME les lots les plus anciens (FIFO), et tout
     surplus RETOURNE la position (flip). Chaque appariement produit un `CompletedTrade`."""
-    books: dict[str, deque[list]] = defaultdict(deque)   # racine → lots [side, qty, price, ts]
+    books: dict[str, deque[list]] = defaultdict(deque)   # racine → lots [side, qty, price, ts, anomaly]
     trades: list[CompletedTrade] = []
     unresolved = 0
 
@@ -114,14 +117,15 @@ def reconcile_fills(fills: list[Fill]) -> ReconResult:
                 instrument=f.instrument, root=root, direction=direction, quantity=matched,
                 entry_price=entry_price, exit_price=exit_price, entry_ts=lot[3], exit_ts=f.ts,
                 exposure_seconds=f.ts - lot[3], pnl_points=round(pnl_points, 6),
-                point_value=pv, pnl_usd=pnl_usd, r_multiple=r_multiple))
+                point_value=pv, pnl_usd=pnl_usd, r_multiple=r_multiple,
+                entry_delta_anomaly=lot[4]))     # anomalie au moment de l'ENTRÉE (lot ouvrant)
             lot[1] -= matched
             qty -= matched
             if lot[1] == 0:
                 book.popleft()
         # surplus → ouvre un lot dans le sens du fill (nouvelle position ou flip)
         if qty > 0:
-            book.append([f.side, qty, f.price, f.ts])
+            book.append([f.side, qty, f.price, f.ts, f.delta_anomaly])
 
     open_lots = sum(len(b) for b in books.values())
     known = [t for t in trades if t.pnl_usd is not None]
@@ -171,9 +175,13 @@ def load_fills_from_snapshots(directory: str) -> list[Fill]:
         if instrument is None or price is None or ts is None:
             continue
         quantity = fill.get("quantity")
+        # anomalie de delta au moment du fill : le snapshot d'entrée a-t-il capté un sweep ?
+        sweep = data.get("liquidity_sweep")
+        delta_anomaly = bool(sweep.get("triggered")) if isinstance(sweep, dict) else False
         try:                                     # valeurs non numériques → écartées, jamais un crash
             f_obj = Fill(instrument=str(instrument), side=fill.get("side"), price=float(price),
-                         quantity=int(quantity) if quantity is not None else 0, ts=float(ts))
+                         quantity=int(quantity) if quantity is not None else 0, ts=float(ts),
+                         delta_anomaly=delta_anomaly)
         except (ValueError, TypeError):
             continue
         keyed.append((f_obj.ts, str(data.get("snapshot_id") or name), f_obj))
@@ -182,13 +190,17 @@ def load_fills_from_snapshots(directory: str) -> list[Fill]:
 
 
 def analyze_trades(directory: str) -> dict:
-    """Charge l'historique + réconcilie → payload pour `GET /analyses/trades`. Déterministe."""
+    """Charge l'historique + réconcilie + analyse les biais → payload pour `GET /analyses/trades`.
+    Déterministe. Le Cortex Cognitif (Psych-Score + biais) est ADVISORY : il n'influence ni ne
+    bloque rien (§2.1), il annote seulement des trades déjà clôturés."""
     fills = load_fills_from_snapshots(directory)
     res = reconcile_fills(fills)
+    trades = [t.model_dump() for t in res.trades]
     return {
-        "trades": [t.model_dump() for t in res.trades],
+        "trades": trades,
         "summary": res.summary,
         "fills_loaded": len(fills),
         "reference_risk_usd": REFERENCE_RISK_USD,
         "contracts": POINT_VALUE,
+        "discipline": discipline_report(trades),   # Cortex Cognitif (D-035) — advisory
     }

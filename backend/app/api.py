@@ -77,9 +77,10 @@ async def snapshot_content(snapshot_id: str) -> dict[str, Any]:
 
 @router.get("/analyses/trades")
 async def analyses_trades() -> dict[str, Any]:
-    """Apparie FIFO les fills embarqués dans les snapshots → P&L USD + R-Multiple par trade.
-    ANALYTIQUE hors-ligne, jamais un ordre (§2.1). Fail-closed : aucun snapshot → résultat vide,
-    contrat inconnu → P&L en points seulement (§3). Lecture disque offloadée."""
+    """Apparie FIFO les fills embarqués dans les snapshots → P&L USD + R-Multiple par trade, plus
+    le Cortex Cognitif (Psych-Score /100 + biais identifiés). ANALYTIQUE hors-ligne, ADVISORY :
+    jamais un ordre, ne bloque ni ne modifie le flux d'exécution (§2.1). Fail-closed : aucun
+    snapshot → résultat vide, contrat inconnu → P&L en points seulement (§3). Lecture offloadée."""
     return await asyncio.to_thread(analyze_trades, config.SNAPSHOT_DIR)
 
 

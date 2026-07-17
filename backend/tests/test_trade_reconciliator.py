@@ -127,6 +127,48 @@ def test_load_absent_dir_is_empty(tmp_path):
     assert load_fills_from_snapshots(str(tmp_path / "n_existe_pas")) == []
 
 
+# ---------- Cortex Cognitif — enrichissement + psych (D-035) ----------
+
+def _write_snap_sweep(directory, sid, ts, fill, triggered):
+    payload = {"snapshot_id": sid, "created_ts": ts, "operator": "SONY", "session_marker": "X",
+               "order_book": {}, "cvd_by_level": {}, "econ_calendar": {},
+               "liquidity_sweep": {"triggered": triggered}, "fill": fill}
+    with open(os.path.join(directory, f"{sid}.json"), "w", encoding="utf-8") as f:
+        json.dump(payload, f)
+
+
+def test_load_extracts_entry_delta_anomaly_from_sweep(tmp_path):
+    d = str(tmp_path)
+    _write_snap_sweep(d, "snap_1000_sony", 1.0,
+                      {"instrument": "ES 12-24", "side": "BUY", "price": 5000.0, "quantity": 1, "ts": 1.0},
+                      triggered=True)
+    fills = load_fills_from_snapshots(d)
+    assert fills[0].delta_anomaly is True
+
+
+def test_reconcile_carries_entry_anomaly_into_trade():
+    fills = [Fill("ES 12-24", "BUY", 5000.0, 1, 0.0, delta_anomaly=True),
+             Fill("ES 12-24", "SELL", 5010.0, 1, 5.0, delta_anomaly=False)]
+    t = reconcile_fills(fills).trades[0]
+    assert t.entry_delta_anomaly is True         # l'anomalie de l'ENTRÉE, pas de la sortie
+
+
+def test_analyze_trades_includes_discipline_and_flags_fomo(tmp_path):
+    d = str(tmp_path)
+    # entrée sur sweep + tenue très courte (5 s) → FOMO ; le payload porte le Psych-Score
+    _write_snap_sweep(d, "snap_1000_sony", 1.0,
+                      {"instrument": "ES 12-24", "side": "BUY", "price": 5000.0, "quantity": 1, "ts": 1.0},
+                      triggered=True)
+    _write_snap_sweep(d, "snap_1006_sony", 6.0,
+                      {"instrument": "ES 12-24", "side": "SELL", "price": 5010.0, "quantity": 1, "ts": 6.0},
+                      triggered=False)
+    res = analyze_trades(d)
+    assert "discipline" in res
+    assert res["discipline"]["psych_score"] == 0          # 1 trade, biaisé → 0 % discipliné
+    assert res["discipline"]["biases_by_type"].get("FOMO") == 1
+    assert res["trades"][0]["entry_delta_anomaly"] is True
+
+
 # ---------- /devil (D-033) : durcissement ----------
 
 def test_reconcile_out_of_order_timestamps_are_sorted():

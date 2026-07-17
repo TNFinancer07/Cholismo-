@@ -72,6 +72,13 @@ SWEEP_RECENT_MAX = 8             # longueur du feed d'alertes récentes
 # référence R réutilise R_UNIT_USD (défaut 100 $) — source unique, pas de double définition.
 CONTRACT_POINT_VALUE = {"ES": 50.0, "MES": 5.0, "NQ": 20.0, "MNQ": 2.0}
 
+# --- Cortex Cognitif — bias_detector (analytique post-hoc, DÉTERMINISTE — D-035) ---
+# Seuils de détection de biais. FOMO/EXEC = PLACEHOLDER (v1 provisional, à calibrer par l'humain
+# sur les 50+ trades) ; la fenêtre revenge est AUTORITÉ (spec : < 3 min après une perte).
+FOMO_MAX_DURATION_S = float(os.getenv("FOMO_MAX_DURATION_S", "30"))       # v1 provisional
+EXEC_MAX_DURATION_S = float(os.getenv("EXEC_MAX_DURATION_S", "1800"))     # v1 provisional (30 min)
+REVENGE_WINDOW_S = float(os.getenv("REVENGE_WINDOW_S", "180"))            # AUTORITÉ — < 3 min
+
 # --- log_scraper : tailer NT8 → auto-snapshot (OBSERVATION seule §2.1 — D-031) ---
 # Désactivé par défaut : aucun log NT8 en démo. Activer avec un vrai dossier NT8
 # (Documents/NinjaTrader 8/log). Fail-closed si le dossier/log du jour est absent.
