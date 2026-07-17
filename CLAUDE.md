@@ -40,6 +40,12 @@ Priorité de build = §10. On construit depuis l'usage réel, pas la complétude
    est une **projection** (grammaire Murex/Calypso réelle). Voir `PRD §Zone D`.
 6. **Discipline dans l'infra, pas dans la volonté.**
 7. **Process score ≠ result score.** Jamais consolidés ; result score affiché après 20+ trades.
+   Le **Cortex Cognitif** (D-035) opérationnalise ce score de *processus* : sur les trades
+   réconciliés, 3 biais **déterministes** — **FOMO** (durée courte sur anomalie de delta),
+   **EXEC_TOO_LONG** (durée > seuil), **REVENGE** (< 3 min après une perte) — alimentent un
+   **Psych-Score /100** (% de trades sans biais). **Advisory pur** : il annote, ne bloque ni ne
+   modifie jamais l'exécution (§2.1) ; jamais consolidé avec le P&L (result). Règles + seuils :
+   `DECISIONS.md` D-033/D-035.
 8. **Claude n'est JAMAIS synchrone dans le hot path live.** Le chemin décision live est
    rapide et déterministe. Claude (scoring) et Gemini (audit) sont **périodiques/async**.
    Voir §7 budget latence.
