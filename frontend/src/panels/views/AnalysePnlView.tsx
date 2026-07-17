@@ -25,6 +25,14 @@ interface CompletedTrade {
   exposure_seconds: number; pnl_points: number
   point_value: number | null; pnl_usd: number | null; r_multiple: number | null
 }
+interface BiasFinding {
+  type: string; trade_index: number; instrument: string
+  entry_ts: number | null; exit_ts: number | null; exposure_seconds: number | null; detail: string
+}
+interface Discipline {
+  psych_score: number | null; total_trades: number; biased_trades: number; clean_trades: number
+  biases_by_type: Record<string, number>; biases: BiasFinding[]
+}
 interface TradesPayload {
   trades: CompletedTrade[]
   summary: {
@@ -32,6 +40,7 @@ interface TradesPayload {
     total_pnl_usd: number; total_r: number; open_lots: number; unresolved_fills: number
   }
   fills_loaded: number; reference_risk_usd: number; contracts: Record<string, number>
+  discipline?: Discipline
 }
 
 type SortKey = 'chrono' | 'pnl' | 'r' | 'duration'
@@ -40,7 +49,21 @@ type SortDir = 'asc' | 'desc'
 const POLL_MS = 8000
 const ROW_H = 22        // hauteur de ligne fixe (px) → base de la virtualisation
 const OVERSCAN = 8
-const COLS = 'grid-cols-[70px_1fr_66px_40px_92px_66px_60px]'   // Heure|Instr|Sens|Qté|P&L$|R|Durée
+const COLS = 'grid-cols-[70px_1fr_62px_36px_88px_62px_56px_58px]'   // Heure|Instr|Sens|Qté|P&L$|R|Durée|Biais
+
+// Cortex Cognitif (D-035) — icône + libellé court par type de biais ; couleur AMBRE (avertissement
+// comportemental), distincte du vert/rouge (signe P&L) et de l'or (interactif). Jamais seule (§3).
+const BIAS_META: Record<string, { icon: string; label: string }> = {
+  FOMO: { icon: '⚡', label: 'FOMO' },
+  REVENGE: { icon: '↻', label: 'REVENGE' },
+  EXEC_TOO_LONG: { icon: '⏱', label: 'LENT' },
+}
+
+// Psych-Score : vert si ≥ 80 (discipliné), ambre si < 80 (à surveiller), neutre si None.
+function psychStyle(score: number | null): { cls: string; glyph: string } {
+  if (score === null) return { cls: 'text-term-dim', glyph: '·' }
+  return score >= 80 ? { cls: 'text-risk-green', glyph: '✓' } : { cls: 'text-risk-yellow', glyph: '⚠' }
+}
 
 // couleur au SIGNE — jamais seule (§3) : classe + glyphe directionnel
 function signStyle(v: number | null): { cls: string; glyph: string } {
@@ -122,10 +145,21 @@ export function AnalysePnlView() {
     return { winRate, avgR, avgDuration, wins, losses }
   }, [data])
 
-  // liste triée (mémoïsée : pas de re-tri à chaque frame de scroll). Valeurs null TOUJOURS en
-  // bas — pas de valeur → pas de rang (§3), quel que soit le sens.
+  // biais par index de trade ORIGINAL (les findings référencent l'ordre backend, pas le tri).
+  // Map → lookup O(1) par ligne : la virtualisation reste fluide même à 500+ trades.
+  const biasByIndex = useMemo(() => {
+    const m = new Map<number, BiasFinding[]>()
+    for (const b of data?.discipline?.biases ?? []) {
+      const arr = m.get(b.trade_index)
+      if (arr) arr.push(b); else m.set(b.trade_index, [b])
+    }
+    return m
+  }, [data])
+
+  // liste triée (mémoïsée : pas de re-tri à chaque frame de scroll). `_idx` = index d'origine →
+  // permet de retrouver les biais après tri. Valeurs null TOUJOURS en bas (§3).
   const trades = useMemo(() => {
-    const base = data ? [...data.trades] : []
+    const base = (data ? data.trades : []).map((t, i) => ({ ...t, _idx: i }))
     if (sortKey === 'chrono') return base.sort((a, b) => a.exit_ts - b.exit_ts)
     const get = sortKey === 'pnl' ? (t: CompletedTrade) => t.pnl_usd
       : sortKey === 'r' ? (t: CompletedTrade) => t.r_multiple
@@ -229,6 +263,48 @@ export function AnalysePnlView() {
               </span>
             </Tile>
           </div>
+
+          {/* ---- CORTEX COGNITIF : Psych-Score + biais (D-035) ---- */}
+          {(() => {
+            const disc = data.discipline
+            const score = disc?.psych_score ?? null
+            const ps = psychStyle(score)
+            const byType = disc?.biases_by_type ?? {}
+            const anyBias = Object.keys(byType).length > 0
+            return (
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border border-term-border bg-term-panel2 px-2 py-1">
+                <span className="text-xxs font-bold uppercase tracking-wider text-term-dim">Cortex cognitif</span>
+                <span className="flex items-baseline gap-1" title="Score de discipline = % de trades sans biais (processus, jamais le P&L)">
+                  <span className="text-xxs uppercase text-term-faint">Psych-Score</span>
+                  <span className={cn('font-mono text-lg font-bold tabular-nums', ps.cls)}>
+                    <span aria-hidden className="mr-0.5 text-sm">{ps.glyph}</span>
+                    {score === null ? '—' : score}<span className="text-xs text-term-faint">/100</span>
+                  </span>
+                </span>
+                <span className="h-4 w-px bg-term-border" aria-hidden />
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {anyBias ? Object.entries(byType).map(([type, n]) => {
+                    const m = BIAS_META[type] ?? { icon: '•', label: type }
+                    return (
+                      <span key={type} className="inline-flex items-center gap-1 border border-risk-yellow/40 px-1 text-xxs font-semibold text-risk-yellow"
+                        title={`${m.label} : ${n} occurrence${n > 1 ? 's' : ''}`}>
+                        <span aria-hidden>{m.icon}</span>{m.label}<span className="tabular-nums">{n}</span>
+                      </span>
+                    )
+                  }) : (
+                    <span className="inline-flex items-center gap-1 text-xxs text-risk-green">
+                      <span aria-hidden>✓</span>aucun biais détecté
+                    </span>
+                  )}
+                  {disc && (
+                    <span className="text-xxs text-term-faint">
+                      · {disc.biased_trades}/{disc.total_trades} trade{disc.total_trades > 1 ? 's' : ''} biaisé{disc.biased_trades > 1 ? 's' : ''}
+                    </span>
+                  )}
+                </div>
+              </div>
+            )
+          })()}
           {s.unresolved_fills > 0 && (
             <span className="text-xxs text-risk-yellow">
               ⚠ {s.unresolved_fills} fill(s) non résolu(s) — côté/instrument manquant, exclus de l'analyse (§3)
@@ -239,7 +315,7 @@ export function AnalysePnlView() {
           <div className="flex min-h-0 flex-1 flex-col border border-term-border">
             <div ref={bodyRef} onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}
               className="min-h-0 flex-1 overflow-auto">
-              <div className="min-w-[560px]">
+              <div className="min-w-[600px]">
                 <div className={cn('sticky top-0 z-10 grid items-center gap-1 border-b border-term-border bg-term-panel2 px-1.5 py-0.5 text-xxs uppercase text-term-faint', COLS)}>
                   <span className={colCls('chrono')}>Heure{colArrow('chrono')}</span>
                   <span>Instrument</span><span>Sens</span>
@@ -247,6 +323,7 @@ export function AnalysePnlView() {
                   <span className={cn('text-right', colCls('pnl'))}>P&L ${colArrow('pnl')}</span>
                   <span className={cn('text-right', colCls('r'))}>R{colArrow('r')}</span>
                   <span className={cn('text-right', colCls('duration'))}>Durée{colArrow('duration')}</span>
+                  <span className="text-right">Biais</span>
                 </div>
                 {trades.length === 0 ? (
                   <div className="grid place-items-center p-4 text-center text-xxs leading-relaxed text-term-faint">
@@ -263,6 +340,7 @@ export function AnalysePnlView() {
                       // Sens = direction (glyphe ▲/▼ + texte), NEUTRE : vert/rouge réservé au
                       // SIGNE du P&L/R (point 4), jamais surchargé par la direction.
                       const dir = t.direction === 'LONG' ? '▲' : '▼'
+                      const rowBiases = biasByIndex.get(t._idx) ?? []   // biais du trade (index d'origine)
                       return (
                         <div key={idx}
                           style={{ position: 'absolute', top: idx * ROW_H, left: 0, right: 0, height: ROW_H }}
@@ -286,6 +364,15 @@ export function AnalysePnlView() {
                             {t.r_multiple === null ? '—' : fmtSigned(t.r_multiple, 2)}
                           </span>
                           <span className="text-right text-term-dim">{fmtAge(t.exposure_seconds)}</span>
+                          {/* Biais : chips ambre discrets, infobulle = explication complète (§3 : icône + couleur) */}
+                          <span className="flex items-center justify-end gap-0.5">
+                            {rowBiases.map((b, k) => (
+                              <span key={k} aria-label={b.type} title={b.detail}
+                                className="cursor-help font-bold text-risk-yellow">
+                                {(BIAS_META[b.type] ?? { icon: '•' }).icon}
+                              </span>
+                            ))}
+                          </span>
                         </div>
                       )
                     })}
@@ -296,8 +383,10 @@ export function AnalysePnlView() {
           </div>
           <p className="border-t border-term-border pt-1 text-xxs text-term-faint">
             Astuce : cliquer une tuile <span className="text-router">Total P&L / Total R / Durée moyenne</span> trie
-            la table (↓ décroissant · ↑ croissant · 3ᵉ clic → chronologique). R = P&L $ /
-            {' '}{fmtInt(data.reference_risk_usd)} $. Contrat inconnu → $/R « — » (jamais inventés, §3).
+            la table (↓ décroissant · ↑ croissant · 3ᵉ clic → chronologique).
+            {' '}Biais <span className="text-risk-yellow">⚡ FOMO · ↻ REVENGE · ⏱ LENT (exécution trop longue)</span> —
+            survoler l'icône pour l'explication. R = P&L $ / {fmtInt(data.reference_risk_usd)} $.
+            Contrat inconnu → $/R « — » (jamais inventés, §3).
           </p>
         </div>
       </Panel>

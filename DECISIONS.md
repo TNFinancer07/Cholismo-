@@ -832,6 +832,27 @@ Analyse post-hoc DÉTERMINISTE des CompletedTrades → 3 biais + Psych-Score /10
 - **Hors-scope (une feature = un commit)** : surface frontend du Psych-Score/biais (panneau
   « Cortex » — l'endpoint est prêt) ; calibration des seuils ; pondération sévérité par biais.
 
+### /polish D-035 — surface « Cortex » dans la vue PNL (frontend)
+Le Psych-Score + les biais (payload `discipline`) sont rendus dans `AnalysePnlView` — backend
+inchangé.
+- **Widget Cortex** : ligne « CORTEX COGNITIF · Psych-Score N/100 » — **vert si ≥ 80**, **ambre
+  si < 80**, « — » si None (§3 : couleur + glyphe ✓/⚠/· + libellé « /100 »). Puis les compteurs
+  de biais par type (chips ambre `⚡FOMO`, `↻REVENGE`, `⏱LENT`) OU « ✓ aucun biais détecté », et
+  « X/Y trades biaisés ». Le widget sert AUSSI de légende des icônes de la table.
+- **Colonne « Biais » par ligne** : icône ambre par biais (`⚡`/`↻`/`⏱`), **infobulle = explication
+  française complète** (`detail`) au survol. L'ambre = avertissement comportemental, distinct du
+  vert/rouge (signe P&L) et de l'or (interactif) — sémantique couleur préservée (§3).
+- **Virtualisation fluide** : les biais sont indexés dans une **Map par `trade_index` d'origine**
+  (lookup O(1) par ligne, mémoïsée) ; chaque trade trié porte son `_idx` d'origine pour retrouver
+  ses biais malgré le tri. Aucun recalcul par frame de scroll → pas de saccade (durcissement
+  /devil préservé).
+- **Découvrabilité (§5)** : légende des icônes en pied de vue + dans le widget ; `title`/
+  `aria-label` sur chaque icône. **Fail-closed** : `discipline` absent ou `psych_score` None →
+  « — » / « aucun biais », jamais un score inventé.
+- **Vérif** : `tsc` + `vite build` OK ; essai Playwright réel (seed 4 trades biaisés) → widget
+  Cortex, Psych-Score 25/100 en AMBRE, 3 icônes de biais en ligne + infobulle FOMO, 0 erreur JS
+  + capture. Backend inchangé (git : seul `AnalysePnlView.tsx`).
+
 ### /devil D-035 — durcissement (4 attaques)
 Attaques : biais cumulés sur un trade · timestamps identiques/inversés · séquences massives ·
 division par zéro / score négatif.
