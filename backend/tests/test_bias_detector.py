@@ -115,6 +115,58 @@ def test_discipline_report_empty_is_none_not_fake():
     assert r["psych_score"] is None and r["total_trades"] == 0              # fail-closed, pas de faux 100
 
 
+# ---------- /devil (D-035) : durcissement ----------
+
+def test_cumulative_biases_on_one_trade_counted_once():
+    # un même trade cumule REVENGE + FOMO → 2 findings, mais 1 seul trade biaisé
+    loss = _t(entry_ts=0.0, exit_ts=100.0, exposure_seconds=100.0, pnl_usd=-250.0)
+    c = _t(entry_ts=160.0, exit_ts=165.0, exposure_seconds=5.0, entry_delta_anomaly=True)
+    r = discipline_report([loss, c])
+    types = {b["type"] for b in r["biases"] if b["trade_index"] == 1}
+    assert {"FOMO", "REVENGE"} <= types
+    assert r["biased_trades"] == 1 and r["clean_trades"] == 1 and r["psych_score"] == 50
+
+
+def test_revenge_on_instant_reentry_gap_zero():
+    # entrée EXACTEMENT à la clôture d'une perte (gap 0, timestamps identiques) → revenge
+    loss = _t(entry_ts=0.0, exit_ts=100.0, exposure_seconds=100.0, pnl_usd=-250.0)
+    instant = _t(entry_ts=100.0, exit_ts=200.0, exposure_seconds=100.0)
+    f = detect_biases([loss, instant])
+    assert any(b.type == "REVENGE" and b.trade_index == 1 for b in f)
+
+
+def test_zero_exposure_loss_does_not_revenge_itself():
+    # perte à durée nulle (entry==exit) : ne se déclenche pas revenge sur elle-même
+    z = _t(entry_ts=50.0, exit_ts=50.0, exposure_seconds=0.0, pnl_usd=-100.0)
+    assert not any(b.type == "REVENGE" for b in detect_biases([z]))
+
+
+def test_negative_exposure_no_fomo_failclosed():
+    # durée négative (timestamps inversés / donnée corrompue) → pas de FOMO (§3)
+    f = detect_biases([_t(exposure_seconds=-10.0, entry_delta_anomaly=True)])
+    assert not any(b.type == "FOMO" for b in f)
+
+
+def test_score_bounded_never_negative_never_divzero():
+    all_biased = [_t(exposure_seconds=EXEC_MAX_DURATION_S + 10) for _ in range(5)]
+    r = discipline_report(all_biased)
+    assert r["psych_score"] == 0 and r["biased_trades"] == 5            # jamais négatif
+    assert 0 <= r["psych_score"] <= 100
+    assert discipline_report([])["psych_score"] is None                 # aucun trade → pas de /0
+
+
+def test_revenge_scales_to_massive_sequences():
+    # séquence massive de trades rapides : doit rester rapide (pas d'O(n²))
+    import time
+    trades = [_t(entry_ts=float(i * 10), exit_ts=float(i * 10 + 5), exposure_seconds=5.0,
+                 pnl_usd=(-100.0 if i % 2 else 100.0)) for i in range(5000)]
+    t0 = time.perf_counter()
+    r = discipline_report(trades)
+    dt = time.perf_counter() - t0
+    assert dt < 0.5, f"trop lent ({dt * 1000:.0f} ms) — complexité O(n²) ?"
+    assert r["total_trades"] == 5000 and 0 <= r["psych_score"] <= 100
+
+
 def test_findings_are_serialisable():
     f = detect_biases([_t(exposure_seconds=5.0, entry_delta_anomaly=True)])
     assert isinstance(f[0], BiasFinding)

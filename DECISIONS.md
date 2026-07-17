@@ -832,6 +832,28 @@ Analyse post-hoc DÉTERMINISTE des CompletedTrades → 3 biais + Psych-Score /10
 - **Hors-scope (une feature = un commit)** : surface frontend du Psych-Score/biais (panneau
   « Cortex » — l'endpoint est prêt) ; calibration des seuils ; pondération sévérité par biais.
 
+### /devil D-035 — durcissement (4 attaques)
+Attaques : biais cumulés sur un trade · timestamps identiques/inversés · séquences massives ·
+division par zéro / score négatif.
+- **Séquences massives (bug de perf → corrigé)** : REVENGE était en O(n²) (double boucle) —
+  mesuré 5000 trades = **1316 ms** (endpoint bloqué sur gros historique). Corrigé : clôtures des
+  pertes pré-triées + **bisect** (O(n log n)), auto-exclusion préservée. Après : 5000 = **50 ms**,
+  20000 = 184 ms ; sortie identique (essai : Psych-Score 25, mêmes biais). Test : 5000 trades
+  < 0,5 s.
+- **Timestamps identiques/inversés** : entrée EXACTEMENT à la clôture d'une perte (gap 0) →
+  revenge (correct) ; une perte à durée nulle (entry==exit) ne se déclenche PAS revenge sur
+  elle-même (auto-exclusion via `self_counted`) ; **durée négative** (timestamps inversés) → pas
+  de FOMO (garde `0 ≤ durée`, fail-closed §3). Rappel : le réconciliateur trie les fills → une
+  durée d'exposition est TOUJOURS ≥ 0 en amont ; la garde protège les appels directs.
+- **Biais cumulés sur un trade** (déjà géré, testé) : REVENGE + FOMO sur le même trade → 2
+  findings mais **1 seul trade biaisé** (`biased_trades` dédoublonne par `trade_index`). FOMO et
+  EXEC_TOO_LONG sont mutuellement exclusifs (durée < 30 s vs > 1800 s).
+- **Division par zéro / score négatif** (déjà sûr, testé) : `biased ≤ total` (indices ⊆
+  {0..total−1}) → `clean ≥ 0` → score ∈ [0, 100], jamais négatif ni > 100 ; `total == 0` → None
+  (aucune division). Non-numérique (pnl/exit) filtré (`_num`) → pas de crash de tri.
+- **Vérif** : +6 tests /devil ; 140 passed, ruff clean ; perf mesurée avant/après + essai live
+  inchangé.
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.

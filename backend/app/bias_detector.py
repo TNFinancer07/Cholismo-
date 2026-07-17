@@ -20,10 +20,16 @@ Détecteurs (v1) :
 """
 from __future__ import annotations
 
+import bisect
 from dataclasses import asdict, dataclass
 from typing import Optional
 
 from . import config
+
+
+def _num(v) -> bool:
+    """True si v est un nombre exploitable (ni None, ni bool, ni non-numérique)."""
+    return isinstance(v, (int, float)) and not isinstance(v, bool)
 
 
 @dataclass
@@ -40,8 +46,16 @@ class BiasFinding:
 
 def detect_biases(trades: list[dict]) -> list[BiasFinding]:
     """Scanne les CompletedTrades (dumpés) et renvoie la liste des biais. Déterministe et
-    fail-closed : un champ manquant désactive le détecteur concerné pour ce trade (§3)."""
+    fail-closed : un champ manquant/non numérique désactive le détecteur concerné (§3).
+
+    REVENGE en O(n log n) : les clôtures de pertes sont pré-triées et interrogées par bisect
+    (une recherche binaire par trade, pas de double boucle — tient les séquences massives)."""
     findings: list[BiasFinding] = []
+    win = config.REVENGE_WINDOW_S
+    # clôtures des trades PERDANTS, triées → recherche binaire de la fenêtre revenge.
+    loss_exits = sorted(t["exit_ts"] for t in trades
+                        if _num(t.get("pnl_usd")) and t["pnl_usd"] < 0 and _num(t.get("exit_ts")))
+
     for i, t in enumerate(trades):
         instrument = str(t.get("instrument", ""))
         expo = t.get("exposure_seconds")
@@ -49,35 +63,35 @@ def detect_biases(trades: list[dict]) -> list[BiasFinding]:
         exit_ts = t.get("exit_ts")
         anomaly = bool(t.get("entry_delta_anomaly"))
 
-        # 1) FOMO — entrée impulsive : tenue anormalement courte SUR une anomalie de delta.
-        if expo is not None and expo < config.FOMO_MAX_DURATION_S and anomaly:
+        # 1) FOMO — tenue anormalement COURTE (0 ≤ durée < seuil ; une durée négative = donnée
+        #    invalide/inversée → pas de FOMO, §3) SUR une anomalie de delta à l'entrée.
+        if _num(expo) and 0 <= expo < config.FOMO_MAX_DURATION_S and anomaly:
             findings.append(BiasFinding(
                 "FOMO", i, instrument, entry, exit_ts, expo,
                 f"Entrée impulsive : {int(expo)}s de tenue sur une anomalie de delta "
                 f"(< {int(config.FOMO_MAX_DURATION_S)}s)."))
 
         # 2) EXEC_TOO_LONG — position tenue au-delà du seuil critique.
-        if expo is not None and expo > config.EXEC_MAX_DURATION_S:
+        if _num(expo) and expo > config.EXEC_MAX_DURATION_S:
             findings.append(BiasFinding(
                 "EXEC_TOO_LONG", i, instrument, entry, exit_ts, expo,
                 f"Exécution trop longue : {int(expo)}s > seuil critique "
                 f"{int(config.EXEC_MAX_DURATION_S)}s."))
 
-        # 3) REVENGE — trade initié < REVENGE_WINDOW_S après la clôture d'une PERTE antérieure.
-        if entry is not None:
-            for j, p in enumerate(trades):
-                if j == i:
-                    continue
-                pnl = p.get("pnl_usd")
-                p_exit = p.get("exit_ts")
-                if (pnl is not None and pnl < 0 and p_exit is not None
-                        and 0 <= entry - p_exit < config.REVENGE_WINDOW_S):
-                    gap = int(entry - p_exit)
-                    findings.append(BiasFinding(
-                        "REVENGE", i, instrument, entry, exit_ts, expo,
-                        f"Trade initié {gap}s après une perte "
-                        f"(< {int(config.REVENGE_WINDOW_S)}s) — revenge trading."))
-                    break
+        # 3) REVENGE — trade initié < win après la clôture d'une PERTE antérieure (≠ soi-même).
+        if _num(entry) and loss_exits:
+            lo = bisect.bisect_right(loss_exits, entry - win)      # pertes clôturées > entry-win
+            hi = bisect.bisect_right(loss_exits, entry)            # ... et ≤ entry (donc dans la fenêtre)
+            in_range = hi - lo
+            # exclure soi-même : seule une perte à durée nulle (exit==entry) peut se compter.
+            self_counted = (_num(t.get("pnl_usd")) and t["pnl_usd"] < 0 and _num(exit_ts)
+                            and entry - win < exit_ts <= entry)
+            if in_range - (1 if self_counted else 0) > 0:
+                gap = int(entry - loss_exits[hi - 1])              # perte la plus récente en fenêtre
+                findings.append(BiasFinding(
+                    "REVENGE", i, instrument, entry, exit_ts, expo,
+                    f"Trade initié {gap}s après une perte "
+                    f"(< {int(win)}s) — revenge trading."))
     return findings
 
 
