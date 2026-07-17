@@ -138,6 +138,10 @@ class S1State(BaseModel):
     # DOM ES 10 niveaux (D-025) — value: {"bids": [[price, size]…], "asks": [[price, size]…]},
     # bids décroissants / asks croissants. Affichage lecture seule, PAS critique Phase 0 en v1.
     order_book: MetaField = Field(default_factory=MetaField)
+    # Heatmap de liquidité (D-036) — value: {columns: [{ts, bids:[[p,s]…], asks:[[p,s]…]}…],
+    # max_size}. Fenêtre glissante du carnet L2 (profondeur historique), rendue en Canvas.
+    # Lecture seule (§2.1). Fraîcheur = celle du carnet (fail-closed §3).
+    liquidity_heatmap: MetaField = Field(default_factory=MetaField)
     # Tape / Time & Sales (D-026) — value: [{ts, price, size, side ∈ BUY|SELL, seq}…],
     # fenêtre glissante bornée, plus récent en tête. Prints OBSERVÉS (pas des ordres, §2.1).
     tape: MetaField = Field(default_factory=MetaField)

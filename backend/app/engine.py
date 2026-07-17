@@ -23,6 +23,7 @@ from .datasource.base import MarketDataSource
 from .datasource import scenarios
 from .event_store import get_store
 from .graph.liquidity_sweep import SWEEP_GRAPH, build_sweep_inputs
+from .heatmap import accumulate_heatmap
 from .macro_score import compute_s2_macro_score
 from .meta import Freshness, MetaField, make_meta
 from .phase0 import Phase0Input, evaluate_phase0
@@ -211,6 +212,7 @@ class Engine:
         self._cvd_reset_ts: Optional[float] = None
         self._cvd_reset_reason: str = ""
         self._cvd_since_ts: Optional[float] = None
+        self._heatmap_cols: list[dict] = []   # historique de colonnes du heatmap LOB (D-036)
         self._regime_tier = "GREEN"  # D4 hysteresis state (reference/youssef/01)
 
     # ---------- assembly helpers ----------
@@ -389,6 +391,13 @@ class Engine:
         _validate_order_book(order_book)
         tape = await self._meta("tape", raws, now)
         _validate_tape(tape)
+        # Heatmap LOB (D-036) : accumule le carnet en colonnes temporelles (hot path, cheap —
+        # append + borne). Fail-closed : carnet non FRESH → aucune colonne inventée (§3).
+        self._heatmap_cols, heatmap_value = accumulate_heatmap(
+            self._heatmap_cols, order_book, now, config.HEATMAP_COLS, config.HEATMAP_LEVELS)
+        liquidity_heatmap = MetaField(
+            value=heatmap_value, last_update_ts=order_book.last_update_ts,
+            source=order_book.source, freshness=order_book.freshness, flags=order_book.flags)
         s1 = S1State(
             svs_score=await self._meta("svs_score", raws, now),
             order_flow=OrderFlow(
@@ -403,6 +412,7 @@ class Engine:
             cvd_by_level=self._build_cvd(tape, now),  # accumulation par niveau, hot path (D-029)
             chop=await self._meta("chop", raws, now),
             order_book=order_book,
+            liquidity_heatmap=liquidity_heatmap,
             tape=tape,
         )
         self.schema.s1_state = s1

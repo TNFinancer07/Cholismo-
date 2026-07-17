@@ -7,7 +7,7 @@ import { useTerminal } from './terminal'
 
 /** Identifiants canoniques des panneaux disponibles (couverts par panels/registry). */
 export const PANEL_IDS = ['A1', 'A2', 'A3', 'EC', 'S2P', 'MOCK', 'B1', 'B2', 'B3', 'B4',
-  'S1S', 'OB', 'TP', 'CVD', 'IA', 'C1', 'C2', 'C4', 'MODE'] as const
+  'S1S', 'OB', 'TP', 'CVD', 'HM', 'IA', 'C1', 'C2', 'C4', 'MODE'] as const
 export type PanelId = (typeof PANEL_IDS)[number]
 
 export interface Workspace {
@@ -23,7 +23,7 @@ function builtins(): Workspace[] {
     { id: 'defaut', name: 'DÉFAUT', builtin: true, showBlotter: true,
       columns: [['A1', 'S2P', 'A3', 'MOCK'], ['B4', 'S1S', 'B1'], ['EC', 'C1', 'C2', 'C4', 'MODE']] },
     { id: 'micro', name: 'MICRO · S1', builtin: true, showBlotter: true,
-      columns: [['S1S', 'B2', 'IA'], ['B4', 'OB', 'CVD', 'B1'], ['TP', 'EC', 'B3', 'C1', 'C2', 'MOCK']] },
+      columns: [['S1S', 'B2', 'IA'], ['B4', 'OB', 'CVD', 'HM', 'B1'], ['TP', 'EC', 'B3', 'C1', 'C2', 'MOCK']] },
     { id: 'macro', name: 'MACRO · S2', builtin: true, showBlotter: false,
       columns: [['A1', 'A3', 'EC'], ['S2P', 'A2'], ['B4', 'B3', 'MOCK']] },
     { id: 'discipline', name: 'DISCIPLINE', builtin: true, showBlotter: true,
@@ -31,10 +31,10 @@ function builtins(): Workspace[] {
   ]
 }
 
-// v6 : ajout du panneau CVD (footprint delta par niveau, D-029) aux espaces intégrés — bump
-// de clé : les layouts persistés antérieurs repartent des intégrés (les PERSO se recréent ;
-// pas de migration silencieuse d'un panneau invisible).
-const STORAGE_KEY = () => `cholismo.workspaces.${useTerminal.getState().operator}.v6`
+// v7 : ajout du panneau HM (Heatmap de liquidité, D-036) à l'espace MICRO — bump de clé : les
+// layouts persistés antérieurs repartent des intégrés (les PERSO se recréent ; pas de migration
+// silencieuse d'un panneau invisible).
+const STORAGE_KEY = () => `cholismo.workspaces.${useTerminal.getState().operator}.v7`
 
 interface Persisted { workspaces: Workspace[]; activeId: string }
 

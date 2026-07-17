@@ -72,6 +72,12 @@ SWEEP_RECENT_MAX = 8             # longueur du feed d'alertes récentes
 # référence R réutilise R_UNIT_USD (défaut 100 $) — source unique, pas de double définition.
 CONTRACT_POINT_VALUE = {"ES": 50.0, "MES": 5.0, "NQ": 20.0, "MNQ": 2.0}
 
+# --- Heatmap de liquidité (LOB, canal rapide 4 Hz — D-036) ---
+# Fenêtre glissante de colonnes temporelles (une par tick rapide de 0,25 s). 60 colonnes ≈ 15 s
+# d'historique. Niveaux par côté = profondeur affichée du carnet (BOOK_DEPTH).
+HEATMAP_COLS = int(os.getenv("HEATMAP_COLS", "60"))       # colonnes temporelles conservées
+HEATMAP_LEVELS = int(os.getenv("HEATMAP_LEVELS", "10"))   # niveaux par côté (= BOOK_DEPTH)
+
 # --- Cortex Cognitif — bias_detector (analytique post-hoc, DÉTERMINISTE — D-035) ---
 # Seuils de détection de biais. FOMO/EXEC = PLACEHOLDER (v1 provisional, à calibrer par l'humain
 # sur les 50+ trades) ; la fenêtre revenge est AUTORITÉ (spec : < 3 min après une perte).

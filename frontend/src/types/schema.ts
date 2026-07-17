@@ -83,6 +83,17 @@ export interface OrderBookValue {
   asks: [number, number][]
 }
 
+// Heatmap de liquidité (D-036) — fenêtre glissante du carnet L2, rendue en Canvas.
+export interface HeatmapColumn {
+  ts: number
+  bids: [number, number][]
+  asks: [number, number][]
+}
+export interface HeatmapValue {
+  columns: HeatmapColumn[]     // ancien → récent, borné (HEATMAP_COLS)
+  max_size: number             // normalisation couleur (0 si vide)
+}
+
 /** Tape / Time & Sales (D-026) — prints observés, plus récent en tête. */
 export interface TapePrint {
   ts: number
@@ -117,6 +128,7 @@ export interface S1State {
   cvd_by_level: CvdState
   chop: MetaField<number>
   order_book: MetaField<OrderBookValue>
+  liquidity_heatmap: MetaField<HeatmapValue>
   tape: MetaField<TapePrint[]>
   strategies: S1Strategies | null
 }

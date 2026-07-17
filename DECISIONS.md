@@ -875,6 +875,34 @@ division par zéro / score négatif.
 - **Vérif** : +6 tests /devil ; 140 passed, ruff clean ; perf mesurée avant/après + essai live
   inchangé.
 
+## D-036 · Heatmap de liquidité (LOB) — `s1_state.liquidity_heatmap` + Canvas
+Profondeur HISTORIQUE du carnet L2 rendue en HTML5 Canvas. Décisions/hypothèses (Loop 1) :
+- **Schéma (MetaField)** : `s1_state.liquidity_heatmap` — value `{columns: [{ts, bids:[[p,s]…],
+  asks:[[p,s]…]}…], max_size}`. Fenêtre glissante (`HEATMAP_COLS=60` ≈ 15 s à 4 Hz), `levels`
+  par côté = `BOOK_DEPTH` (10). **Canal RAPIDE** : `s1_state` est déjà dans `FAST_BLOCKS` → poussé
+  au tick rapide (0,25 s = **4 Hz**), sans nouveau canal.
+- **Réutilise le carnet existant** : pas de nouveau pipeline d'ingestion L2 — la heatmap accumule
+  `order_book` (D-025) en colonnes temporelles (`app/heatmap.py::accumulate_heatmap`, pur/testé).
+  L'accumulation est sur le hot path mais O(cols×levels) — append + borne, trivial (§7).
+- **FAIL-CLOSED (§3)** : carnet non FRESH (STALE/ABSENT) → AUCUNE colonne inventée ; l'historique
+  est conservé, la fraîcheur du bloc SUIT le carnet. Le panneau : STALE → « FIGÉ » + grisé,
+  ABSENT/vide → « PAS DE DONNÉES ».
+- **Canvas haute-performance** : un seul `<canvas>` (DPR-scalé, ResizeObserver), redessiné à
+  chaque update SSE (4 redraws/s, ~1200 rects — trivial). Temps = X, prix = Y, taille = intensité
+  (bids VERT sous le mid / asks ROUGE au-dessus : côté encodé par couleur ET position). **Aucun
+  nœud DOM par cellule** (essai : 1 canvas, 4 div dans le panneau, pas ~1000) → pas de surcharge
+  DOM. **Lecture seule** : aucun affordance de passage d'ordre (§2.1).
+- **Câblage** : `PANEL_IDS` + registre (`HM`), ajouté à l'espace **MICRO** (bump `STORAGE_KEY`
+  v6→v7 — layouts persistés repartent des intégrés), mnémonique `HM` (zone B). Traçable §1 :
+  un panneau = un bloc.
+- **Vérif** : 7 tests backend (append FRESH, borne, fail-closed STALE/ABSENT, troncature levels,
+  max_size) ; 147 passed, ruff clean ; `tsc` + `vite build` OK ; essai réel : engine accumule
+  12 colonnes/3 s (FRESH, max_size réel), Canvas dessiné (55 % de pixels peints, 24 colonnes),
+  0 erreur JS + capture.
+- **Hors-scope (une feature = un commit)** : diffusion en DELTA (v1 pousse l'historique complet
+  à chaque tick → ~80 Ko/s en démo localhost, acceptable ; à optimiser en delta si bande passante
+  réelle) ; axes de prix/temps annotés ; survol → prix/taille ; agrégation multi-tick par colonne.
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.
