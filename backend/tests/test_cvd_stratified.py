@@ -120,3 +120,63 @@ def test_zero_or_negative_bucket_returns_empty():
 
 def test_size_threshold_echoed_in_output():
     assert _build([], threshold=42)["size_threshold"] == 42
+
+
+# ---------- /devil (D-038) : anomalies de flux critiques ----------
+
+import math  # noqa: E402
+
+
+def test_massive_flow_bounded_and_finite():
+    # 50 000 prints → série bornée à max_points, valeurs TOUTES finies, pas d'explosion
+    prints = [_p(i, 5000 + (i % 20) * 0.25, (i % 30) + 1, "BUY" if i % 2 else "SELL")
+              for i in range(50_000)]
+    out = _build(prints, bucket=5, max_points=120)
+    assert len(out["series"]) == 120
+    for pt in out["series"]:
+        assert all(math.isfinite(pt[k]) for k in ("retail", "institutional", "total", "price"))
+
+
+def test_sizes_straddling_threshold_exact_ge():
+    # 9.99 < 10 → retail ; 10.0 == seuil → institutional (≥) ; 10.01 > seuil → institutional
+    prints = [_p(0, 5000, 9.99, "BUY"), _p(1, 5000, 10.0, "BUY"), _p(2, 5000, 10.01, "BUY")]
+    pt = _build(prints, threshold=10)["series"][-1]
+    assert pt["retail"] == 9.99 and round(pt["institutional"], 2) == 20.01
+
+
+def test_flat_zero_delta_series_no_divergence_no_error():
+    # longue série au delta NET NUL par bucket (buy == sell) → CVD plat, aucune divergence,
+    # aucune division par zéro (pente/divergence). Le prix bouge mais l'inst reste plat.
+    prints = []
+    for i in range(40):
+        prints += [_p(i * 5, 5000 + i, 20, "BUY"), _p(i * 5 + 1, 5000 + i, 20, "SELL")]  # +20 −20 = 0
+    out = _build(prints, bucket=5)
+    assert len(out["series"]) == 40
+    assert all(pt["institutional"] == 0 and pt["total"] == 0 for pt in out["series"])
+    assert out["divergence"] is None                    # inst plat → deadband → jamais de signal
+
+
+def test_price_flat_inst_moves_no_divergence():
+    # prix CONSTANT (direction 0 via deadband) même si l'inst grimpe → pas de faux signal
+    prints = [_p(i * 5, 5000, 20, "BUY") for i in range(10)]   # prix figé 5000, inst ↑
+    assert _build(prints)["divergence"] is None
+
+
+def test_nan_inf_price_and_ts_ignored():
+    prints = [_p(0, float("inf"), 20, "BUY"), _p(float("nan"), 5000, 20, "BUY"),
+              _p(0, float("-inf"), 20, "SELL"), _p(0, 5000, 7, "BUY")]
+    out = _build(prints)
+    assert out["series"][-1]["total"] == 7             # seuls les prints entièrement finis comptent
+
+
+def test_divergence_lookback_larger_than_series():
+    # lookback 100 mais série de 3 points → fenêtre = toute la série, pas d'IndexError
+    prints = [_p(0, 5002, 20, "BUY"), _p(60, 5001, 20, "BUY"), _p(120, 5000, 20, "BUY")]
+    out = _build(prints, lookback=100)
+    assert out["divergence"] is None or out["divergence"]["bars"] == 3
+
+
+def test_zero_or_negative_threshold_no_crash():
+    # seuil ≤ 0 → tout print (size>0) est institutionnel ; aucun crash, retail vide
+    pt = _build([_p(0, 5000, 5, "BUY")], threshold=0)["series"][-1]
+    assert pt["institutional"] == 5 and pt["retail"] == 0

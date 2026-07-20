@@ -28,6 +28,11 @@ function fmt(v: number): string {
   return s + R(a)
 }
 
+// nombre SIGNÉ robuste (badge divergence) : non-fini / absent → « · » (jamais un « NaN » affiché).
+function signed(v: number, digits = 0): string {
+  return Number.isFinite(v) ? (v > 0 ? '+' : '') + v.toFixed(digits) : '·'
+}
+
 function draw(canvas: HTMLCanvasElement, val: CvdStratifiedValue | null | undefined,
               box: { w: number; h: number }, hoverX: number | null) {
   const dpr = window.devicePixelRatio || 1
@@ -37,7 +42,7 @@ function draw(canvas: HTMLCanvasElement, val: CvdStratifiedValue | null | undefi
   const ctx = canvas.getContext('2d'); if (!ctx) return
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
   ctx.clearRect(0, 0, W, H)
-  const series = val?.series ?? []
+  const series = Array.isArray(val?.series) ? val!.series : []
   if (W < 4 || H < 4 || series.length === 0) return
 
   // étendue Y sur les 3 strates + zéro (déterministe) ; padding si plat.
@@ -88,9 +93,13 @@ function draw(canvas: HTMLCanvasElement, val: CvdStratifiedValue | null | undefi
   line('institutional', INST, 2, [])    // strate clé, la plus visible
 
   // survol : réticule + points + infobulle (interactif)
-  if (hoverX != null && hoverX >= PAD_L - 6 && hoverX <= W - PAD_R + 6 && n >= 1) {
-    const i = n === 1 ? 0 : Math.max(0, Math.min(n - 1, R(((hoverX - PAD_L) / plotW) * (n - 1))))
-    const p = series[i], hx = R(xOf(i)) + 0.5
+  // GARDE /devil : plotW ≤ 0 (panneau très étroit) rendrait `(hoverX−PAD_L)/plotW` = ±∞/NaN →
+  // index NaN → `series[NaN]` undefined → crash. On exige plotW > 0 et un point valide.
+  const rawI = plotW > 0 ? R(((hoverX ?? 0) - PAD_L) / plotW * (n - 1)) : 0
+  const i = n === 1 ? 0 : Math.max(0, Math.min(n - 1, Number.isFinite(rawI) ? rawI : 0))
+  const hp = series[i]
+  if (hoverX != null && plotW > 0 && hoverX >= PAD_L - 6 && hoverX <= W - PAD_R + 6 && hp) {
+    const p = hp, hx = R(xOf(i)) + 0.5
     ctx.strokeStyle = 'rgba(201, 212, 227, 0.35)'; ctx.lineWidth = 1
     ctx.beginPath(); ctx.moveTo(hx, PAD_T); ctx.lineTo(hx, H - PAD_B); ctx.stroke()
     const dot = (v: number, color: string) => {
@@ -138,7 +147,7 @@ export function CvdStratifiedPanel() {
   }, [cs, box, hoverX])
 
   const fresh = cs?.freshness
-  const series = cs?.value?.series ?? []
+  const series = Array.isArray(cs?.value?.series) ? cs!.value!.series : []
   const noData = fresh === 'ABSENT' || series.length === 0
   const div = cs?.value?.divergence ?? null
   const threshold = cs?.value?.size_threshold ?? 10
@@ -151,9 +160,9 @@ export function CvdStratifiedPanel() {
           <div className={cn('mb-0.5 flex shrink-0 items-center gap-1 border px-1 py-0.5 text-xxs font-bold',
             div.kind === 'BULLISH' ? 'border-risk-green/50 text-risk-green' : 'border-risk-red/50 text-risk-red')}
             title="Divergence prix ↔ CVD institutionnel (advisory, ne bloque ni ne trade — §2.1)">
-            <span>{div.kind === 'BULLISH' ? '⤴ ACCUMULATION' : '⤵ DISTRIBUTION'} INST</span>
+            <span>{div.kind === 'BULLISH' ? '⤴ ACCUMULATION' : div.kind === 'BEARISH' ? '⤵ DISTRIBUTION' : '±'} INST</span>
             <span className="ml-auto font-normal text-term-faint tabular-nums">
-              Δprix {div.price_change > 0 ? '+' : ''}{div.price_change.toFixed(2)} · Δinst {div.inst_change > 0 ? '+' : ''}{Math.round(div.inst_change)} · {div.bars} pas
+              Δprix {signed(div.price_change, 2)} · Δinst {signed(div.inst_change)} · {Number.isFinite(div.bars) ? div.bars : '·'} pas
             </span>
           </div>
         )}

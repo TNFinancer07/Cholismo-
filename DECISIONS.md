@@ -1063,6 +1063,38 @@ institutionnel. Décisions :
 - **Hors-scope (une feature = un commit)** : 3+ strates (retail/mid/inst) ; profil de volume par
   strate ; corrélation glissante prix↔CVD ; export ; superposition sur le graphe de prix.
 
+### /devil D-038 — anomalies de flux critiques
+Attaques : flux massifs · taille == seuil (`>=`) · prix NaN/Inf · série de delta PLATE (variation
+nulle → /0 de pente/divergence ?) · (frontend) valeurs non-finies, resize 0×0, survol hors cadre.
+- **Backend division-free (pente/divergence)** : la divergence compare des DIRECTIONS
+  (soustraction + deadbands), **jamais une division** → une série plate ne peut pas provoquer de
+  /0 ; le seul quotient est `floor(ts/bucket_seconds)`, gaté `bucket_seconds > 0`. Tests :
+  série plate delta-nul (30–40 pts) → divergence None, aucune erreur ; prix figé → pas de faux
+  signal (deadband prix).
+- **Flux massifs** : 50 000 prints → série bornée à `max_points`, **toutes valeurs finies**,
+  < 0,15 s ; en live le moteur borne déjà le tampon à `CVD_STRAT_MAX_PRINTS`. Test dédié.
+- **Seuil exact `>=`** : 9.99 → retail ; 10.0 (== seuil) → institutional ; 10.01 → institutional.
+  Seuil ≤ 0 → tout institutionnel, aucun crash. Tests dédiés.
+- **Prix/ts NaN/Inf** : filtrés en amont (`math.isfinite` + côté ∈ BUY/SELL) → jamais un delta
+  inventé (§3). Test dédié.
+- **Frontend — 2 bugs RÉELS trouvés & corrigés** (essai Playwright SSE gelé, **0 erreur JS**) :
+  1. **Badge divergence — crash `.toFixed` sur `undefined`/non-fini** : une divergence forcée/
+     corrompue sans `price_change` (ou avec `±Infinity`/`NaN`) faisait planter le rendu du badge
+     (`undefined.toFixed(2)` → TypeError). Corrigé par `signed()` : non-fini/absent → « · »
+     (jamais un « NaN » brut affiché §3). Test : divergence extrême (prix 1e12, Δ non-finis) +
+     champs manquants → badge propre, 0 erreur.
+  2. **Survol — index NaN sur panneau très étroit** : si `plotW ≤ 0` (largeur < gouttières),
+     `(hoverX−PAD_L)/plotW` = ±∞/NaN → `series[NaN]` undefined → crash sur `.institutional`.
+     Corrigé : garde `plotW > 0` + `Number.isFinite(rawI)` + point valide requis (le survol
+     dégrade proprement plutôt que planter).
+- **Chemins déjà sûrs confirmés** : valeurs de série non-finies (étendue Y les ignore + segment de
+  ligne coupé) ; **resize 0×0** (retour anticipé `W<4 || H<4`) ; survol X extrême / hors cadre
+  (index borné) ; série plate `ymax==ymin` (padding ±1, pas de /0) ; série non-tableau
+  (`Array.isArray` → PAS DE DONNÉES honnête).
+- **Vérif** : +7 tests backend (flux massif, seuil exact, plat delta-nul, prix figé, NaN/Inf,
+  lookback > série, seuil ≤ 0) ; **191 passed**, ruff clean ; `tsc` + `vite build` OK ; essai
+  Playwright 7 pathologies + balayage de survol hors cadre → **0 erreur JS**, UI réactive.
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.
