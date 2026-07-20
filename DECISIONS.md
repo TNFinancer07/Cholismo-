@@ -1095,6 +1095,26 @@ nulle → /0 de pente/divergence ?) · (frontend) valeurs non-finies, resize 0×
   lookback > série, seuil ≤ 0) ; **191 passed**, ruff clean ; `tsc` + `vite build` OK ; essai
   Playwright 7 pathologies + balayage de survol hors cadre → **0 erreur JS**, UI réactive.
 
+### /polish D-038 — réticule net, contraste, échelle dynamique
+Loop 5 sur le rendu (aucune logique métier touchée). 3 axes :
+- **1. Alignement au pixel (réticule + infobulle)** : réticule vertical sur la demi-grille
+  (`R(x)+0.5`), points de survol à centres entiers (`R(x)`, `R(yOf)`), boîte + texte d'infobulle
+  et étiquettes d'axe sur bornes entières → arêtes nettes, aucun flou d'anti-aliasing. (Les
+  courbes de données restent lissées : l'anti-aliasing y est voulu pour des diagonales douces.)
+- **2. Lisibilité des couleurs (fond sombre)** : la ligne RETAIL passait du gris « faint »
+  `#67788f` (contraste ~2:1, sous le seuil) à un gris-bleu lisible `#94a3b8` ; contraste WCAG
+  1.4.11 MESURÉ sur le fond réel du panneau — **inst 7.06 · retail 7.49 · total 12.81**, tous
+  ≥ 3:1. Strate toujours encodée couleur ET style de trait ET légende (§3). Légende synchronisée.
+- **3. Échelle dynamique douce** : la fenêtre Y est LISSÉE (`rangeRef`) — à chaque donnée, on
+  vise l'étendue des 3 strates + 8 % de marge, on **EXPANSE instantanément** (jamais de rognage
+  d'un pic RÉEL, §3) mais on **CONTRACTE en douceur** (easing 0.28) → l'axe respire, un pic
+  n'écrase pas le graphe et l'axe ne snappe pas. Le survol/resize ne relancent pas le lissage
+  (l'axe est stable au survol). Essai : pic ×40 → ligne repoussée instantanément (9→36 px) puis
+  retour GRADUEL (35→9 px sur ~24 ticks), convergence au régime (Δ ≤ 3 px).
+- **Vérif** : `tsc --noEmit` + `vite build` OK ; essai Playwright `/polish` (contraste ≥ 3:1
+  mesuré, échelle instant-expand/eased-contract mesurée au pixel) **0 erreur JS** + captures
+  (live, survol net).
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.
