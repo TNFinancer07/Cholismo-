@@ -975,6 +975,29 @@ Agrégation du Time & Sales par bougie/niveau (Bid×Ask), imbalances diagonales,
   multi-bougie complet ; agrégation Value Area ; empilement d'imbalances (stacked) ; survol →
   détail. (Le tape étant une fenêtre bornée, les bougies se remplissent au fil du temps.)
 
+### /devil D-037 — anomalies de flux critiques
+Attaques : division /0 du ratio · prix hors-grille · rafales à ts identiques · bougie à niveau
+unique · (frontend) prix NaN/Inf, volume gigantesque, /0 de la taille de cellule.
+- **Division par zéro (ratio)** : IMMUNE par construction — la formule est MULTIPLICATIVE
+  (`ask ≥ ratio·bid[k−1]`), jamais une division. Diagonale à volume nul → condition vraie
+  gatée par le plancher `min_vol`. Test dédié.
+- **Rafale à timestamps identiques (bug OHLC → corrigé)** : `open` utilisait `<=` → écrasé par
+  le DERNIER print de la rafale. Corrigé en `<` strict → `open` = 1er print de l'ordre d'entrée,
+  `close` = dernier (`>=`). Test dédié.
+- **Prix hors-grille** : `round(prix/tick)` snappe TOUT prix fini sur la grille ; deux prix
+  aberrants lointains → niveaux épars, pas de crash (test snap). **tick ≤ 0** → `build_footprint`
+  renvoie `[]` (fail-closed).
+- **Bougie à niveau unique** (O=H=L=C, un seul prix) : POC = ce niveau, imbalance vs diagonale
+  vide, OHLC égaux — aucun crash (test dédié).
+- **Frontend blindé** (essai Playwright SSE gelé — **0 erreur JS**, UI réactive) : `fmt` gère
+  non-fini (« · ») et gros volumes (k/M → cellule jamais débordée) ; garde `!(tick > 0)` capture
+  0 ET NaN ; **fenêtre de prix bornée à `MAX_ROWS=400`** → un prix aberrant lointain n'explose
+  jamais la hauteur du canvas (mesuré < 40 000 px) ; boucle de cellules ignore prix non-fini /
+  hors-fenêtre ; OHLC dessiné seulement si fini. Aucune division locale de taille (cellules à
+  dimensions FIXES). Hook DEV `window.__setFootprint` (élagué en prod) pour forcer ces états.
+- **Vérif** : +5 tests backend (rafale OHLC, niveau unique, prix aberrant, diagonale nulle,
+  tick 0/négatif) ; 168 passed, ruff clean ; essai Playwright 7 pathologies → 0 erreur JS.
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.

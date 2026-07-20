@@ -102,3 +102,38 @@ def test_levels_sorted_price_desc_and_total_volume():
     prices = [lvl["price"] for lvl in c["levels"]]
     assert prices == sorted(prices, reverse=True)                 # haut → bas
     assert c["total_volume"] == 12
+
+
+# ---------- /devil (D-037) : anomalies de flux critiques ----------
+
+def test_same_ts_burst_ohlc_open_first_close_last():
+    # rafale à timestamps IDENTIQUES : open = 1er print (ordre d'entrée), close = dernier
+    prints = [_p(0, 5000.0, 1, "BUY"), _p(0, 5001.0, 1, "BUY"), _p(0, 4999.0, 1, "SELL")]
+    c = build_footprint(prints, 60, 0.25, 3.0, 1, 12)[0]
+    assert c["open"] == 5000.0 and c["close"] == 4999.0
+    assert c["high"] == 5001.0 and c["low"] == 4999.0
+
+
+def test_single_level_candle_ohlc_equal_no_crash():
+    prints = [_p(0, 5000.0, 10, "BUY"), _p(1, 5000.0, 4, "SELL")]   # un seul prix transigé
+    c = build_footprint(prints, 60, 0.25, 3.0, 1, 12)[0]
+    assert c["open"] == c["high"] == c["low"] == c["close"] == 5000.0
+    assert c["poc"] == 5000.0 and len(c["levels"]) == 1
+
+
+def test_aberrant_far_price_snaps_to_grid_no_crash():
+    prints = [_p(0, 5000.0, 5, "BUY"), _p(0, 999999.37, 5, "BUY")]  # prix aberrant hors-grille
+    c = build_footprint(prints, 60, 0.25, 3.0, 1, 12)[0]
+    prices = {lvl["price"] for lvl in c["levels"]}
+    assert 5000.0 in prices and any(abs(pr - 999999.37) <= 0.25 for pr in prices)   # snappé
+
+
+def test_zero_diagonal_no_division_error():
+    # niveau adjacent à volume NUL → formule multiplicative (pas de /0) → imbalance vs vide
+    c = build_footprint([_p(0, 5000.0, 10, "BUY")], 60, 0.25, 3.0, 1, 12)[0]
+    assert _levels(c)[5000.0]["imbalance"] == "ASK"
+
+
+def test_zero_or_negative_tick_returns_empty():
+    assert build_footprint([_p(0, 5000, 1, "BUY")], 60, 0.0, 3.0, 1, 12) == []
+    assert build_footprint([_p(0, 5000, 1, "BUY")], 0.0, 0.25, 3.0, 1, 12) == []

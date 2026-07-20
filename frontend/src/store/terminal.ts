@@ -166,6 +166,12 @@ if (import.meta.env.DEV && typeof window !== 'undefined') {
     const s = useTerminal.getState()
     if (s.s1_state) s.set({ s1_state: { ...s.s1_state, liquidity_heatmap: hm as never } })
   }
+  // /devil D-037 : force un `footprint` pathologique (prix NaN, volume gigantesque, niveau
+  // unique, plage aberrante, tick 0/NaN) pour vérifier que le Canvas ne crashe jamais.
+  ;(window as unknown as { __setFootprint?: (fp: unknown) => void }).__setFootprint = (fp) => {
+    const s = useTerminal.getState()
+    if (s.s1_state) s.set({ s1_state: { ...s.s1_state, footprint: fp as never } })
+  }
 }
 
 /** Temps serveur estimé (pour countdown C3 et âges de donnée). */

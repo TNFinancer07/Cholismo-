@@ -51,8 +51,9 @@ def build_footprint(prints: list[dict], candle_seconds: float, tick: float,
             lvl[1] += float(size)                      # ask volume
         else:
             lvl[0] += float(size)                      # bid volume
-        # OHLC par ordre chronologique des prints
-        if ts <= b["first_ts"]:
+        # OHLC : open = print au ts le plus PETIT (rafale à ts égal → 1er de l'ordre d'entrée,
+        # d'où le `<` strict) ; close = ts le plus GRAND (rafale → dernier, d'où le `>=`).
+        if ts < b["first_ts"]:
             b["first_ts"], b["open"] = ts, float(price)
         if ts >= b["last_ts"]:
             b["last_ts"], b["close"] = ts, float(price)

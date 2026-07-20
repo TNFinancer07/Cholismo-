@@ -16,22 +16,33 @@ const GREEN = '52, 211, 153'    // ASK imbalance (achat)
 const RED = '248, 113, 113'     // BID imbalance (vente)
 const GOLD = '240, 180, 41'     // POC (router)
 const PRICE_W = 52, CW = 62, RH = 14, HEAD_H = 15   // gouttière prix, largeur bougie, hauteur ligne, entête
+const MAX_ROWS = 400, MAX_CANDLES = 60              // bornes de rendu (canvas fini, /devil)
 
-function fmt(v: number): string { return v >= 1000 ? Math.round(v / 100) / 10 + 'k' : String(Math.round(v)) }
+// compact + robuste : non-fini → « · » ; gros volumes → k/M (cellule jamais débordée).
+function fmt(v: number): string {
+  if (!Number.isFinite(v)) return '·'
+  const a = Math.abs(v)
+  if (a >= 1e6) return Math.round(v / 1e5) / 10 + 'M'
+  if (a >= 1000) return Math.round(v / 100) / 10 + 'k'
+  return String(Math.round(v))
+}
 
 function draw(canvas: HTMLCanvasElement, fp: FootprintValue | null | undefined) {
-  const cands = fp?.candles ?? []
+  const cands = (fp?.candles ?? []).slice(-MAX_CANDLES)
   const tick = fp?.tick ?? 0.25
-  // étendue de prix partagée (grille de tick)
+  // étendue de prix partagée (grille de tick) — seuls les prix FINIS comptent.
   let pmin = Infinity, pmax = -Infinity
   for (const c of cands) for (const l of c.levels) {
     if (Number.isFinite(l.price)) { if (l.price < pmin) pmin = l.price; if (l.price > pmax) pmax = l.price }
   }
   const dpr = window.devicePixelRatio || 1
-  if (cands.length === 0 || !Number.isFinite(pmin) || pmax < pmin || tick <= 0) {
+  // garde : `!(tick > 0)` capture aussi NaN ; range non-finie / vide → canvas neutre.
+  if (cands.length === 0 || !Number.isFinite(pmin) || !Number.isFinite(pmax) || pmax < pmin || !(tick > 0)) {
     canvas.width = 1; canvas.height = 1; return
   }
-  const rows = Math.max(1, Math.round((pmax - pmin) / tick) + 1)
+  // fenêtre de prix BORNÉE à MAX_ROWS (un prix aberrant lointain ne fait pas exploser le canvas).
+  const rows = Math.max(1, Math.min(Math.round((pmax - pmin) / tick) + 1, MAX_ROWS))
+  const pminD = pmax - (rows - 1) * tick
   const W = PRICE_W + cands.length * CW
   const H = HEAD_H + rows * RH
   canvas.style.width = W + 'px'; canvas.style.height = H + 'px'
@@ -54,16 +65,19 @@ function draw(canvas: HTMLCanvasElement, fp: FootprintValue | null | undefined) 
 
   cands.forEach((c, j) => {
     const x0 = PRICE_W + j * CW
-    // fine bougie OHLC (rappel de l'action des prix) sur le bord gauche de la colonne
-    const up = c.close >= c.open
-    ctx.strokeStyle = up ? `rgba(${GREEN}, 0.5)` : `rgba(${RED}, 0.5)`
-    ctx.fillStyle = up ? `rgba(${GREEN}, 0.35)` : `rgba(${RED}, 0.35)`
-    const cx = x0 + 3
-    ctx.beginPath(); ctx.moveTo(cx, yOf(c.high)); ctx.lineTo(cx, yOf(c.low)); ctx.stroke()
-    const yo = yOf(c.open), yc = yOf(c.close)
-    ctx.fillRect(x0 + 1, Math.min(yo, yc), 4, Math.max(2, Math.abs(yc - yo)))
+    // fine bougie OHLC (rappel de l'action des prix) — seulement si OHLC fini (§3 défensif).
+    if (Number.isFinite(c.open) && Number.isFinite(c.high) && Number.isFinite(c.low) && Number.isFinite(c.close)) {
+      const up = c.close >= c.open
+      ctx.strokeStyle = up ? `rgba(${GREEN}, 0.5)` : `rgba(${RED}, 0.5)`
+      ctx.fillStyle = up ? `rgba(${GREEN}, 0.35)` : `rgba(${RED}, 0.35)`
+      const cx = x0 + 3
+      ctx.beginPath(); ctx.moveTo(cx, yOf(c.high)); ctx.lineTo(cx, yOf(c.low)); ctx.stroke()
+      const yo = yOf(c.open), yc = yOf(c.close)
+      ctx.fillRect(x0 + 1, Math.min(yo, yc), 4, Math.max(2, Math.abs(yc - yo)))
+    }
 
     for (const l of c.levels) {
+      if (!Number.isFinite(l.price) || l.price < pminD) continue   // hors-grille / hors-fenêtre → ignoré
       const y = yOf(l.price)
       // fond de surbrillance d'imbalance
       if (l.imbalance === 'ASK') { ctx.fillStyle = `rgba(${GREEN}, 0.22)`; ctx.fillRect(x0 + 7, y, CW - 8, RH) }
