@@ -145,6 +145,10 @@ class S1State(BaseModel):
     # Tape / Time & Sales (D-026) — value: [{ts, price, size, side ∈ BUY|SELL, seq}…],
     # fenêtre glissante bornée, plus récent en tête. Prints OBSERVÉS (pas des ordres, §2.1).
     tape: MetaField = Field(default_factory=MetaField)
+    # Footprint + imbalances (D-037) — value: {candles: [{start_ts, end_ts, open, high, low,
+    # close, poc, total_volume, levels: [{price, bid_vol, ask_vol, imbalance ∈ ASK|BID|null}]}…],
+    # tick, ratio, candle_seconds}. Agrégation Bid×Ask par niveau/bougie. Lecture seule (§2.1).
+    footprint: MetaField = Field(default_factory=MetaField)
     # The two REAL Sony execution strategies (reference/sony/*), evaluated live (D-021).
     strategies: Optional[S1Strategies] = None
 

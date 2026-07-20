@@ -121,6 +121,27 @@ export interface CvdState {
   capped: boolean
 }
 
+// Footprint + imbalances (D-037) — agrégation Bid×Ask par niveau/bougie, rendue en Canvas.
+export interface FootprintLevel {
+  price: number
+  bid_vol: number
+  ask_vol: number
+  imbalance: 'ASK' | 'BID' | null
+}
+export interface FootprintCandle {
+  start_ts: number; end_ts: number
+  open: number; high: number; low: number; close: number
+  poc: number | null
+  total_volume: number
+  levels: FootprintLevel[]        // trié prix décroissant
+}
+export interface FootprintValue {
+  candles: FootprintCandle[]
+  tick: number
+  ratio: number
+  candle_seconds: number
+}
+
 export interface S1State {
   svs_score: MetaField<number>
   order_flow: OrderFlow
@@ -130,6 +151,7 @@ export interface S1State {
   order_book: MetaField<OrderBookValue>
   liquidity_heatmap: MetaField<HeatmapValue>
   tape: MetaField<TapePrint[]>
+  footprint: MetaField<FootprintValue>
   strategies: S1Strategies | null
 }
 

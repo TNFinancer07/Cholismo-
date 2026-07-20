@@ -72,6 +72,16 @@ SWEEP_RECENT_MAX = 8             # longueur du feed d'alertes récentes
 # référence R réutilise R_UNIT_USD (défaut 100 $) — source unique, pas de double définition.
 CONTRACT_POINT_VALUE = {"ES": 50.0, "MES": 5.0, "NQ": 20.0, "MNQ": 2.0}
 
+# --- Footprint + imbalances (D-037) ---
+# Ratio d'imbalance diagonal = AUTORITÉ (spec : > 300 %). Tick ES = 0.25. Le reste PLACEHOLDER
+# (v1 provisional — durée de bougie, plancher de volume, fenêtres, à calibrer par l'humain).
+PRICE_TICK = float(os.getenv("PRICE_TICK", "0.25"))                    # grille de prix ES
+FOOTPRINT_CANDLE_SECONDS = float(os.getenv("FOOTPRINT_CANDLE_SECONDS", "60"))  # v1 provisional
+FOOTPRINT_CANDLES = int(os.getenv("FOOTPRINT_CANDLES", "12"))         # bougies affichées
+FOOTPRINT_IMBALANCE_RATIO = float(os.getenv("FOOTPRINT_IMBALANCE_RATIO", "3.0"))   # AUTORITÉ (300 %)
+FOOTPRINT_MIN_IMBALANCE_VOL = float(os.getenv("FOOTPRINT_MIN_IMBALANCE_VOL", "1"))  # plancher, v1
+FOOTPRINT_MAX_PRINTS = int(os.getenv("FOOTPRINT_MAX_PRINTS", "800"))  # tampon de prints accumulés
+
 # --- Heatmap de liquidité (LOB, canal rapide 4 Hz — D-036) ---
 # Fenêtre glissante de colonnes temporelles (une par tick rapide de 0,25 s). 60 colonnes ≈ 15 s
 # d'historique. Niveaux par côté = profondeur affichée du carnet (BOOK_DEPTH).

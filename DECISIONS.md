@@ -943,6 +943,38 @@ l'état `_heatmap_cols` du moteur sont supprimés (le moteur est sans état pour
   essai Playwright réel : accumulation 8 → 20 colonnes en 3 s, Canvas dessiné, 1 canvas / 4 div,
   0 erreur JS + capture.
 
+## D-037 · Footprint + imbalances (`s1_state.footprint` + Canvas)
+Agrégation du Time & Sales par bougie/niveau (Bid×Ask), imbalances diagonales, POC. Décisions :
+- **Schéma (MetaField)** `s1_state.footprint` — value `{candles: [{start_ts, end_ts, open, high,
+  low, close, poc, total_volume, levels: [{price, bid_vol, ask_vol, imbalance ∈ ASK|BID|null}]}],
+  tick, ratio, candle_seconds}`. Canal RAPIDE (`s1_state`). Lecture seule (§2.1).
+- **Approche mathématique** (`app/footprint.py::build_footprint`, pur/déterministe) : BUY =
+  agresseur à l'ASK (`ask_vol`), SELL = au BID (`bid_vol`) ; prix quantifié sur la grille de
+  tick (`k = round(prix/tick)`). **Imbalance DIAGONALE** (ratio R, plancher M) : niveau `k` =
+  **ASK** si `ask_vol[k] ≥ R·bid_vol[k−1]` ET `ask_vol[k] ≥ M` ; **BID** si `bid_vol[k] ≥
+  R·ask_vol[k+1]` ET `bid_vol[k] ≥ M` (les deux → côté au volume dominant). **POC** = niveau au
+  volume total max. Ratio = **AUTORITÉ** (spec : 300 % → 3.0) ; durée de bougie (60 s), plancher
+  (1) = **v1 provisional** (config, à calibrer).
+- **Ingestion** : le moteur accumule les prints NEUFS du tape (seq-dédup + re-baseline sur
+  régression, comme le CVD D-029) dans un buffer borné (`FOOTPRINT_MAX_PRINTS=800`), puis
+  `build_footprint` construit les bougies. Hot path O(prints), borné (§7). Fail-closed (§3) :
+  tape non FRESH → pas d'accumulation, fraîcheur propagée ; prix/taille non-fini, côté inconnu →
+  ignorés (jamais un volume inventé).
+- **Frontend Canvas** (`FootprintImbalancePanel`) : colonnes = bougies, lignes = niveaux (axe
+  prix partagé) ; chaque cellule `bid×ask` ; **surbrillance d'imbalance** (fond VERT ASK + ▲ /
+  ROUGE BID + ▼ — couleur JAMAIS seule §3) ; **POC** marqué en OR (liseré) ; fine bougie OHLC
+  (rappel de l'action des prix). Grille dimensionnée au CONTENU → défile (cellules lisibles),
+  un seul `<canvas>` (aucun DOM par cellule). Lecture seule (§2.1). STALE→FIGÉ, vide→PAS DE
+  DONNÉES. Câblé : registre `FP`, espace MICRO (bump `STORAGE_KEY` v7→v8), mnémonique `FP`.
+- **Vérif** : 13 tests backend (agrégation Bid×Ask, POC, imbalance ASK/BID/vs-vide/sous-ratio,
+  bucketing, OHLC, quantification, cap, fail-closed non-fini/côté) ; 163 passed, ruff clean ;
+  `tsc` + `vite build` OK ; essai réel : engine agrège 1 bougie (POC 5450.5, imbalances ASK
+  détectées), Canvas dessiné (1 canvas / 5 div, bid×ask + surbrillance + POC), 0 erreur JS +
+  capture.
+- **Hors-scope (une feature = un commit)** : superposition sur un vrai graphe chandelier
+  multi-bougie complet ; agrégation Value Area ; empilement d'imbalances (stacked) ; survol →
+  détail. (Le tape étant une fenêtre bornée, les bougies se remplissent au fil du temps.)
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.
