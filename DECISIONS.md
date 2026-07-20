@@ -998,6 +998,32 @@ unique · (frontend) prix NaN/Inf, volume gigantesque, /0 de la taille de cellul
 - **Vérif** : +5 tests backend (rafale OHLC, niveau unique, prix aberrant, diagonale nulle,
   tick 0/négatif) ; 168 passed, ruff clean ; essai Playwright 7 pathologies → 0 erreur JS.
 
+### /polish D-037 — clarté cognitive & précision graphique du Canvas
+Loop 5 sur le rendu (aucune logique métier touchée). Les 4 axes demandés :
+- **1. Alignement au pixel** : toutes les coordonnées de tracé passent par `R = Math.round`
+  (`yOf` renvoie un entier, remplissages sur bornes rondes) ; les traits 1 px (mèche OHLC,
+  contour POC) sont posés sur la demi-grille (`R(x)+0.5`) → arêtes nettes à 100 % de zoom, sans
+  flou d'anti-aliasing. Essai : front doré du POC = colonne franche (barre gauche 2 px + bords).
+- **2. Échelle typographique adaptative + AJUSTEMENT AU PANNEAU** : `ResizeObserver` mesure le
+  conteneur ; cellules bornées (`CW ∈ [40,132]`, `RH ∈ [12,26]`) qui **s'étirent** quand le
+  panneau grandit et **défilent** quand c'est dense. La police est choisie par `measureText` sur
+  la cellule la plus large (tient en largeur ET hauteur → séparateur/glyphe ▲▼ ne chevauchent
+  jamais les chiffres) ; sous un seuil lisible, `showText` masque le texte plutôt que de le
+  tasser. Correctif de conteneur : `h-full` sur la colonne flex (sinon le wrap s'effondrait à
+  1 px — le canvas mesurait la boîte, pas l'inverse). Essai : panneau large → canvas 512 px,
+  étroit → 290 px (les cellules suivent la largeur réelle).
+- **3. Intensité visuelle (alpha ∝ volume)** : le fond d'imbalance module son opacité selon le
+  volume du côté imbalancé rapporté au max de la bougie — `alpha = 0.12 + 0.32·min(1, vol/sideMax)`
+  (plancher 0.12 pour rester visible, plafond 0.44 pour ne jamais noyer le texte). Plus
+  l'imbalance est forte, plus la couleur est affirmée. Essai : fond fort (ask 300) alpha 112/255
+  vs faible (ask 20) alpha 36/255 → dégradé mesuré ×3, texte lisible dans les deux.
+- **4. POC au premier plan** : la barre + le contour OR sont dessinés **en DERNIER** dans chaque
+  cellule (après fond d'imbalance ET texte) → le marqueur POC reste net même superposé à une
+  imbalance active. Essai : niveau POC == imbalance ASK → or ET vert coexistent (or au-dessus).
+- **Vérif** : `tsc --noEmit` + `vite build` OK ; essai Playwright `/polish` (SSE gelé, 4 axes
+  validés au pixel) **0 erreur JS** + captures (live, POC/imbalance, dégradé alpha) ; ré-essai
+  `/devil` (7 pathologies) → **0 erreur JS** (blindage préservé après réécriture du rendu).
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.
