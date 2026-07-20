@@ -1024,6 +1024,45 @@ Loop 5 sur le rendu (aucune logique métier touchée). Les 4 axes demandés :
   validés au pixel) **0 erreur JS** + captures (live, POC/imbalance, dégradé alpha) ; ré-essai
   `/devil` (7 pathologies) → **0 erreur JS** (blindage préservé après réécriture du rendu).
 
+## D-038 · CVD granulaire stratifié par taille (`s1_state.cvd_stratified` + Canvas)
+CVD segmenté par STRATE DE TAILLE d'ordre (retail vs institutionnel) + divergence prix↔CVD
+institutionnel. Décisions :
+- **Schéma (MetaField)** `s1_state.cvd_stratified` — value `{size_threshold, series: [{ts, price,
+  retail, institutional, total}…], divergence: {kind ∈ BULLISH|BEARISH, price_change, inst_change,
+  bars} | null}`. Canal RAPIDE (`s1_state`). Lecture seule (§2.1). Distinct de `order_flow.cvd`
+  (scalaire) et `cvd_by_level` (par PRIX, D-029) : ici l'axe est la TAILLE d'ordre.
+- **Classification + maths** (`app/cvd_stratified.py::build_cvd_stratified`, pur/déterministe) :
+  chaque print classé `institutional` si `size ≥ size_threshold`, sinon `retail` ; delta agresseur
+  BUY = +size / SELL = −size ; agrégé par BUCKET temporel puis **cumulé chronologiquement par
+  strate** (retail / institutional / total) ; `price` du point = dernier prix (ts max) du bucket.
+- **Divergence (advisory §2.1)** : sur la fenêtre `lookback`, comparaison des DIRECTIONS prix vs
+  CVD institutionnel avec **deadbands** (`min_price_move`, `min_delta_move` → jamais un faux
+  signal) : prix ↓ + inst ↑ = **BULLISH** (accumulation cachée) ; prix ↑ + inst ↓ = **BEARISH**
+  (distribution). N'annote jamais un ordre, ne bloque ni ne modifie l'exécution (§2.1).
+- **Seuil retail/institutionnel `CVD_SIZE_THRESHOLD`** = **v1 provisional** (PLACEHOLDER §11 —
+  pas d'AUTORITÉ dans /reference ; calibration owner: Sony ; défaut 10). Bucket (5 s), fenêtre de
+  série (120 pts), lookback (12), deadbands = v1 provisional (config, à calibrer).
+- **Ingestion** : le moteur accumule les prints NEUFS du tape (seq-dédup + re-baseline sur
+  régression, comme CVD D-029 / footprint D-037) dans un buffer borné (`CVD_STRAT_MAX_PRINTS`),
+  puis `build_cvd_stratified` construit la série. Hot path O(prints), déterministe, zéro LLM (§7).
+  Fail-closed (§3) : tape non FRESH → pas d'accumulation, fraîcheur propagée ; prix/taille
+  non-fini, côté inconnu → ignorés (jamais un delta inventé) ; JSON strict `allow_nan=False` OK.
+- **Frontend Canvas** (`CvdStratifiedPanel`, code `CDS`) : 3 lignes de CVD cumulé (INSTITUTIONNEL
+  violet épais / RETAIL gris fin / TOTAL clair tireté) sur ligne de base ZÉRO ; la STRATE est
+  encodée par couleur ET style de trait ET libellé de légende (jamais la couleur seule §3) ; la
+  PENTE porte le sens (montée = achat net). Bande + badge de divergence (VERT ⤴ accumulation /
+  ROUGE ⤵ distribution). **INTERACTIF** : survol → réticule + infobulle (inst/retail/total/prix).
+  Un seul `<canvas>` DPR-scalé, aucun DOM par point. STALE→FIGÉ, vide→PAS DE DONNÉES. Câblé :
+  registre `CDS`, espace MICRO (bump `STORAGE_KEY` v8→v9), mnémonique `CDS`, hook DEV `__setCvdStrat`.
+- **Vérif** : 16 tests backend (classification par seuil/inclusif, signe delta, cumul multi-bucket,
+  bucketing, prix=dernier, divergence BULLISH/BEARISH/aligné/sous-deadband/point unique, vide,
+  fail-closed non-fini/côté, cap max_points, seuil échoué) ; 166 passed, ruff clean ; `tsc` +
+  `vite build` OK ; essai Playwright réel : engine agrège la série live (retail/inst/total,
+  divergence détectée sur données réelles), multi-ligne dessiné (violet inst visible), survol →
+  infobulle, BULLISH/BEARISH forcés → badge + bande, **0 erreur JS** + captures.
+- **Hors-scope (une feature = un commit)** : 3+ strates (retail/mid/inst) ; profil de volume par
+  strate ; corrélation glissante prix↔CVD ; export ; superposition sur le graphe de prix.
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.

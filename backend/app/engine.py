@@ -22,6 +22,7 @@ from . import config, settings
 from .datasource.base import MarketDataSource
 from .datasource import scenarios
 from .event_store import get_store
+from .cvd_stratified import build_cvd_stratified
 from .footprint import build_footprint
 from .graph.liquidity_sweep import SWEEP_GRAPH, build_sweep_inputs
 from .heatmap import latest_column
@@ -215,6 +216,8 @@ class Engine:
         self._cvd_since_ts: Optional[float] = None
         self._fp_prints: deque = deque(maxlen=config.FOOTPRINT_MAX_PRINTS)  # buffer prints footprint (D-037)
         self._fp_last_seq: int = 0
+        self._cs_prints: deque = deque(maxlen=config.CVD_STRAT_MAX_PRINTS)  # buffer prints CVD stratifié (D-038)
+        self._cs_last_seq: int = 0
         self._regime_tier = "GREEN"  # D4 hysteresis state (reference/youssef/01)
 
     # ---------- assembly helpers ----------
@@ -409,6 +412,32 @@ class Engine:
         return MetaField(value=value, last_update_ts=tape.last_update_ts, source=tape.source,
                          freshness=tape.freshness, flags=tape.flags)
 
+    def _build_cvd_stratified(self, tape: MetaField) -> MetaField:
+        """CVD granulaire stratifié par taille (D-038) : accumule les prints NEUFS du tape
+        (seq-dédup + re-baseline sur régression, comme le footprint) dans un buffer borné, puis
+        `build_cvd_stratified` construit la série cumulée par strate + la divergence — pur.
+        Tape non FRESH → pas d'accumulation, fraîcheur propagée (fail-closed §3). Hot path : O(prints)."""
+        if tape.freshness == Freshness.FRESH and isinstance(tape.value, list) and tape.value:
+            seqs = [p["seq"] for p in tape.value if isinstance(p.get("seq"), int)]
+            if seqs and max(seqs) < self._cs_last_seq:   # régression de seq (redémarrage source)
+                self._cs_last_seq = 0
+            new_max = self._cs_last_seq
+            for p in tape.value:
+                seq = p.get("seq")
+                if not isinstance(seq, int) or seq <= self._cs_last_seq:
+                    continue
+                self._cs_prints.append({"ts": p.get("ts"), "price": p.get("price"),
+                                        "size": p.get("size"), "side": p.get("side")})
+                new_max = max(new_max, seq)
+            self._cs_last_seq = new_max
+
+        value = build_cvd_stratified(
+            list(self._cs_prints), config.CVD_SIZE_THRESHOLD, config.CVD_STRAT_BUCKET_SECONDS,
+            config.CVD_STRAT_MAX_POINTS, config.CVD_STRAT_DIV_LOOKBACK,
+            config.CVD_STRAT_DIV_MIN_PRICE, config.CVD_STRAT_DIV_MIN_DELTA)
+        return MetaField(value=value, last_update_ts=tape.last_update_ts, source=tape.source,
+                         freshness=tape.freshness, flags=tape.flags)
+
     # ---------- loops ----------
 
     async def _assemble_fast(self, now: float) -> None:
@@ -445,6 +474,7 @@ class Engine:
             liquidity_heatmap=liquidity_heatmap,
             tape=tape,
             footprint=self._build_footprint(tape, now),   # D-037 : agrégation Bid×Ask + imbalances
+            cvd_stratified=self._build_cvd_stratified(tape),  # D-038 : CVD par strate de taille + divergence
         )
         self.schema.s1_state = s1
 

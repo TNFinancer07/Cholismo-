@@ -149,6 +149,11 @@ class S1State(BaseModel):
     # close, poc, total_volume, levels: [{price, bid_vol, ask_vol, imbalance ∈ ASK|BID|null}]}…],
     # tick, ratio, candle_seconds}. Agrégation Bid×Ask par niveau/bougie. Lecture seule (§2.1).
     footprint: MetaField = Field(default_factory=MetaField)
+    # CVD granulaire stratifié par taille (D-038) — value: {size_threshold, series: [{ts, price,
+    # retail, institutional, total}…], divergence: {kind ∈ BULLISH|BEARISH, price_change,
+    # inst_change, bars} | null}. Delta agresseur net cumulé par strate de taille + divergence
+    # prix↔CVD institutionnel (advisory §2.1). Lecture seule (§2.1). Fail-closed (§3).
+    cvd_stratified: MetaField = Field(default_factory=MetaField)
     # The two REAL Sony execution strategies (reference/sony/*), evaluated live (D-021).
     strategies: Optional[S1Strategies] = None
 

@@ -172,6 +172,12 @@ if (import.meta.env.DEV && typeof window !== 'undefined') {
     const s = useTerminal.getState()
     if (s.s1_state) s.set({ s1_state: { ...s.s1_state, footprint: fp as never } })
   }
+  // /devil D-038 : force un `cvd_stratified` pathologique (série vide, valeurs non-finies,
+  // divergence, point unique) pour vérifier que le rendu Canvas ne crashe jamais.
+  ;(window as unknown as { __setCvdStrat?: (cs: unknown) => void }).__setCvdStrat = (cvd) => {
+    const s = useTerminal.getState()
+    if (s.s1_state) s.set({ s1_state: { ...s.s1_state, cvd_stratified: cvd as never } })
+  }
 }
 
 /** Temps serveur estimé (pour countdown C3 et âges de donnée). */

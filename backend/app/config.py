@@ -82,6 +82,17 @@ FOOTPRINT_IMBALANCE_RATIO = float(os.getenv("FOOTPRINT_IMBALANCE_RATIO", "3.0"))
 FOOTPRINT_MIN_IMBALANCE_VOL = float(os.getenv("FOOTPRINT_MIN_IMBALANCE_VOL", "1"))  # plancher, v1
 FOOTPRINT_MAX_PRINTS = int(os.getenv("FOOTPRINT_MAX_PRINTS", "800"))  # tampon de prints accumulés
 
+# --- CVD granulaire stratifié par taille d'ordre (D-038) ---
+# Seuil retail/institutionnel = v1 provisional (PLACEHOLDER — pas d'AUTORITÉ dans /reference ;
+# calibration owner: Sony). Bucket temporel, fenêtre de série, deadbands de divergence = v1.
+CVD_SIZE_THRESHOLD = float(os.getenv("CVD_SIZE_THRESHOLD", "10"))         # ≥ seuil → institutionnel
+CVD_STRAT_BUCKET_SECONDS = float(os.getenv("CVD_STRAT_BUCKET_SECONDS", "5"))   # échantillon série
+CVD_STRAT_MAX_POINTS = int(os.getenv("CVD_STRAT_MAX_POINTS", "120"))     # points de série affichés
+CVD_STRAT_MAX_PRINTS = int(os.getenv("CVD_STRAT_MAX_PRINTS", "4000"))    # tampon de prints accumulés
+CVD_STRAT_DIV_LOOKBACK = int(os.getenv("CVD_STRAT_DIV_LOOKBACK", "12"))  # fenêtre de divergence
+CVD_STRAT_DIV_MIN_PRICE = float(os.getenv("CVD_STRAT_DIV_MIN_PRICE", "0.5"))   # deadband prix (pts)
+CVD_STRAT_DIV_MIN_DELTA = float(os.getenv("CVD_STRAT_DIV_MIN_DELTA", "25"))    # deadband delta (vol)
+
 # --- Heatmap de liquidité (LOB, canal rapide 4 Hz — D-036) ---
 # Fenêtre glissante de colonnes temporelles (une par tick rapide de 0,25 s). 60 colonnes ≈ 15 s
 # d'historique. Niveaux par côté = profondeur affichée du carnet (BOOK_DEPTH).

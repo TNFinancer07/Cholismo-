@@ -142,6 +142,26 @@ export interface FootprintValue {
   candle_seconds: number
 }
 
+// CVD granulaire stratifié par taille (D-038)
+export interface CvdStratPoint {
+  ts: number
+  price: number
+  retail: number         // CVD cumulé strate retail (size < seuil)
+  institutional: number  // CVD cumulé strate institutionnelle (size >= seuil)
+  total: number
+}
+export interface CvdDivergence {
+  kind: 'BULLISH' | 'BEARISH'
+  price_change: number
+  inst_change: number
+  bars: number
+}
+export interface CvdStratifiedValue {
+  size_threshold: number
+  series: CvdStratPoint[]
+  divergence: CvdDivergence | null
+}
+
 export interface S1State {
   svs_score: MetaField<number>
   order_flow: OrderFlow
@@ -152,6 +172,7 @@ export interface S1State {
   liquidity_heatmap: MetaField<HeatmapValue>
   tape: MetaField<TapePrint[]>
   footprint: MetaField<FootprintValue>
+  cvd_stratified: MetaField<CvdStratifiedValue>
   strategies: S1Strategies | null
 }
 
