@@ -42,7 +42,10 @@ def build_options_chain(raw_expirations: list[dict], underlying, atm_band: float
     rows: [{strike, call, put}]}]}`. `call`/`put` = `{iv, delta, gamma, vanna, charm, moneyness}`.
     Rows triés strike croissant ; expirations triées DTE croissant (bornées) ; strikes bornés aux
     plus proches du sous-jacent."""
-    u = float(underlying) if _finite(underlying) else None
+    # sous-jacent ≤ 0 = corrompu (un indice ne vaut jamais 0/négatif) → indécidable, moneyness None
+    u = float(underlying) if (_finite(underlying) and underlying > 0) else None
+    if not isinstance(raw_expirations, list):
+        raw_expirations = []                           # /devil : raw non-liste → jamais un crash (§3)
 
     exps = []
     for e in raw_expirations:
@@ -80,7 +83,7 @@ def build_term_structure(raw_points: list[dict], flat_eps: float) -> dict:
     (front < back), BACKWARDATION (front > back), FLAT (|Δ| ≤ eps). `< 2` points finis → état None
     (jamais un faux régime, §3). Retourne `{points, state, front_back_spread}`."""
     pts = []
-    for p in raw_points:
+    for p in (raw_points if isinstance(raw_points, list) else []):   # /devil : raw non-liste → vide
         if isinstance(p, dict) and _finite(p.get("days")) and _finite(p.get("value")):
             pts.append({"tenor": p.get("tenor"), "days": float(p["days"]), "value": float(p["value"])})
     pts.sort(key=lambda p: p["days"])

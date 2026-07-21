@@ -138,3 +138,55 @@ def test_term_structure_filters_non_finite():
 def test_term_structure_insufficient_points_state_none():
     assert build_term_structure([_pt("VIX", 30, 18)], 0.1)["state"] is None
     assert build_term_structure([], 0.1)["state"] is None
+
+
+# ---------- /devil (D-039) : conditions limites ----------
+
+import math  # noqa: E402
+
+
+def test_underlying_zero_or_negative_moneyness_none():
+    # sous-jacent ≤ 0 = donnée corrompue (un indice ne vaut jamais 0/négatif) → moneyness None,
+    # jamais classé contre un 0 bidon (fail-closed §3).
+    raw = [_exp("E1", 30, [_row(5000)])]
+    for bad in (0.0, -5.0):
+        out = build_options_chain(raw, bad, 6.0, 6, 40)
+        assert out["underlying"] is None
+        assert out["expirations"][0]["rows"][0]["call"]["moneyness"] is None
+
+
+def test_giant_chain_bounded_and_finite():
+    rows = [_row(3000 + i * 5) for i in range(600)]           # 600 strikes
+    raw = [_exp("E1", 30, rows)]
+    got = _chain(raw, underlying=5000, max_strikes=13)["expirations"][0]["rows"]
+    assert len(got) == 13 and all(math.isfinite(r["strike"]) for r in got)  # 13 plus proches
+
+
+def test_dte_non_finite_becomes_none_no_crash():
+    raw = [{"expiry": "E1", "dte": float("nan"), "strikes": [_row(5000)]}]
+    assert _chain(raw)["expirations"][0]["dte"] is None       # dte NaN → None (tri non cassé)
+
+
+def test_corrupted_expirations_skipped():
+    good = {"strike": 5000, "call": _leg(0.2, 0.5, 0.01, 0, 0), "put": _leg(0.2, -0.5, 0.01, 0, 0)}
+    raw = [
+        "pas un dict",                                        # échéance non-dict → ignorée
+        {"expiry": "E1", "dte": 30, "strikes": "boom"},       # strikes non-liste → vide
+        {"expiry": "E2", "dte": 7, "strikes": ["x", good]},   # entrée non-dict écartée
+    ]
+    by_exp = {e["expiry"]: e for e in _chain(raw)["expirations"]}
+    assert by_exp["E1"]["rows"] == []
+    assert [r["strike"] for r in by_exp["E2"]["rows"]] == [5000]
+
+
+def test_non_list_raw_returns_empty():
+    assert build_options_chain(None, 5000, 6.0, 6, 40)["expirations"] == []
+    assert build_options_chain("boom", 5000, 6.0, 6, 40)["expirations"] == []
+    assert build_term_structure(None, 0.1)["state"] is None
+    assert build_term_structure("boom", 0.1)["points"] == []
+
+
+def test_term_structure_giant_and_duplicate_days():
+    raw = [_pt(f"T{i}", i % 5, 15 + (i % 7)) for i in range(1000)]  # jours dupliqués, 1000 points
+    ts = build_term_structure(raw, 0.1)
+    assert len(ts["points"]) == 1000 and ts["state"] in ("CONTANGO", "BACKWARDATION", "FLAT")

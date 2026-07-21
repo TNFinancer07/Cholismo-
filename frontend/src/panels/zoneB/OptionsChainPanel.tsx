@@ -32,7 +32,7 @@ function drawSkew(canvas: HTMLCanvasElement, exp: OptionExpiry | undefined, box:
   canvas.width = R(W * dpr); canvas.height = R(H * dpr)
   const ctx = canvas.getContext('2d'); if (!ctx) return
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, W, H)
-  const rows = exp?.rows ?? []
+  const rows = Array.isArray(exp?.rows) ? exp!.rows : []   // /devil : rows non-tableau → jamais .map crash
   if (W < 4 || H < 4 || rows.length === 0) return
 
   const strikes = rows.map((r) => r.strike).filter(Number.isFinite)
@@ -158,7 +158,7 @@ export function OptionsChainPanel() {
               </tr>
             </thead>
             <tbody>
-              {(exp?.rows ?? []).map((r) => {
+              {(Array.isArray(exp?.rows) ? exp!.rows : []).map((r) => {
                 const atm = r.call?.moneyness === 'ATM'
                 const cItm = r.call?.moneyness === 'ITM', pItm = r.put?.moneyness === 'ITM'
                 return (

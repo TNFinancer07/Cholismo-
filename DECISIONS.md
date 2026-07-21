@@ -1151,6 +1151,36 @@ Moniteur de chaîne d'options (Calls/Puts, IV, Grecques) + structure de vol VIX.
 - **Hors-scope (une feature = un commit)** : surface 3D IV ; Greeks agrégés (net GEX/DEX par
   strike) ; historique de skew ; pin risk ; smile arbitrage-free ; survol d'infobulle sur le skew.
 
+### /devil D-039 — conditions limites
+Attaques : sous-jacent 0/négatif/NaN · chaîne géante 500+ strikes · IV/temps nul-non-fini (/0
+grecques/moneyness) · expirations corrompues · (frontend) IV NaN au skew, sauts de strikes, resize
+0×0, bascule rapide onglets/grecques (crash `.toFixed`/index).
+- **Builders division-free** : `build_options_chain` ne CALCULE aucune grecque (elle les PORTE) et
+  le moneyness est une comparaison — **aucune division** → un IV/temps nul ne peut pas provoquer de
+  /0. Le seul risque était le sous-jacent bidon → durci.
+- **2 bugs RÉELS backend trouvés & corrigés** :
+  1. **Sous-jacent ≤ 0** (0/négatif) était classé contre un 0 bidon (tous calls OTM). Corrigé :
+     `underlying > 0` requis, sinon `underlying=None` → moneyness None (indécidable honnête §3).
+  2. **`raw` non-liste** (`None`, dict) → `TypeError` à l'itération. Corrigé : garde `isinstance
+     list` dans les deux builders → structure vide, jamais un crash.
+- **Chaîne géante** : 600 strikes → bornage aux `max_strikes` plus proches (tri O(n log n)), fini.
+  Expirations corrompues (non-dict, `strikes` non-liste, entrée non-dict) → écartées ligne par
+  ligne. `dte` non-fini → None (tri non cassé). Tests dédiés.
+- **2 durcissements frontend** (essai Playwright SSE gelé, **0 erreur JS**) :
+  1. **`exp.rows` non-tableau** → `.map`/`for…of` planterait le skew et la grille. Corrigé par
+     garde `Array.isArray` (rows non-tableau → vide).
+  2. **Point de term structure à valeur non-finie/absente** → NaN dans l'étendue + `.toFixed` sur
+     `undefined`. Corrigé : la courbe VTS ne garde que les points ENTIÈREMENT finis (comme le
+     builder), `noData` honnête si aucun.
+- **Chemins déjà sûrs confirmés** : IV/greeks non-finis au skew (étendue les ignore + segment
+  coupé) ; `num`/`pct`/`signed` gèrent non-fini/undefined (« · », jamais `.toFixed` cru) ; index
+  d'échéance borné (`Math.min(expIdx, exps.length−1)`) ; resize 0×0 (retour `W<4||H<4`) ; bascule
+  rapide onglets+grecques → 0 crash ; chaîne géante (200 strikes) rendue sans planter.
+- **Vérif** : +6 tests backend (sous-jacent ≤ 0, chaîne géante, dte non-fini, expirations
+  corrompues, raw non-liste, term structure géante/dupliquée) ; **213 passed**, ruff clean ; `tsc`
+  + `vite build` OK ; essai Playwright 6 pathologies + martèlement onglets/grecques + viewport
+  minuscule → **0 erreur JS**, UI réactive.
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.

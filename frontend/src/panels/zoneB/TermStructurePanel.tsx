@@ -20,7 +20,10 @@ function draw(canvas: HTMLCanvasElement, val: TermStructureValue | null | undefi
   canvas.width = R(W * dpr); canvas.height = R(H * dpr)
   const ctx = canvas.getContext('2d'); if (!ctx) return
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, W, H)
-  const pts: TermPoint[] = Array.isArray(val?.points) ? val!.points : []
+  // /devil : ne garde que les points ENTIÈREMENT finis → pas de NaN dans l'étendue ni de
+  // `.toFixed` sur une valeur absente (fail-closed §3).
+  const pts: TermPoint[] = (Array.isArray(val?.points) ? val!.points : [])
+    .filter((p) => p && Number.isFinite(p.value) && Number.isFinite(p.days))
   if (W < 4 || H < 4 || pts.length < 2) return
 
   const days = pts.map((p) => p.days), vals = pts.map((p) => p.value)
@@ -71,7 +74,8 @@ export function TermStructurePanel() {
 
   const fresh = ts?.freshness
   const val = ts?.value
-  const pts = Array.isArray(val?.points) ? val!.points : []
+  const pts = (Array.isArray(val?.points) ? val!.points : [])
+    .filter((p) => p && Number.isFinite(p.value) && Number.isFinite(p.days))
   const noData = fresh === 'ABSENT' || pts.length < 2
   const state = val?.state ?? null
   const spread = val?.front_back_spread
