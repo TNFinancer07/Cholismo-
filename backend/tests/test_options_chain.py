@@ -190,3 +190,17 @@ def test_term_structure_giant_and_duplicate_days():
     raw = [_pt(f"T{i}", i % 5, 15 + (i % 7)) for i in range(1000)]  # jours dupliqués, 1000 points
     ts = build_term_structure(raw, 0.1)
     assert len(ts["points"]) == 1000 and ts["state"] in ("CONTANGO", "BACKWARDATION", "FLAT")
+
+
+def test_duplicate_strikes_deduped_last_wins():
+    # strike dupliqué = donnée corrompue → 1 seule ligne (clé React unique en aval), dernier gagne
+    raw = [_exp("E1", 30, [_row(5000, c=_leg(0.10, 0.5, 0.01, 0, 0)),
+                           _row(5000, c=_leg(0.22, 0.6, 0.02, 0, 0))])]
+    rows = _chain(raw)["expirations"][0]["rows"]
+    assert len(rows) == 1 and rows[0]["call"]["iv"] == 0.22   # dédup, dernière occurrence
+
+
+def test_many_expirations_capped_keeps_nearest_dte():
+    raw = [_exp(f"E{i}", i * 3, [_row(5000)]) for i in range(50)]  # 50 échéances (DTE 0..147)
+    out = _chain(raw, max_exp=4)["expirations"]
+    assert [e["dte"] for e in out] == [0, 3, 6, 9]                 # 4 plus proches, triées

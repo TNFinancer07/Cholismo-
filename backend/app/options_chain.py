@@ -52,14 +52,15 @@ def build_options_chain(raw_expirations: list[dict], underlying, atm_band: float
         if not isinstance(e, dict):
             continue
         raw_strikes = e.get("strikes") if isinstance(e.get("strikes"), list) else []
-        rows = []
+        rows_by_k: dict[float, dict] = {}              # dédup par strike (clé React unique en aval)
         for s in raw_strikes:
             if not isinstance(s, dict) or not _finite(s.get("strike")):
                 continue                               # fail-closed : strike non-fini → ligne ignorée
             k = float(s["strike"])
-            rows.append({"strike": k,
-                         "call": _leg(s.get("call"), _moneyness(k, u, atm_band, True)),
-                         "put": _leg(s.get("put"), _moneyness(k, u, atm_band, False))})
+            rows_by_k[k] = {"strike": k,               # strike dupliqué → dernière occurrence gagne
+                            "call": _leg(s.get("call"), _moneyness(k, u, atm_band, True)),
+                            "put": _leg(s.get("put"), _moneyness(k, u, atm_band, False))}
+        rows = list(rows_by_k.values())
         # borne les strikes aux plus proches du sous-jacent (les plus pertinents), puis trie
         if max_strikes > 0 and len(rows) > max_strikes:
             ref = u if u is not None else (rows[len(rows) // 2]["strike"] if rows else 0.0)

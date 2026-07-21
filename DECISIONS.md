@@ -1176,10 +1176,20 @@ grecques/moneyness) · expirations corrompues · (frontend) IV NaN au skew, saut
   coupé) ; `num`/`pct`/`signed` gèrent non-fini/undefined (« · », jamais `.toFixed` cru) ; index
   d'échéance borné (`Math.min(expIdx, exps.length−1)`) ; resize 0×0 (retour `W<4||H<4`) ; bascule
   rapide onglets+grecques → 0 crash ; chaîne géante (200 strikes) rendue sans planter.
-- **Vérif** : +6 tests backend (sous-jacent ≤ 0, chaîne géante, dte non-fini, expirations
-  corrompues, raw non-liste, term structure géante/dupliquée) ; **213 passed**, ruff clean ; `tsc`
-  + `vite build` OK ; essai Playwright 6 pathologies + martèlement onglets/grecques + viewport
-  minuscule → **0 erreur JS**, UI réactive.
+- **2e passe (durcissement + audit)** : **strikes DUPLIQUÉS** dans une échéance (donnée
+  corrompue) produisaient 2 lignes → collision de clé React (`key={strike}`) en aval. Corrigé :
+  dédup par strike dans `build_options_chain` (dict, dernière occurrence gagne) → 1 ligne/strike,
+  clé unique. Audit confirmé : la **boucle lente est résiliente** (`while True` + `try/except` →
+  log + reprise à la cadence suivante → fail-closed, le schéma vieillit vers STALE ; une exception
+  de tick datasource ne tue jamais la boucle, RUNTIME_LOOPS) ; le mock calcule des grecques avec
+  divisions par `underlying` mais mean-reverte ~5000 (jamais 0) et toute exception serait
+  rattrapée par la boucle ; chaîne à 50 échéances → bornée aux 4 plus proches (DTE). Tests dédiés
+  (dédup last-wins, cap 4/50 échéances).
+- **Vérif** : +9 tests backend au total (sous-jacent ≤ 0, chaîne géante, dte non-fini, expirations
+  corrompues, raw non-liste, term structure géante, dédup strikes, cap échéances) ; **215 passed**,
+  ruff clean ; `tsc` + `vite build` OK ; essais Playwright : 6 pathologies + martèlement onglets/
+  grecques + viewport minuscule (1re passe) et live 13 strikes DISTINCTS + martèlement ×3 (2e
+  passe) → **0 erreur JS**, UI réactive.
 
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
