@@ -23,7 +23,7 @@ from .base import MarketDataSource
 # Simulated upstream sources -> the fields they own.
 SOURCES = {
     "sierra_chart": ["svs_score", "cvd", "absorption", "aggressor_ratio",
-                     "vpoc", "vah", "val", "lvn", "chop", "order_book", "tape"],
+                     "vpoc", "vah", "val", "lvn", "chop", "order_book", "tape", "session_prev"],
     "cboe": ["vix", "vvix", "vol_term_structure"],
     "cme": ["nq_es", "zn", "dxy_alt"],
     "fx_feed": ["eurusd", "dx", "dxy"],
@@ -131,6 +131,10 @@ class MockDataSource(MarketDataSource):
             self._tape.append({"ts": time.time(), "price": round(price, 2),
                                "size": size, "side": side, "seq": self._tape_seq})
         await self._emit(state, "sierra_chart", "tape", list(self._tape), patho)
+        # niveaux Volume Profile de la VEILLE (source, D-041) : POC/VAH/VAL stables autour du prix.
+        prev_poc = round(round((es - 3.0) / 0.25) * 0.25, 2)
+        await self._emit(state, "sierra_chart", "session_prev",
+                         {"poc": prev_poc, "vah": round(prev_poc + 6.0, 2), "val": round(prev_poc - 9.0, 2)}, patho)
 
         vix = max(9.0, self._drift("vix", base["vix"], vol, 0.5))
         vvix = max(60.0, self._drift("vvix", base["vvix"], vol, 1.5))

@@ -20,6 +20,7 @@ import { FootprintPanel } from '@/panels/zoneB/FootprintPanel'
 import { LiquidityHeatmapPanel } from '@/panels/zoneB/LiquidityHeatmapPanel'
 import { FootprintImbalancePanel } from '@/panels/zoneB/FootprintImbalancePanel'
 import { CvdStratifiedPanel } from '@/panels/zoneB/CvdStratifiedPanel'
+import { VolumeProfilePanel } from '@/panels/zoneB/VolumeProfilePanel'
 import { OptionsChainPanel } from '@/panels/zoneB/OptionsChainPanel'
 import { TermStructurePanel } from '@/panels/zoneB/TermStructurePanel'
 import { BridgePanel } from '@/panels/zoneB/BridgePanel'
@@ -53,6 +54,7 @@ export const PANEL_REGISTRY: Record<PanelId, PanelDef> = {
   HM: { id: 'HM', label: 'Heatmap liquidité', component: LiquidityHeatmapPanel },
   FP: { id: 'FP', label: 'Footprint · imbalances', component: FootprintImbalancePanel },
   CDS: { id: 'CDS', label: 'CVD stratifié · taille', component: CvdStratifiedPanel },
+  VP: { id: 'VP', label: 'Volume Profile · VA/POC', component: VolumeProfilePanel },
   OMON: { id: 'OMON', label: "Chaîne d'options · skew", component: OptionsChainPanel },
   VTS: { id: 'VTS', label: 'Term structure vol', component: TermStructurePanel },
   B2: { id: 'B2', label: 'Bridge variables', component: BridgePanel },

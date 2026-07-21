@@ -24,6 +24,7 @@ from .datasource import scenarios
 from .event_store import get_store
 from .cvd_stratified import build_cvd_stratified
 from .footprint import build_footprint
+from .volume_profile import build_volume_profile
 from .graph.liquidity_sweep import SWEEP_GRAPH, build_sweep_inputs
 from .heatmap import latest_column
 from .macro_risk import build_macro_calendar, compute_macro_risk
@@ -54,6 +55,7 @@ FIELD_SPEC: dict[str, tuple[str, float, float]] = {
     "val": ("sierra_chart", *_FAST), "lvn": ("sierra_chart", *_FAST),
     "chop": ("sierra_chart", *_FAST), "order_book": ("sierra_chart", *_FAST),
     "tape": ("sierra_chart", *_FAST),
+    "session_prev": ("sierra_chart", *_FAST),  # niveaux POC/VAH/VAL de la veille (source, D-041)
     "vix": ("cboe", *_FAST), "vvix": ("cboe", *_FAST),
     "eurusd": ("fx_feed", *_SLOW), "dx": ("fx_feed", *_SLOW), "dxy": ("fx_feed", *_FAST),
     "dxy_alt": ("cme", *_FAST),
@@ -225,6 +227,10 @@ class Engine:
         self._fp_last_seq: int = 0
         self._cs_prints: deque = deque(maxlen=config.CVD_STRAT_MAX_PRINTS)  # buffer prints CVD stratifié (D-038)
         self._cs_last_seq: int = 0
+        self._vp_levels: dict[int, float] = {}   # Volume Profile : k(prix) → volume accumulé (D-041)
+        self._vp_last_seq: int = 0
+        self._vp_prev: Optional[dict] = None     # snapshot POC/VAH/VAL de la session précédente
+        self._vp_session_day: Optional[int] = None
         self._regime_tier = "GREEN"  # D4 hysteresis state (reference/youssef/01)
 
     # ---------- assembly helpers ----------
@@ -445,6 +451,53 @@ class Engine:
         return MetaField(value=value, last_update_ts=tape.last_update_ts, source=tape.source,
                          freshness=tape.freshness, flags=tape.flags)
 
+    def _build_volume_profile(self, tape: MetaField, session_prev: MetaField, now: float) -> MetaField:
+        """Volume Profile (D-041) : accumule le volume par NIVEAU de prix sur la SESSION (dict
+        borné par le nombre de niveaux, pas de prints — comme le CVD par niveau D-029), puis
+        `build_volume_profile` calcule POC/VA/VAH/VAL/LVN. Au changement de journée : snapshot
+        POC/VAH/VAL → `previous` puis reset (projection de la veille). `previous` retombe sur les
+        niveaux fournis par la source si aucun snapshot propre. Fail-closed (§3) : tape non FRESH →
+        pas d'accumulation, fraîcheur propagée."""
+        day = int(now // 86400)
+        if self._vp_session_day is None:
+            self._vp_session_day = day
+        if day != self._vp_session_day and self._vp_levels:   # nouvelle session → snapshot + reset
+            prof = build_volume_profile({k * config.PRICE_TICK: v for k, v in self._vp_levels.items()},
+                                        config.PRICE_TICK, config.VP_VA_PCT, config.VP_LVN_RATIO,
+                                        config.VP_MAX_LEVELS)
+            self._vp_prev = {"poc": prof["poc"], "vah": prof["vah"], "val": prof["val"]}
+            self._vp_levels = {}
+            self._vp_last_seq = 0
+            self._vp_session_day = day
+
+        if tape.freshness == Freshness.FRESH and isinstance(tape.value, list) and tape.value:
+            seqs = [p["seq"] for p in tape.value if isinstance(p.get("seq"), int)]
+            if seqs and max(seqs) < self._vp_last_seq:        # régression de seq (redémarrage source)
+                self._vp_last_seq = 0
+            new_max = self._vp_last_seq
+            for p in tape.value:
+                seq, price, size = p.get("seq"), p.get("price"), p.get("size")
+                if not isinstance(seq, int) or seq <= self._vp_last_seq:
+                    continue
+                if isinstance(price, (int, float)) and math.isfinite(price) \
+                        and isinstance(size, (int, float)) and math.isfinite(size) and size > 0:
+                    k = round(float(price) / config.PRICE_TICK)
+                    self._vp_levels[k] = self._vp_levels.get(k, 0.0) + float(size)
+                new_max = max(new_max, seq)
+            self._vp_last_seq = new_max
+
+        value = build_volume_profile({k * config.PRICE_TICK: v for k, v in self._vp_levels.items()},
+                                     config.PRICE_TICK, config.VP_VA_PCT, config.VP_LVN_RATIO,
+                                     config.VP_MAX_LEVELS)
+        # previous : snapshot propre (session précédente) sinon niveaux fournis par la source
+        prev = self._vp_prev
+        if prev is None and isinstance(session_prev.value, dict):
+            sv = session_prev.value
+            prev = {"poc": sv.get("poc"), "vah": sv.get("vah"), "val": sv.get("val")}
+        value["previous"] = prev
+        return MetaField(value=value, last_update_ts=tape.last_update_ts, source=tape.source,
+                         freshness=tape.freshness, flags=tape.flags)
+
     # ---------- loops ----------
 
     async def _assemble_fast(self, now: float) -> None:
@@ -482,6 +535,8 @@ class Engine:
             tape=tape,
             footprint=self._build_footprint(tape, now),   # D-037 : agrégation Bid×Ask + imbalances
             cvd_stratified=self._build_cvd_stratified(tape),  # D-038 : CVD par strate de taille + divergence
+            volume_profile=self._build_volume_profile(     # D-041 : profil volumétrique + VA/POC/LVN
+                tape, await self._meta("session_prev", raws, now), now),
         )
         self.schema.s1_state = s1
 

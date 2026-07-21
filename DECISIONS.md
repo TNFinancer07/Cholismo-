@@ -1298,6 +1298,37 @@ Loop 5 sur le rendu (aucune logique métier touchée). 3 axes :
   séparateur MAINTENANT, badge PAUSED fort `bg 0.2`+bordure / WARNING `0.15` / NORMAL transparent)
   → **0 erreur JS** + captures (MCAL, badges PAUSED/WARNING/NORMAL).
 
+## D-041 · Volume Profile dynamique (`s1_state.volume_profile` + Canvas)
+Profil volumétrique auto-calculé (POC / Value Area 70 % / VAH·VAL / LVN / veille). Décisions :
+- **Champ `s1_state.volume_profile`** — DISTINCT de `structure.vpoc/vah/val/lvn` (scalaires fournis
+  par la SOURCE) : ici la DISTRIBUTION complète est auto-calculée par le terminal depuis le tape.
+  value : `{tick, va_pct, total_volume, poc, vah, val, levels: [{price, volume}], lvn: [prix],
+  previous: {poc, vah, val} | null}`. Canal RAPIDE (`s1_state`). Lecture seule (§2.1).
+- **Algorithme** (`app/volume_profile.py::build_volume_profile`, pur/déterministe) : agrège le
+  volume par niveau (grille de tick), **POC** = volume max (égalité → prix bas) ; **Value Area
+  70 %** : depuis le POC, étend vers le voisin au plus gros volume jusqu'à `va_pct · total`
+  (convention Market Profile) → **VAH/VAL** = bornes ; **LVN** = minima locaux stricts `≤ ratio ·
+  vol POC` (lacune à 0 = LVN fort). Grille CONTIGUË bornée à `VP_MAX_LEVELS` autour du POC (prix
+  aberrant lointain ne l'explose pas). VA 70 % = AUTORITÉ de facto ; ratio LVN = v1 provisional.
+- **Accumulation session** : le moteur accumule le volume par niveau dans un dict (borné par le
+  nombre de NIVEAUX, pas de prints — comme le CVD par niveau D-029), seq-dédup. Au changement de
+  journée : snapshot POC/VAH/VAL → `previous` puis reset (projection de la veille). `previous`
+  retombe sur les niveaux fournis par la source (`session_prev`) tant qu'aucun snapshot propre
+  (cold start honnête). Fail-closed (§3) : tape non FRESH → pas d'accumulation, fraîcheur propagée.
+- **Frontend Canvas** (`VolumeProfilePanel`, code `VP`) : histogramme HORIZONTAL — axe Y = prix,
+  axe X = volume (barres → droite) ; **surbrillance stricte** : bande Value Area (sky), barre +
+  ligne POC (OR), niveaux VEILLE (prev POC/VAH/VAL, tiretés violets + libellés yPOC/yVAH/yVAL),
+  LVN (◄ ambre) — chaque repère = couleur + glyphe/position + libellé (jamais la couleur seule §3).
+  Un seul `<canvas>` DPR-scalé. STALE→FIGÉ, vide→PAS DE DONNÉES. Câblés : registre `VP`, espace
+  MICRO (bump `STORAGE_KEY` v11→v12), mnémonique `VP`, hook DEV `__setVolProfile`.
+- **Vérif** : 13 tests backend (POC + égalité, VA 70 % symétrique/asymétrique, LVN minima/lacune,
+  grille contiguë, quantification tick, niveau unique, total, fail-closed non-fini, vide, prix
+  aberrant borné) ; **255 passed**, ruff clean ; `tsc` + `vite build` OK ; essai Playwright réel :
+  profil live (38 niveaux, POC 5449.75, VA 5446.75–5450.25, 10 LVN, veille projetée), Canvas
+  histogramme + VA sky + POC or + veille violet + LVN ambre, **0 erreur JS** + capture.
+- **Hors-scope (une feature = un commit)** : profils composites multi-sessions ; TPO/Market Profile
+  par lettres ; naked POC (POC non-testés) ; split VA au-dessus/en-dessous ; delta par niveau.
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.

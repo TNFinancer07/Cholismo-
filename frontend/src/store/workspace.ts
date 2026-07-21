@@ -7,7 +7,7 @@ import { useTerminal } from './terminal'
 
 /** Identifiants canoniques des panneaux disponibles (couverts par panels/registry). */
 export const PANEL_IDS = ['A1', 'A2', 'A3', 'EC', 'MCAL', 'S2P', 'MOCK', 'B1', 'B2', 'B3', 'B4',
-  'S1S', 'OB', 'TP', 'CVD', 'HM', 'FP', 'CDS', 'OMON', 'VTS', 'IA', 'C1', 'C2', 'C4', 'MODE'] as const
+  'S1S', 'OB', 'TP', 'CVD', 'HM', 'FP', 'CDS', 'VP', 'OMON', 'VTS', 'IA', 'C1', 'C2', 'C4', 'MODE'] as const
 export type PanelId = (typeof PANEL_IDS)[number]
 
 export interface Workspace {
@@ -23,7 +23,7 @@ function builtins(): Workspace[] {
     { id: 'defaut', name: 'DÉFAUT', builtin: true, showBlotter: true,
       columns: [['A1', 'S2P', 'A3', 'MOCK'], ['B4', 'S1S', 'B1'], ['EC', 'MCAL', 'C1', 'C2', 'C4', 'MODE']] },
     { id: 'micro', name: 'MICRO · S1', builtin: true, showBlotter: true,
-      columns: [['S1S', 'B2', 'IA', 'FP'], ['B4', 'OB', 'CVD', 'HM', 'CDS', 'B1'], ['TP', 'EC', 'B3', 'C1', 'C2', 'MOCK']] },
+      columns: [['S1S', 'B2', 'IA', 'FP'], ['B4', 'OB', 'CVD', 'VP', 'CDS', 'B1'], ['TP', 'HM', 'EC', 'B3', 'C1', 'C2', 'MOCK']] },
     { id: 'macro', name: 'MACRO · S2', builtin: true, showBlotter: false,
       columns: [['A1', 'A3', 'EC', 'VTS'], ['S2P', 'A2', 'OMON'], ['B4', 'B3', 'MOCK']] },
     { id: 'discipline', name: 'DISCIPLINE', builtin: true, showBlotter: true,
@@ -31,10 +31,10 @@ function builtins(): Workspace[] {
   ]
 }
 
-// v11 : ajout du panneau MCAL (Calendrier économique · releases, D-040) à l'espace DÉFAUT — bump
-// de clé : les layouts persistés antérieurs repartent des intégrés (les PERSO se recréent ; pas
-// de migration silencieuse d'un panneau invisible).
-const STORAGE_KEY = () => `cholismo.workspaces.${useTerminal.getState().operator}.v11`
+// v12 : ajout du panneau VP (Volume Profile, D-041) à l'espace MICRO — bump de clé : les layouts
+// persistés antérieurs repartent des intégrés (les PERSO se recréent ; pas de migration
+// silencieuse d'un panneau invisible).
+const STORAGE_KEY = () => `cholismo.workspaces.${useTerminal.getState().operator}.v12`
 
 interface Persisted { workspaces: Workspace[]; activeId: string }
 

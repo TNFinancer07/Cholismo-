@@ -154,6 +154,10 @@ class S1State(BaseModel):
     # inst_change, bars} | null}. Delta agresseur net cumulé par strate de taille + divergence
     # prix↔CVD institutionnel (advisory §2.1). Lecture seule (§2.1). Fail-closed (§3).
     cvd_stratified: MetaField = Field(default_factory=MetaField)
+    # Volume Profile dynamique (D-041) — DISTRIBUTION auto-calculée du volume par prix sur la
+    # session (distinct des scalaires source `structure.*`). value: {tick, va_pct, total_volume,
+    # poc, vah, val, levels: [{price, volume}], lvn: [prix], previous: {poc, vah, val} | null}.
+    volume_profile: MetaField = Field(default_factory=MetaField)
     # The two REAL Sony execution strategies (reference/sony/*), evaluated live (D-021).
     strategies: Optional[S1Strategies] = None
 

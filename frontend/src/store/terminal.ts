@@ -187,6 +187,12 @@ if (import.meta.env.DEV && typeof window !== 'undefined') {
     const s = useTerminal.getState()
     if (s.s1_state) s.set({ s1_state: { ...s.s1_state, cvd_stratified: cvd as never } })
   }
+  // /devil D-041 : force un `volume_profile` pathologique (niveaux non-finis, VA vide, prix
+  // aberrant, previous null) pour vérifier que le rendu Canvas ne crashe jamais.
+  ;(window as unknown as { __setVolProfile?: (vp: unknown) => void }).__setVolProfile = (vp) => {
+    const s = useTerminal.getState()
+    if (s.s1_state) s.set({ s1_state: { ...s.s1_state, volume_profile: vp as never } })
+  }
   // /devil D-039 : force un `vol_surface` pathologique (chaîne vide, IV/greeks non-finis,
   // moneyness null, term structure inversée) pour vérifier que le rendu Canvas/grille ne crashe jamais.
   ;(window as unknown as { __setVolSurface?: (vs: unknown) => void }).__setVolSurface = (vs) => {

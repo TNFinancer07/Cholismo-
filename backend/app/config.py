@@ -102,6 +102,12 @@ OPTIONS_MAX_STRIKES = int(os.getenv("OPTIONS_MAX_STRIKES", "13"))    # strikes a
 VOL_TERM_FLAT_EPS = float(os.getenv("VOL_TERM_FLAT_EPS", "0.3"))     # |Δ| ≤ eps → FLAT (points VIX)
 VOL_TENORS = (("VIX9D", 9), ("VIX", 30), ("VIX3M", 93), ("VIX6M", 186))  # ténor → jours (CBOE)
 
+# --- Volume Profile dynamique (D-041) ---
+# VA 70 % = convention Market Profile (AUTORITÉ de facto). Ratio LVN + niveaux max = v1 provisional.
+VP_VA_PCT = float(os.getenv("VP_VA_PCT", "0.70"))            # Value Area = 70 % du volume
+VP_LVN_RATIO = float(os.getenv("VP_LVN_RATIO", "0.25"))     # creux ≤ 25 % du volume POC = LVN
+VP_MAX_LEVELS = int(os.getenv("VP_MAX_LEVELS", "400"))      # niveaux de prix bornés (grille)
+
 # --- Moteur Macro & Risk Guard (D-040) ---
 # Fenêtres = v1 provisional (PLACEHOLDER §11 — à calibrer). La fenêtre blackout ±15 min autour
 # d'un HIGH câble la règle Phase 0 MACRO_BLACKOUT (verrou unique §2.2).

@@ -162,6 +162,20 @@ export interface CvdStratifiedValue {
   divergence: CvdDivergence | null
 }
 
+// Volume Profile dynamique (D-041)
+export interface VolumeLevel { price: number; volume: number }
+export interface VolumeProfileValue {
+  tick: number
+  va_pct: number
+  total_volume: number
+  poc: number | null
+  vah: number | null
+  val: number | null
+  levels: VolumeLevel[]
+  lvn: number[]
+  previous: { poc: number | null; vah: number | null; val: number | null } | null
+}
+
 export interface S1State {
   svs_score: MetaField<number>
   order_flow: OrderFlow
@@ -173,6 +187,7 @@ export interface S1State {
   tape: MetaField<TapePrint[]>
   footprint: MetaField<FootprintValue>
   cvd_stratified: MetaField<CvdStratifiedValue>
+  volume_profile: MetaField<VolumeProfileValue>
   strategies: S1Strategies | null
 }
 
