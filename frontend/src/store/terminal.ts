@@ -4,8 +4,8 @@
 import { create } from 'zustand'
 import type {
   BlotterRow, BridgeVariables, Calibration, ContextSchema, EconCalendar, Extras,
-  LiquiditySweep, OperationalMode, Operator, OrchestratorPayload, S1State, S2State,
-  SessionIdentity, SyncState, UnifiedSignalOutput, VolSurface,
+  LiquiditySweep, MacroCalendarValue, MacroRiskValue, MetaField, OperationalMode, Operator,
+  OrchestratorPayload, S1State, S2State, SessionIdentity, SyncState, UnifiedSignalOutput, VolSurface,
 } from '@/types/schema'
 
 export type ZoneKey = 'A' | 'B' | 'C' | 'D'
@@ -35,6 +35,8 @@ interface TerminalStore {
   econ_calendar: EconCalendar | null
   liquidity_sweep: LiquiditySweep | null
   vol_surface: VolSurface | null
+  macro_calendar: MetaField<MacroCalendarValue> | null
+  macro_risk: MetaField<MacroRiskValue> | null
   extras: Extras | null
 
   // santé des canaux (fail-closed UI : canal muet => BLOQUÉ affiché)
@@ -81,6 +83,8 @@ export const useTerminal = create<TerminalStore>((set) => ({
   econ_calendar: null,
   liquidity_sweep: null,
   vol_surface: null,
+  macro_calendar: null,
+  macro_risk: null,
   sync_state: null,
   unified_signal_output: null,
   extras: null,
@@ -140,6 +144,8 @@ export const useTerminal = create<TerminalStore>((set) => ({
         case 'econ_calendar': return { econ_calendar: payload as EconCalendar }
         case 'liquidity_sweep': return { liquidity_sweep: payload as LiquiditySweep }
         case 'vol_surface': return { vol_surface: payload as VolSurface }
+        case 'macro_calendar': return { macro_calendar: payload as MetaField<MacroCalendarValue> }
+        case 'macro_risk': return { macro_risk: payload as MetaField<MacroRiskValue> }
         case 'unified_signal_output': {
           const signal = payload as UnifiedSignalOutput
           return { unified_signal_output: signal, history: push(state.history, 'score', signal.score) }
@@ -186,6 +192,12 @@ if (import.meta.env.DEV && typeof window !== 'undefined') {
   ;(window as unknown as { __setVolSurface?: (vs: unknown) => void }).__setVolSurface = (vs) => {
     const s = useTerminal.getState()
     s.set({ vol_surface: vs as never })
+  }
+  // /devil D-040 : force `macro_calendar` / `macro_risk` pathologiques (events non-finis, régime
+  // inconnu, event null, seconds_until NaN) pour vérifier que le panneau/badge ne crashe jamais.
+  ;(window as unknown as { __setMacro?: (c: unknown, r: unknown) => void }).__setMacro = (cal, risk) => {
+    const s = useTerminal.getState()
+    s.set({ macro_calendar: cal as never, macro_risk: risk as never })
   }
 }
 

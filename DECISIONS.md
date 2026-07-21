@@ -1213,6 +1213,46 @@ Loop 5 sur le rendu (aucune logique métier touchée). Améliorations :
   ATM libellé 134 px or, 24 cellules ITM ombrées, courbe contango verte 893 px / backwardation
   forcée rouge 862 px) + martèlement onglets/grecques → **0 erreur JS** + captures (OMON, VTS).
 
+## D-040 · Moteur Macro & Risk Guard (`macro_calendar` + `macro_risk`, câblé Phase 0)
+Calendrier des publications éco TRADABLES + garde de risque déterministe. Décisions :
+- **Bloc DISTINCT d'`econ_calendar` (D-027)** — clarifié avec l'humain : EC reste le calendrier
+  macro/géo SYSTÉMIQUE (tiers 1/2/3, reset CVD D-029) ; le nouveau `macro_calendar` = publications
+  TRADABLES (impact HIGH/MED/LOW, consensus/previous/actual, ÉCART de surprise). Zéro modification
+  de D-027 (§1 : deux angles distincts, pas de duplication).
+- **Champs** : `macro_calendar` (LENT) value `{events: [{ts, name, country, currency, impact,
+  consensus, previous, actual, surprise}]}` ; `macro_risk` (RAPIDE) value `{regime ∈ NORMAL|
+  WARNING|EXECUTION_PAUSED, event | null, seconds_until, in_window}`. Le régime + countdown sont
+  RAPIDES (en phase avec Phase 0) ; le calendrier est LENT (données changent lentement).
+- **Risk Guard déterministe** (`app/macro_risk.py::compute_macro_risk`, pur) : EXECUTION_PAUSED si
+  un HIGH est dans le BLACKOUT symétrique `|ts − now| ≤ pause` ; WARNING si un HIGH approche
+  (`pause < Δ ≤ warn`) ; NORMAL sinon. MED/LOW n'enclenchent jamais le garde.
+- **VERROU UNIQUE (§2.2)** — clarifié avec l'humain : le garde EST câblé à Phase 0 via la règle
+  déterministe `MACRO_BLACKOUT` (CRIT) qui appelle **le même** `compute_macro_risk` → Phase 0
+  BLOCKED en blackout. `macro_risk` (projection) et la règle Phase 0 partagent l'algorithme : une
+  seule logique, jamais deux verrous concurrents. EXECUTION_PAUSED = projection de Phase 0 BLOCKED.
+- **Fenêtres** (pause ±15 min, warn 30 min) = **v1 provisional** (config). Calendrier ABSENT →
+  aucun HIGH connu → NORMAL (le blackout est un signal POSITIF, pas un défaut fail-closed — noté).
+- **Fail-closed (§3)** : ts non-fini / impact invalide / name vide → événement écarté ; nombre
+  non-fini → None (jamais une surprise inventée) ; raw non-liste → vide. JSON strict `allow_nan=False`.
+- **Mock (§4)** : grille de releases (ISM/CPI/FOMC/ECB/NFP/Retail) autour de `now` — une HIGH dans
+  le blackout (exerce le garde + Phase 0) ; `actual` connu seulement après publication ; pathologie
+  (release cassé) écartée par le moteur.
+- **Frontend** : `MacroCalendarPanel` (MCAL, zone A, `S1 + S2`) — grille haute densité chronologique,
+  compte à rebours dérivé client, jauge d'impact HIGH/MED/LOW (couleur + points ●●● + texte, §3),
+  consensus/previous/actual + surprise SIGNÉE (▲ vert / ▼ rouge), lignes HIGH en blackout surlignées
+  (⏸). Badge de régime `MacroRegimeBadge` dans la **Zone 0** (lit `macro_risk`) : glyphe + event +
+  countdown + régime (« ⏸ CPI publiée +6m11s · EXECUTION_PAUSED ») à côté du Phase 0 GÉANT — couleur
+  jamais seule (§3). Câblés : registre, SSE (`macro_risk` FAST, `macro_calendar` SLOW), espace DÉFAUT
+  (bump `STORAGE_KEY` v10→v11), mnémonique `MCAL`, hook DEV `__setMacro`.
+- **Vérif** : 18 tests backend (calendrier : surprise/tri/impact/fail-closed/grâce ; risk guard :
+  NORMAL/WARNING/PAUSED avant-après blackout, MED/LOW ignorés, priorité, driver, fail-closed ;
+  **câblage Phase 0** : MACRO_BLACKOUT bloque / ne bloque pas) ; **231 passed**, ruff clean ; `tsc`
+  + `vite build` OK ; essai Playwright réel : 5 releases live (CPI/FOMC/NFP, jauges, surprise ▲+0.3,
+  blackout ⏸), badge Zone 0 **EXECUTION_PAUSED** + countdown, **Phase 0 BLOQUÉ** par le blackout,
+  **0 erreur JS** + captures.
+- **Hors-scope (une feature = un commit)** : historique des surprises ; scoring d'impact pondéré ;
+  filtre par devise ; révisions (actual révisé) ; auto-ack de sortie de blackout ; feed réel.
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.

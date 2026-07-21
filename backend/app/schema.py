@@ -365,8 +365,16 @@ class ContextSchema(BaseModel):
     econ_calendar: EconCalendar = Field(default_factory=EconCalendar)
     liquidity_sweep: LiquiditySweep = Field(default_factory=LiquiditySweep)
     vol_surface: VolSurface = Field(default_factory=VolSurface)
+    # Moteur Macro (D-040) — publications éco TRADABLES (distinct d'econ_calendar D-027, macro/géo
+    # systémique). value: {events: [{ts, name, country, currency, impact ∈ HIGH|MED|LOW, consensus,
+    # previous, actual, surprise}]}. Canal LENT. Lecture seule (§2.1).
+    macro_calendar: MetaField = Field(default_factory=MetaField)
+    # Risk Guard déterministe (D-040) — projection du régime (§2.2, câblé à Phase 0 MACRO_BLACKOUT).
+    # value: {regime ∈ NORMAL|WARNING|EXECUTION_PAUSED, event: {name, ts, impact, country} | null,
+    # seconds_until, in_window}. Canal RAPIDE (régime + countdown frais, en phase avec Phase 0).
+    macro_risk: MetaField = Field(default_factory=MetaField)
 
 
 FAST_BLOCKS = ("session_identity", "s1_state", "bridge_variables", "sync_state",
-               "unified_signal_output", "liquidity_sweep")
-SLOW_BLOCKS = ("s2_state", "econ_calendar", "vol_surface")
+               "unified_signal_output", "liquidity_sweep", "macro_risk")
+SLOW_BLOCKS = ("s2_state", "econ_calendar", "vol_surface", "macro_calendar")

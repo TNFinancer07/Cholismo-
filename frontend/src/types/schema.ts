@@ -347,6 +347,30 @@ export interface EconCalendar {
   events: MetaField<EconEvent[]>
 }
 
+// --- macro_calendar → panneau MCAL + macro_risk → badge Zone 0 (D-040) ---
+
+export type Impact = 'HIGH' | 'MED' | 'LOW'
+export interface MacroRelease {
+  ts: number
+  name: string
+  country: string | null
+  currency: string | null
+  impact: Impact
+  consensus: number | null
+  previous: number | null
+  actual: number | null
+  surprise: number | null
+}
+export interface MacroCalendarValue { events: MacroRelease[] }
+export type MacroRiskRegime = 'NORMAL' | 'WARNING' | 'EXECUTION_PAUSED'
+export interface MacroRiskEvent { name: string | null; ts: number; impact: Impact | null; country: string | null }
+export interface MacroRiskValue {
+  regime: MacroRiskRegime
+  event: MacroRiskEvent | null
+  seconds_until: number | null
+  in_window: boolean
+}
+
 // --- liquidity_sweep → panneau IA (détecteur LangGraph déterministe, D-028) [rapide] ---
 
 export interface LiquiditySweepAlert {
@@ -379,6 +403,8 @@ export interface ContextSchema {
   econ_calendar: EconCalendar
   liquidity_sweep: LiquiditySweep
   vol_surface: VolSurface
+  macro_calendar: MetaField<MacroCalendarValue>
+  macro_risk: MetaField<MacroRiskValue>
 }
 
 // --- hors-schéma : extras opérationnels poussés sur le canal rapide ---

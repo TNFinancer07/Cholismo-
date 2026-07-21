@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from typing import Callable, Optional
 
 from . import config
+from .macro_risk import compute_macro_risk
 from .meta import Freshness
 from .schema import (ContextSchema, Phase0Blocker, Phase0State, SessionMarker)
 
@@ -83,6 +84,20 @@ def _rule_session(i: Phase0Input) -> RuleResult:
     return RuleResult(ok, "" if ok else "Hors fenêtre de session (Londres obs / overlap NY)")
 
 
+def _rule_macro_blackout(i: Phase0Input) -> RuleResult:
+    """Blackout macro (D-040) : une annonce HIGH impact dans la fenêtre ±15 min → BLOCKED. Même
+    calcul déterministe que la projection `macro_risk` (verrou UNIQUE §2.2). Calendrier absent →
+    aucun HIGH connu → passe (le blackout est un signal POSITIF, pas un défaut fail-closed)."""
+    cal = i.schema.macro_calendar.value
+    events = cal.get("events") if isinstance(cal, dict) else None
+    risk = compute_macro_risk(events if isinstance(events, list) else [], i.now,
+                              config.MACRO_PAUSE_WINDOW_S, config.MACRO_WARN_WINDOW_S)
+    if risk["regime"] != "EXECUTION_PAUSED":
+        return RuleResult(True)
+    ev = risk.get("event") or {}
+    return RuleResult(False, f"Blackout macro : {ev.get('name', 'annonce HIGH')} dans la fenêtre ±15 min")
+
+
 def _rule_streak(i: Phase0Input) -> RuleResult:
     if i.streak < config.STREAK_AUDIT_THRESHOLD:
         return RuleResult(True)
@@ -98,6 +113,7 @@ CRIT_RULES: list[Rule] = [
     Rule("VIX_LIMIT", "VIX ≤ 30", "CRIT", _rule_vix),
     Rule("CHOP_LIMIT", "CHOP < 61.8", "CRIT", _rule_chop),
     Rule("SESSION_WINDOW", "Fenêtre de session", "CRIT", _rule_session),
+    Rule("MACRO_BLACKOUT", "Blackout macro (HIGH ±15 min)", "CRIT", _rule_macro_blackout),
     Rule("STREAK_AUDIT", "Audit streak (seuil 8)", "CRIT", _rule_streak),
 ]
 

@@ -26,6 +26,7 @@ from .cvd_stratified import build_cvd_stratified
 from .footprint import build_footprint
 from .graph.liquidity_sweep import SWEEP_GRAPH, build_sweep_inputs
 from .heatmap import latest_column
+from .macro_risk import build_macro_calendar, compute_macro_risk
 from .macro_score import compute_s2_macro_score
 from .meta import Freshness, MetaField, make_meta
 from .phase0 import Phase0Input, evaluate_phase0
@@ -61,6 +62,7 @@ FIELD_SPEC: dict[str, tuple[str, float, float]] = {
     "gex": ("greeks_engine", config.GEX_STALE_SECONDS, config.GEX_STALE_SECONDS * 4),
     "rms": ("rms_engine", *_FAST),
     "econ_calendar": ("econ_feed", *_SLOW),  # systemic macro/geo schedule (D-027)
+    "macro_releases": ("econ_feed", *_SLOW),  # tradable economic releases (D-040)
     # Surface de volatilité (D-039) — chaîne d'options (Greeks engine, vitesse inconnue §8-B2 →
     # GEX_STALE) + structure de vol VIX (CBOE, cadence lente).
     "options_chain": ("greeks_engine", config.GEX_STALE_SECONDS, config.GEX_STALE_SECONDS * 4),
@@ -529,6 +531,15 @@ class Engine:
         streak = max(loss_streak(store), scenario["simulated_streak"])  # D-017
         streak_acked = await self.state.streak_audit_acked(streak) if redis_up else False
 
+        # Macro Risk Guard (D-040) — projection RAPIDE du régime, MÊME calcul déterministe que la
+        # règle Phase 0 MACRO_BLACKOUT (verrou unique §2.2). Calendrier depuis le dernier tick lent.
+        cal = self.schema.macro_calendar.value
+        mc_events = cal.get("events") if isinstance(cal, dict) else None
+        self.schema.macro_risk = MetaField(
+            value=compute_macro_risk(mc_events if isinstance(mc_events, list) else [], now,
+                                     config.MACRO_PAUSE_WINDOW_S, config.MACRO_WARN_WINDOW_S),
+            last_update_ts=now, source="macro_engine", freshness=Freshness.FRESH)
+
         # Phase 0 — deterministic, fail-closed
         heartbeat_age = await self.state.heartbeat_age() if redis_up else None
         phase0_state, blockers, warnings = evaluate_phase0(
@@ -572,7 +583,7 @@ class Engine:
 
         dump = self.schema.model_dump(mode="json")
         for block in ("session_identity", "s1_state", "bridge_variables",
-                      "sync_state", "unified_signal_output"):
+                      "sync_state", "unified_signal_output", "macro_risk"):
             broadcaster.publish("fast", block, dump[block])
         broadcaster.publish("fast", "extras", self._extras)
 
@@ -585,7 +596,7 @@ class Engine:
     async def _assemble_slow(self, now: float) -> None:
         raws = await self.state.read_raw_many(
             ["nq_es", "vix", "zn", "dx", "eurusd", "real_rates", "bridgewater_matrix",
-             "econ_calendar", "options_chain", "vol_term_structure",
+             "econ_calendar", "macro_releases", "options_chain", "vol_term_structure",
              "g_momentum", "pi_momentum", "d1", "d2", "d3", "d4", "d5",
              "taylor_ois_delta", "phillips_tips_delta", "beer_z", "carry_net",
              "cycle_div_delta", "leading_turn", "rr_zscore", "spot_momentum"])
@@ -613,10 +624,17 @@ class Engine:
         _validate_econ_calendar(econ, now)
         self.schema.econ_calendar = EconCalendar(events=econ)
         self.schema.vol_surface = await self._build_vol_surface(raws, now)  # D-039
+        # Macro : publications éco TRADABLES normalisées (D-040) ; fraîcheur propagée du raw (§3).
+        mr = await self._meta("macro_releases", raws, now)
+        self.schema.macro_calendar = MetaField(
+            value=build_macro_calendar(mr.value if isinstance(mr.value, list) else [], now,
+                                       config.MACRO_PAST_GRACE_S, config.MACRO_MAX_EVENTS),
+            last_update_ts=mr.last_update_ts, source=mr.source, freshness=mr.freshness, flags=mr.flags)
         dump = self.schema.model_dump(mode="json")
         broadcaster.publish("slow", "s2_state", dump["s2_state"])
         broadcaster.publish("slow", "econ_calendar", dump["econ_calendar"])
         broadcaster.publish("slow", "vol_surface", dump["vol_surface"])
+        broadcaster.publish("slow", "macro_calendar", dump["macro_calendar"])
 
     async def _build_vol_surface(self, raws: dict, now: float) -> VolSurface:
         """Surface de volatilité (D-039) : la chaîne d'options brute (Greeks engine) est classée

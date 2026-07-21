@@ -102,6 +102,14 @@ OPTIONS_MAX_STRIKES = int(os.getenv("OPTIONS_MAX_STRIKES", "13"))    # strikes a
 VOL_TERM_FLAT_EPS = float(os.getenv("VOL_TERM_FLAT_EPS", "0.3"))     # |Δ| ≤ eps → FLAT (points VIX)
 VOL_TENORS = (("VIX9D", 9), ("VIX", 30), ("VIX3M", 93), ("VIX6M", 186))  # ténor → jours (CBOE)
 
+# --- Moteur Macro & Risk Guard (D-040) ---
+# Fenêtres = v1 provisional (PLACEHOLDER §11 — à calibrer). La fenêtre blackout ±15 min autour
+# d'un HIGH câble la règle Phase 0 MACRO_BLACKOUT (verrou unique §2.2).
+MACRO_PAUSE_WINDOW_S = float(os.getenv("MACRO_PAUSE_WINDOW_S", "900"))   # ±15 min → EXECUTION_PAUSED
+MACRO_WARN_WINDOW_S = float(os.getenv("MACRO_WARN_WINDOW_S", "1800"))    # 30 min avant → WARNING
+MACRO_PAST_GRACE_S = float(os.getenv("MACRO_PAST_GRACE_S", "1800"))      # grâce d'affichage du passé
+MACRO_MAX_EVENTS = int(os.getenv("MACRO_MAX_EVENTS", "20"))              # publications affichées
+
 # --- Heatmap de liquidité (LOB, canal rapide 4 Hz — D-036) ---
 # Fenêtre glissante de colonnes temporelles (une par tick rapide de 0,25 s). 60 colonnes ≈ 15 s
 # d'historique. Niveaux par côté = profondeur affichée du carnet (BOOK_DEPTH).

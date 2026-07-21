@@ -1,13 +1,46 @@
 /** ZONE 0 — barre de statut (`session_identity`). Horloge double Montréal+CET, marqueur de
  *  session (teinte le fond via App), 3 modes, PHASE 0 GÉANT (reflet du moteur déterministe,
  *  jamais overridable ici), glyphe état maître, badge opérateur. */
-import { Lock, LockOpen, Radio, RadioTower, ShieldAlert, ShieldCheck, ShieldHalf } from 'lucide-react'
+import { CalendarClock, Lock, LockOpen, PauseOctagon, Radio, RadioTower, ShieldAlert, ShieldCheck, ShieldHalf, TriangleAlert } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { api } from '@/lib/api'
 import { fmtClock } from '@/lib/format'
 import { cn } from '@/lib/utils'
-import { effectivePhase0, MODES, useTerminal } from '@/store/terminal'
+import { effectivePhase0, MODES, serverNow, useTerminal } from '@/store/terminal'
+
+// durée compacte : 1h04 / 04m30s (valeur absolue ; le sens « dans / publiée +X » est porté à part)
+function fmtDur(s: number): string {
+  if (!Number.isFinite(s)) return '—'
+  const a = Math.abs(Math.round(s)), m = Math.floor(a / 60), h = Math.floor(m / 60)
+  return h > 0 ? `${h}h${String(m % 60).padStart(2, '0')}` : `${m}m${String(a % 60).padStart(2, '0')}s`
+}
+
+/** Badge de régime MACRO (`macro_risk`, D-040) — reflète le Risk Guard déterministe (câblé à
+ *  Phase 0 §2.2). Régime encodé par COULEUR + GLYPHE + TEXTE (jamais la couleur seule §3).
+ *  Countdown dérivé côté client (event.ts − serverNow) → cohérent avec les autres compte-à-rebours. */
+function MacroRegimeBadge() {
+  const mr = useTerminal((s) => s.macro_risk?.value)
+  const now = useTerminal((s) => serverNow(s))
+  if (!mr) return null
+  const regime = mr.regime
+  const cfg = regime === 'EXECUTION_PAUSED'
+    ? { cls: 'border-risk-red bg-risk-red/10 text-risk-red', Icon: PauseOctagon, label: 'EXECUTION_PAUSED' }
+    : regime === 'WARNING'
+      ? { cls: 'border-risk-yellow bg-risk-yellow/10 text-risk-yellow', Icon: TriangleAlert, label: 'WARNING' }
+      : { cls: 'border-risk-green/60 bg-risk-green/5 text-risk-green', Icon: CalendarClock, label: 'NORMAL' }
+  const ev = mr.event
+  const delta = ev && Number.isFinite(ev.ts) ? ev.ts - now : null
+  const when = delta === null ? '' : delta >= 0 ? `dans ${fmtDur(delta)}` : `publiée +${fmtDur(delta)}`
+  return (
+    <div className={cn('flex h-full items-center gap-1.5 border-x px-2 text-xxs font-bold tabular-nums', cfg.cls)}
+      title="Régime macro (Risk Guard déterministe, câblé à Phase 0 — CLAUDE §2.2/§2.4)" aria-live="polite">
+      <cfg.Icon size={13} aria-hidden />
+      {ev?.name && <span className="font-mono">{ev.name}{when && ` ${when}`}</span>}
+      <span className="tracking-wide">· {cfg.label}</span>
+    </div>
+  )
+}
 
 const MODE_LABELS: Record<string, string> = {
   PRE_SESSION: 'PRÉ-SESSION', LIVE: 'LIVE', POST_SESSION: 'POST-SESSION',
@@ -86,6 +119,7 @@ export function Zone0StatusBar() {
         {engineMute && <span className="text-xxs font-semibold text-risk-red">(MOTEUR MUET)</span>}
       </div>
 
+      <MacroRegimeBadge />
       <MasterGlyph />
       <span className="text-xxs text-term-dim" title="Avis Groq — advisory seulement, jamais le verrou (CLAUDE §2.2)">
         GROQ: {si?.phase0_advisory ?? 'UNAVAILABLE'}

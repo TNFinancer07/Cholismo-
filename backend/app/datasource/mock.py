@@ -35,7 +35,7 @@ SOURCES = {
                    "taylor_ois_delta", "phillips_tips_delta", "beer_z", "carry_net",
                    "cycle_div_delta", "leading_turn", "rr_zscore", "spot_momentum"],
     "rms_engine": ["rms"],
-    "econ_feed": ["econ_calendar"],   # systemic macro/geo schedule (D-027)
+    "econ_feed": ["econ_calendar", "macro_releases"],   # schedule systémique (D-027) + releases (D-040)
 }
 
 
@@ -47,6 +47,7 @@ class MockDataSource(MarketDataSource):
         self._tape: deque = deque(maxlen=40)   # rolling window of observed prints (D-026)
         self._tape_seq = 0
         self._econ: list[dict] = []            # scheduled macro/geo events (D-027)
+        self._macro: list[dict] = []           # tradable economic releases (D-040)
 
     # -- helpers --
 
@@ -231,6 +232,41 @@ class MockDataSource(MarketDataSource):
                          self._gen_options_chain(base, vol, patho), patho)
         await self._emit(state, "cboe", "vol_term_structure",
                          self._gen_term_structure(base, vol), patho)
+
+        # --- Publications éco tradables (D-040) : FOMC/CPI/NFP/ISM avec impact + consensus/
+        # previous/actual (actual seulement une fois publié). Reseed quand tout est passé. Une des
+        # HIGH est placée dans/près de la fenêtre blackout pour exercer le Risk Guard + Phase 0. ---
+        if not self._macro or all(e["ts"] < now - 1800 for e in self._macro):
+            self._macro = self._seed_macro(now)
+        emitted_macro = []
+        for e in self._macro:
+            ev = dict(e)
+            ev["actual"] = ev["_actual"] if ev["ts"] <= now else None  # actual connu après publication
+            del ev["_actual"]
+            emitted_macro.append(ev)
+        # pathologie §4 : rarement un release cassé se glisse dans le flux → écarté par le moteur.
+        if rng.random() < patho.get("nan_p", 0.0) + 0.03:
+            emitted_macro.append(rng.choice([
+                {"ts": math.nan, "name": "Corrompu", "impact": "HIGH", "country": "US", "currency": "USD"},
+                {"name": "SansTs", "impact": "MED", "country": "EU", "currency": "EUR"},
+                {"ts": now + 400, "name": "ImpactInvalide", "impact": "EXTREME", "country": "US", "currency": "USD"}]))
+        await self._emit(state, "econ_feed", "macro_releases", emitted_macro, patho)
+
+    @staticmethod
+    def _seed_macro(now: float) -> list[dict]:
+        """Grille de démo de publications éco autour de `now` (offsets en secondes) : une HIGH dans
+        la fenêtre blackout (±15 min) pour exercer le garde, d'autres avant/après."""
+        plan = [
+            (-3600, "ISM Manufacturing", "MED", "US", "USD", 48.5, 48.7, 49.1),
+            (-300, "CPI y/y", "HIGH", "US", "USD", 3.1, 3.2, 3.4),       # DANS le blackout (±15 min)
+            (3600, "FOMC Rate Decision", "HIGH", "US", "USD", 5.25, 5.25, None),   # 1 h → NORMAL puis WARN/PAUSE
+            (5400, "ECB Press Conf", "MED", "EU", "EUR", None, None, None),
+            (7200, "NFP", "HIGH", "US", "USD", 180.0, 175.0, None),      # 2 h → future, actual inconnu
+            (9000, "Retail Sales m/m", "LOW", "US", "USD", 0.3, 0.4, None),
+        ]
+        return [{"ts": now + off, "name": name, "impact": imp, "country": c, "currency": cur,
+                 "consensus": cons, "previous": prev, "_actual": act}
+                for off, name, imp, c, cur, cons, prev, act in plan]
 
     def _gen_options_chain(self, base: dict, vol: float, patho: dict) -> dict:
         """Chaîne synthétique : smile actions (IV↑ pour puts OTM), grecques plausibles (delta
