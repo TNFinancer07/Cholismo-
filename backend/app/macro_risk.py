@@ -21,7 +21,18 @@ def _finite(x) -> bool:
 
 
 def _num(x):
-    return float(x) if _finite(x) else None
+    """Valeur numérique robuste : nombre fini → float ; string PROPRE (« 3.4 ») → parsée ; unités/
+    garbage/bool/inf/nan → None (/devil : recouvre les feeds qui envoient des strings, sans jamais
+    deviner une unité ni fabriquer un nombre §3)."""
+    if _finite(x):
+        return float(x)
+    if isinstance(x, str):
+        try:
+            v = float(x.strip())
+        except (ValueError, TypeError):
+            return None
+        return v if math.isfinite(v) else None
+    return None
 
 
 def build_macro_calendar(raw_events, now: float, past_grace: float, max_events: int) -> dict:

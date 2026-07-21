@@ -135,3 +135,59 @@ def test_phase0_macro_blackout_blocks_when_high_in_window():
 def test_phase0_no_macro_blocker_when_high_far():
     _, blockers, _ = _phase0([_ev(10000, impact="HIGH")])                  # Δ 10000 > warn → NORMAL
     assert not any(b.rule == "MACRO_BLACKOUT" for b in blockers)           # macro ne bloque pas
+
+
+# ---------- /devil (D-040) : conditions limites ----------
+
+def test_blackout_boundaries_exact():
+    # bornes INCLUSIVES à ±pause ; passage exact t−15m / t / t+15m → PAUSED
+    assert _risk([_ev(PAUSE, impact="HIGH")])["regime"] == "EXECUTION_PAUSED"    # +15 min pile
+    assert _risk([_ev(-PAUSE, impact="HIGH")])["regime"] == "EXECUTION_PAUSED"   # −15 min pile
+    assert _risk([_ev(0, impact="HIGH")])["regime"] == "EXECUTION_PAUSED"        # t pile
+
+
+def test_blackout_just_outside_is_warning_then_normal():
+    assert _risk([_ev(PAUSE + 1, impact="HIGH")])["regime"] == "WARNING"          # juste après blackout amont
+    assert _risk([_ev(WARN, impact="HIGH")])["regime"] == "WARNING"               # borne warn pile
+    assert _risk([_ev(WARN + 1, impact="HIGH")])["regime"] == "NORMAL"            # juste après warn
+    assert _risk([_ev(-(PAUSE + 1), impact="HIGH")])["regime"] == "NORMAL"        # juste après blackout aval
+
+
+def test_simultaneous_high_and_low_same_ts_high_drives():
+    r = _risk([_ev(120, impact="LOW", name="RETAIL"), _ev(120, impact="HIGH", name="CPI")])
+    assert r["regime"] == "EXECUTION_PAUSED" and r["event"]["name"] == "CPI"      # HIGH pilote, LOW ignoré
+
+
+def test_two_high_same_ts_deterministic():
+    r1 = _risk([_ev(300, impact="HIGH", name="A"), _ev(300, impact="HIGH", name="B")])
+    r2 = _risk([_ev(300, impact="HIGH", name="A"), _ev(300, impact="HIGH", name="B")])
+    assert r1 == r2 and r1["regime"] == "EXECUTION_PAUSED"                        # stable, déterministe
+
+
+def test_string_numeric_fields_parsed_lenient():
+    # « strings au lieu de floats » propres → parsés (recouvre la donnée sans deviner d'unité)
+    ev = _cal([_ev(100, consensus="3.1", previous="3.0", actual="3.4")])["events"][0]
+    assert ev["consensus"] == 3.1 and round(ev["surprise"], 2) == 0.3
+
+
+def test_string_with_units_or_garbage_stays_none():
+    ev = _cal([_ev(100, consensus="3.4%", previous="N/A", actual="beaucoup")])["events"][0]
+    assert ev["consensus"] is None and ev["previous"] is None and ev["actual"] is None
+
+
+def test_bool_fields_are_none_not_numbers():
+    # bool est un int en Python → ne doit JAMAIS passer pour une valeur numérique
+    ev = _cal([_ev(100, consensus=True, actual=False)])["events"][0]
+    assert ev["consensus"] is None and ev["actual"] is None and ev["surprise"] is None
+
+
+def test_string_ts_event_dropped():
+    # ts non numérique = inutilisable sans parsing de date → événement écarté (fail-closed)
+    assert _cal([_ev("1700000000", name="X"), _ev(100, name="OK")])["events"] == \
+        _cal([_ev(100, name="OK")])["events"]
+
+
+def test_absent_calendar_no_crash_normal():
+    # absence totale (None / non-liste) → NORMAL, aucun crash (fail-closed §3)
+    assert compute_macro_risk(None, 0.0, PAUSE, WARN)["regime"] == "NORMAL"
+    assert build_macro_calendar(None, 0.0, GRACE, 20)["events"] == []

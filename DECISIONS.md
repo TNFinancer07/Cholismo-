@@ -1253,6 +1253,33 @@ Calendrier des publications éco TRADABLES + garde de risque déterministe. Déc
 - **Hors-scope (une feature = un commit)** : historique des surprises ; scoring d'impact pondéré ;
   filtre par devise ; révisions (actual révisé) ; auto-ack de sortie de blackout ; feed réel.
 
+### /devil D-040 — conditions limites
+Attaques : annonces simultanées/chevauchantes (HIGH + LOW même seconde) · releases corrompues
+(champs absents, types invalides, strings au lieu de floats) · désync d'horloge · absence totale ·
+bornes exactes du blackout (t−15m, t, t+15m).
+- **Bornes du blackout — INCLUSIVES à ±pause, aucun trou/chevauchement** : `|Δ| ≤ pause` →
+  PAUSED (t−15m, t, t+15m pile) ; `pause < Δ ≤ warn` → WARNING ; au-delà / `Δ < −pause` → NORMAL.
+  Δ=pause n'est jamais compté deux fois (blackout `≤` a priorité, warning exige `>`). Tests dédiés.
+- **Simultané HIGH + LOW même ts** : seuls les HIGH pilotent le garde (LOW/MED ignorés) ; deux HIGH
+  au même ts → régime déterministe et stable (`min` par |Δ|). Tests dédiés. Pas de dédup calendrier
+  (CPI + PPI à 8h30 sont deux vraies publications ; clé React = index, pas de collision).
+- **1 bug RÉEL frontend trouvé & corrigé** : une entrée `events` null/non-objet (release corrompue)
+  faisait planter `e.impact` avant le fallback `IMPACT[…] ?? LOW`. Corrigé : filtre
+  `e && typeof e === 'object'` → entrées corrompues écartées, jamais un crash.
+- **Amélioration backend (« strings au lieu de floats »)** : `_num` parse désormais les strings
+  numériques PROPRES (« 3.4 » → 3.4) mais rejette unités/garbage/bool/inf/nan → None (recouvre les
+  feeds à strings sans deviner d'unité ni fabriquer §3). `ts` reste STRICT (string ts → événement
+  écarté, inutilisable sans parsing de date). Tests dédiés (propre parsé, « 3.4% »/« N/A » → None).
+- **Absence totale / désync** : calendrier None/non-liste → NORMAL, aucun crash (le blackout est un
+  signal POSITIF) ; la règle Phase 0 et la projection dégradent identiquement. Countdown client
+  dérivé de `serverNow` (offset horloge corrigé) ; un ts figé/périmé n'invente jamais de countdown.
+- **Chemins déjà sûrs confirmés** (essai Playwright SSE gelé, **0 erreur JS**) : régime inconnu →
+  style NORMAL ; `event` null → nom masqué ; `value`/`event`/`events` non-objet → PAS DE DONNÉES ;
+  `seconds_until`/`ts` NaN → « · »/« — » (jamais un `.toFixed` cru) ; surprise 1e9 → formatée.
+- **Vérif** : +9 tests backend (bornes exactes ×2, simultané HIGH+LOW, deux HIGH stables, strings
+  parsées/garbage, bool→None, ts string écarté, absence) ; **242 passed**, ruff clean ; `tsc` +
+  `vite build` OK ; essai Playwright 6 pathologies → **0 erreur JS**, UI réactive.
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.

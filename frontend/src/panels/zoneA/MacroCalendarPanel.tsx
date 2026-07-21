@@ -33,7 +33,10 @@ export function MacroCalendarPanel() {
   const mc = useTerminal((s) => s.macro_calendar)
   const now = useTerminal((s) => serverNow(s))   // re-render chaque seconde (compte à rebours)
   const fresh = mc?.freshness
-  const events: MacroRelease[] = Array.isArray(mc?.value?.events) ? mc!.value!.events : []
+  // /devil : filtre les entrées non-objet (une release corrompue/null crasherait `e.impact`)
+  const events: MacroRelease[] = Array.isArray(mc?.value?.events)
+    ? mc!.value!.events.filter((e): e is MacroRelease => !!e && typeof e === 'object')
+    : []
   const noData = fresh === 'ABSENT' || events.length === 0
 
   return (
