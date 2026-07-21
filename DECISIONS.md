@@ -1190,6 +1190,28 @@ grecques/moneyness) · expirations corrompues · (frontend) IV NaN au skew, saut
   ruff clean ; `tsc` + `vite build` OK ; essais Playwright : 6 pathologies + martèlement onglets/
   grecques + viewport minuscule (1re passe) et live 13 strikes DISTINCTS + martèlement ×3 (2e
   passe) → **0 erreur JS**, UI réactive.
+- **3e passe (audit, aucun correctif)** : nouveaux angles (pattes non-dict/absentes, moneyness
+  poubelle, ATM hors-plage, IV 1e12/1e-12, jours identiques, `expirations` non-tableau, `value`
+  non-objet) → **0 erreur JS**. Builders **stateless** (aucun `self._` — pas de race/backpressure,
+  §2). Convergence : la boucle `/devil` est stoppée (CLAUDE §13, pas de brute-force).
+
+### /polish D-039 — lisibilité grille dense + repères skew/term structure
+Loop 5 sur le rendu (aucune logique métier touchée). Améliorations :
+- **Mur de la monnaie (grille OMON)** : les cellules ITM portent un fond TEINTÉ discret (côté call
+  sky, côté put rose) → la zone in-the-money se lit d'un coup d'œil. Redondant avec la clarté du
+  texte (ITM clair / OTM estompé) ET la position (jamais la couleur seule §3). Ligne ATM = fond or
+  + glyphe ◄.
+- **Marqueur ATM libellé (skew)** : la ligne verticale or du strike ATM porte désormais sa VALEUR
+  (`5000`) en bas → le centre du smile est nommé. Coordonnées alignées au pixel (marqueur `R(x)+0.5`,
+  libellés d'axe `R(yOf)`), libellé ATM borné pour ne pas déborder.
+- **Contraste call/put (fond sombre)** : mesuré WCAG sur le fond réel — **call(sky) 8.97 · put(pink)
+  7.25**, tous ≥ 3:1 (objet graphique 1.4.11).
+- **Courbe VTS teintée par état** : contango → VERT, backwardation → ROUGE, plat/indéterminé → gris.
+  Renfort du badge (état porté par 4 canaux : badge texte + glyphe ↗/↘ + pente réelle + teinte —
+  couleur jamais seule §3). Points/libellés déjà alignés au pixel.
+- **Vérif** : `tsc` + `vite build` OK ; essai Playwright `/polish` (contraste ≥ 3:1 mesuré, marqueur
+  ATM libellé 134 px or, 24 cellules ITM ombrées, courbe contango verte 893 px / backwardation
+  forcée rouge 862 px) + martèlement onglets/grecques → **0 erreur JS** + captures (OMON, VTS).
 
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events

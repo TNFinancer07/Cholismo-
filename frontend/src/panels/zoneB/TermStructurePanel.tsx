@@ -9,8 +9,9 @@ import { useTerminal } from '@/store/terminal'
 import { Panel } from '@/components/ui/panel'
 import type { TermPoint, TermStructureValue } from '@/types/schema'
 
-const LINE = '148, 163, 184'   // gris-bleu lisible
+const LINE = '148, 163, 184'   // gris-bleu lisible (état indéterminé / FLAT)
 const GOLD = '240, 180, 41'
+const GREEN = '52, 211, 153', RED = '248, 113, 113'   // contango / backwardation
 const R = Math.round
 
 function draw(canvas: HTMLCanvasElement, val: TermStructureValue | null | undefined, box: { w: number; h: number }) {
@@ -40,8 +41,11 @@ function draw(canvas: HTMLCanvasElement, val: TermStructureValue | null | undefi
   ctx.fillText(vmax.toFixed(0), PL - 3, R(yOf(vmax)) + 4)
   ctx.fillText(vmin.toFixed(0), PL - 3, R(yOf(vmin)) - 4)
 
-  // courbe
-  ctx.strokeStyle = `rgb(${LINE})`; ctx.lineWidth = 1.5; ctx.beginPath()
+  // courbe — teintée selon l'ÉTAT (contango vert / backwardation rouge / plat gris) : renfort du
+  // badge, jamais la couleur seule (§3 : le badge texte+glyphe ET la pente réelle portent l'état)
+  const state = val?.state
+  const curve = state === 'CONTANGO' ? GREEN : state === 'BACKWARDATION' ? RED : LINE
+  ctx.strokeStyle = `rgb(${curve})`; ctx.lineWidth = 1.75; ctx.beginPath()
   pts.forEach((p, i) => { const x = xOf(p.days), y = yOf(p.value); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y) })
   ctx.stroke()
   // points + libellés ténor/valeur

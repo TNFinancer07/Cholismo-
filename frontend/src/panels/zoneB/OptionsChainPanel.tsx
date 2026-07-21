@@ -46,13 +46,16 @@ function drawSkew(canvas: HTMLCanvasElement, exp: OptionExpiry | undefined, box:
   const xOf = (s: number) => PL + (smax === smin ? (W - PL - PR) / 2 : ((s - smin) / (smax - smin)) * (W - PL - PR))
   const yOf = (iv: number) => PT + ((imax - iv) / (imax - imin)) * (H - PT - PB)
 
-  // marqueur ATM (vertical or) — repère de moneyness (position, pas couleur seule)
+  // marqueur ATM (vertical or) — repère de moneyness (position, pas couleur seule) + strike libellé
   if (exp?.atm_strike != null && Number.isFinite(exp.atm_strike)) {
     const x = R(xOf(exp.atm_strike)) + 0.5
-    ctx.strokeStyle = `rgba(${GOLD}, 0.55)`; ctx.lineWidth = 1; ctx.setLineDash([3, 3])
+    ctx.strokeStyle = `rgba(${GOLD}, 0.6)`; ctx.lineWidth = 1; ctx.setLineDash([3, 3])
     ctx.beginPath(); ctx.moveTo(x, PT); ctx.lineTo(x, H - PB); ctx.stroke(); ctx.setLineDash([])
+    ctx.font = '8px "JetBrains Mono", ui-monospace, monospace'; ctx.fillStyle = `rgb(${GOLD})`
+    ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic'
+    ctx.fillText(String(R(exp.atm_strike)), Math.max(PL + 12, Math.min(W - PR - 12, R(x))), H - 3)
   }
-  // axes IV (min/max) + libellés
+  // axes IV (min/max) + libellés — alignés au pixel
   ctx.font = '8px "JetBrains Mono", ui-monospace, monospace'; ctx.fillStyle = '#67788f'
   ctx.textAlign = 'right'; ctx.textBaseline = 'middle'
   ctx.fillText((imax * 100).toFixed(0), PL - 3, R(yOf(imax)) + 4)
@@ -163,13 +166,15 @@ export function OptionsChainPanel() {
                 const cItm = r.call?.moneyness === 'ITM', pItm = r.put?.moneyness === 'ITM'
                 return (
                   <tr key={r.strike} className={cn('border-t border-term-border/40', atm && 'bg-router/10')}>
-                    <td className={cn('px-1 text-left', cItm ? 'text-term-text' : 'text-term-dim')}>{num(r.call?.[greek], gDigits[greek])}</td>
-                    <td className="px-1 text-[rgb(56,189,248)]">{pct(r.call?.iv)}</td>
+                    {/* fond ITM discret (mur de la monnaie lu d'un coup d'œil) — redondant avec
+                        la clarté du texte + la position (jamais la couleur seule §3) */}
+                    <td className={cn('px-1 text-left', cItm ? 'bg-[rgba(56,189,248,0.07)] text-term-text' : 'text-term-dim')}>{num(r.call?.[greek], gDigits[greek])}</td>
+                    <td className={cn('px-1 text-[rgb(56,189,248)]', cItm && 'bg-[rgba(56,189,248,0.07)]')}>{pct(r.call?.iv)}</td>
                     <td className={cn('px-1 text-center', atm ? 'font-bold text-router' : 'text-term-text')}>
                       {num(r.strike, 0)}{atm && <span className="text-xxs"> ◄</span>}
                     </td>
-                    <td className="px-1 text-[rgb(244,114,182)]">{pct(r.put?.iv)}</td>
-                    <td className={cn('px-1 text-left', pItm ? 'text-term-text' : 'text-term-dim')}>{num(r.put?.[greek], gDigits[greek])}</td>
+                    <td className={cn('px-1 text-[rgb(244,114,182)]', pItm && 'bg-[rgba(244,114,182,0.07)]')}>{pct(r.put?.iv)}</td>
+                    <td className={cn('px-1 text-left', pItm ? 'bg-[rgba(244,114,182,0.07)] text-term-text' : 'text-term-dim')}>{num(r.put?.[greek], gDigits[greek])}</td>
                   </tr>
                 )
               })}
