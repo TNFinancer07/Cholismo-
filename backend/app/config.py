@@ -93,6 +93,15 @@ CVD_STRAT_DIV_LOOKBACK = int(os.getenv("CVD_STRAT_DIV_LOOKBACK", "12"))  # fenê
 CVD_STRAT_DIV_MIN_PRICE = float(os.getenv("CVD_STRAT_DIV_MIN_PRICE", "0.5"))   # deadband prix (pts)
 CVD_STRAT_DIV_MIN_DELTA = float(os.getenv("CVD_STRAT_DIV_MIN_DELTA", "25"))    # deadband delta (vol)
 
+# --- Chaîne d'options (OMON) + Term Structure de volatilité (D-039) ---
+# Bande ATM + eps FLAT = v1 provisional (PLACEHOLDER §11 — pas d'AUTORITÉ ; à calibrer). Bornes
+# d'affichage. Ténors VIX = jours standards de la structure (CBOE).
+OPTIONS_ATM_BAND = float(os.getenv("OPTIONS_ATM_BAND", "6"))          # |strike−U| ≤ bande → ATM
+OPTIONS_MAX_EXPIRATIONS = int(os.getenv("OPTIONS_MAX_EXPIRATIONS", "4"))
+OPTIONS_MAX_STRIKES = int(os.getenv("OPTIONS_MAX_STRIKES", "13"))    # strikes affichés par échéance
+VOL_TERM_FLAT_EPS = float(os.getenv("VOL_TERM_FLAT_EPS", "0.3"))     # |Δ| ≤ eps → FLAT (points VIX)
+VOL_TENORS = (("VIX9D", 9), ("VIX", 30), ("VIX3M", 93), ("VIX6M", 186))  # ténor → jours (CBOE)
+
 # --- Heatmap de liquidité (LOB, canal rapide 4 Hz — D-036) ---
 # Fenêtre glissante de colonnes temporelles (une par tick rapide de 0,25 s). 60 colonnes ≈ 15 s
 # d'historique. Niveaux par côté = profondeur affichée du carnet (BOOK_DEPTH).

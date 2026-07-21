@@ -31,10 +31,11 @@ from .meta import Freshness, MetaField, make_meta
 from .phase0 import Phase0Input, evaluate_phase0
 from .projections import loss_streak
 from .redis_state import RedisState
+from .options_chain import build_options_chain, build_term_structure
 from .schema import (BridgeVariables, Cascade, ContextSchema, CvdLevel, CvdState, Decision,
                      DecisionWindow, EconCalendar, LiquiditySweep, LiquiditySweepAlert,
                      MasterState, OperationalMode, OrderFlow, Phase0State, S1State, S2State,
-                     SessionIdentity, SessionMarker, Structure, SyncState, SyncVerdict)
+                     SessionIdentity, SessionMarker, Structure, SyncState, SyncVerdict, VolSurface)
 from .scoring import compute_unified_signal
 from .sse import broadcaster
 from .strategies.sony import evaluate_strategies
@@ -60,6 +61,10 @@ FIELD_SPEC: dict[str, tuple[str, float, float]] = {
     "gex": ("greeks_engine", config.GEX_STALE_SECONDS, config.GEX_STALE_SECONDS * 4),
     "rms": ("rms_engine", *_FAST),
     "econ_calendar": ("econ_feed", *_SLOW),  # systemic macro/geo schedule (D-027)
+    # Surface de volatilité (D-039) — chaîne d'options (Greeks engine, vitesse inconnue §8-B2 →
+    # GEX_STALE) + structure de vol VIX (CBOE, cadence lente).
+    "options_chain": ("greeks_engine", config.GEX_STALE_SECONDS, config.GEX_STALE_SECONDS * 4),
+    "vol_term_structure": ("cboe", *_SLOW),
     # Simulated N1/N2A outputs (Youssef pipeline inputs — slow cadence, D-021)
     **{field: ("macro_feed", *_SLOW) for field in (
         "g_momentum", "pi_momentum", "d1", "d2", "d3", "d4", "d5",
@@ -580,7 +585,7 @@ class Engine:
     async def _assemble_slow(self, now: float) -> None:
         raws = await self.state.read_raw_many(
             ["nq_es", "vix", "zn", "dx", "eurusd", "real_rates", "bridgewater_matrix",
-             "econ_calendar",
+             "econ_calendar", "options_chain", "vol_term_structure",
              "g_momentum", "pi_momentum", "d1", "d2", "d3", "d4", "d5",
              "taylor_ois_delta", "phillips_tips_delta", "beer_z", "carry_net",
              "cycle_div_delta", "leading_turn", "rr_zscore", "spot_momentum"])
@@ -607,9 +612,33 @@ class Engine:
         econ = await self._meta("econ_calendar", raws, now)
         _validate_econ_calendar(econ, now)
         self.schema.econ_calendar = EconCalendar(events=econ)
+        self.schema.vol_surface = await self._build_vol_surface(raws, now)  # D-039
         dump = self.schema.model_dump(mode="json")
         broadcaster.publish("slow", "s2_state", dump["s2_state"])
         broadcaster.publish("slow", "econ_calendar", dump["econ_calendar"])
+        broadcaster.publish("slow", "vol_surface", dump["vol_surface"])
+
+    async def _build_vol_surface(self, raws: dict, now: float) -> VolSurface:
+        """Surface de volatilité (D-039) : la chaîne d'options brute (Greeks engine) est classée
+        par `build_options_chain` (moneyness, tri, bornage) ; la structure de vol (CBOE) par
+        `build_term_structure` (ordre + état). Fraîcheur propagée du raw → STALE honnête si le
+        moteur Greeks ralentit (§8-B2). Fail-closed : raw absent → structure vide (§3)."""
+        oc = await self._meta("options_chain", raws, now)
+        raw_oc = oc.value if isinstance(oc.value, dict) else {}
+        chain = build_options_chain(
+            raw_oc.get("expirations") if isinstance(raw_oc.get("expirations"), list) else [],
+            raw_oc.get("underlying"), config.OPTIONS_ATM_BAND,
+            config.OPTIONS_MAX_EXPIRATIONS, config.OPTIONS_MAX_STRIKES)
+        options_chain = MetaField(value=chain, last_update_ts=oc.last_update_ts,
+                                  source=oc.source, freshness=oc.freshness, flags=oc.flags)
+        vt = await self._meta("vol_term_structure", raws, now)
+        raw_vt = vt.value if isinstance(vt.value, dict) else {}
+        ts = build_term_structure(
+            raw_vt.get("points") if isinstance(raw_vt.get("points"), list) else [],
+            config.VOL_TERM_FLAT_EPS)
+        term_structure = MetaField(value=ts, last_update_ts=vt.last_update_ts,
+                                   source=vt.source, freshness=vt.freshness, flags=vt.flags)
+        return VolSurface(options_chain=options_chain, term_structure=term_structure)
 
     async def _fast_loop(self) -> None:
         while True:

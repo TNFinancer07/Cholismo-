@@ -260,6 +260,41 @@ export interface BridgeVariables {
   dxy: MetaField<number>
 }
 
+// --- vol_surface → OMON (chaîne d'options) + VTS (term structure) [lent] (D-039) ---
+
+export type Moneyness = 'ITM' | 'ATM' | 'OTM' | null
+export interface OptionLeg {
+  iv: number | null
+  delta: number | null
+  gamma: number | null
+  vanna: number | null
+  charm: number | null
+  moneyness: Moneyness
+}
+export interface OptionRow { strike: number; call: OptionLeg; put: OptionLeg }
+export interface OptionExpiry {
+  expiry: string | null
+  dte: number | null
+  atm_strike: number | null
+  rows: OptionRow[]
+}
+export interface OptionsChainValue {
+  underlying: number | null
+  atm_strike: number | null
+  expirations: OptionExpiry[]
+}
+export type TermState = 'CONTANGO' | 'BACKWARDATION' | 'FLAT' | null
+export interface TermPoint { tenor: string | null; days: number; value: number }
+export interface TermStructureValue {
+  points: TermPoint[]
+  state: TermState
+  front_back_spread: number | null
+}
+export interface VolSurface {
+  options_chain: MetaField<OptionsChainValue>
+  term_structure: MetaField<TermStructureValue>
+}
+
 // --- sync_state → B3 [rapide] ---
 
 export type SyncVerdict = 'ALIGNED' | 'DIVERGENT' | 'PARTIAL'
@@ -343,6 +378,7 @@ export interface ContextSchema {
   unified_signal_output: UnifiedSignalOutput
   econ_calendar: EconCalendar
   liquidity_sweep: LiquiditySweep
+  vol_surface: VolSurface
 }
 
 // --- hors-schéma : extras opérationnels poussés sur le canal rapide ---

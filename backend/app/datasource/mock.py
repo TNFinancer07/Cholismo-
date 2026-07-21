@@ -24,10 +24,10 @@ from .base import MarketDataSource
 SOURCES = {
     "sierra_chart": ["svs_score", "cvd", "absorption", "aggressor_ratio",
                      "vpoc", "vah", "val", "lvn", "chop", "order_book", "tape"],
-    "cboe": ["vix", "vvix"],
+    "cboe": ["vix", "vvix", "vol_term_structure"],
     "cme": ["nq_es", "zn", "dxy_alt"],
     "fx_feed": ["eurusd", "dx", "dxy"],
-    "greeks_engine": ["gex"],
+    "greeks_engine": ["gex", "options_chain"],
     "macro_feed": ["real_rates", "bridgewater_matrix",
                    # Simulated N1/N2A outputs feeding the REAL Youssef pipeline formulas
                    # (reference/youssef/*, D-021): momentum axes, D-scores, arb deltas.
@@ -223,6 +223,54 @@ class MockDataSource(MarketDataSource):
                 {"ts": now + 600, "name": "TierInvalide", "tier": 7, "region": "US"},
             ]))
         await self._emit(state, "econ_feed", "econ_calendar", emitted, patho)
+
+        # --- Surface de volatilité (D-039) : chaîne d'options synthétique (smile equity +
+        # grecques) + structure de vol VIX. Pathologies §4 : IV/grecque NaN rares, patte
+        # manquante → le moteur doit les écarter SEUL (fail-closed §3, jamais un chiffre inventé). ---
+        await self._emit(state, "greeks_engine", "options_chain",
+                         self._gen_options_chain(base, vol, patho), patho)
+        await self._emit(state, "cboe", "vol_term_structure",
+                         self._gen_term_structure(base, vol), patho)
+
+    def _gen_options_chain(self, base: dict, vol: float, patho: dict) -> dict:
+        """Chaîne synthétique : smile actions (IV↑ pour puts OTM), grecques plausibles (delta
+        logistique, gamma pic ATM, vanna/charm petits). PLACEHOLDER de démo — pas arbitrage-free."""
+        rng = self._rng
+        underlying = self._drift("es_underlying", 5000.0, vol, 3.0)
+        atm = round(underlying / 25.0) * 25.0
+        base_iv = max(0.05, base["vix"] / 100.0)
+        expirations = []
+        for label, dte in (("W1", 7), ("W2", 14), ("M1", 30), ("M2", 60)):
+            strikes = []
+            for k in range(-6, 7):
+                strike = atm + k * 25.0
+                m = (strike - underlying) / underlying          # fraction de moneyness
+                iv = max(0.03, base_iv - 0.6 * m + 2.5 * m * m + 0.02 * (dte / 30.0) ** 0.5)
+                cdelta = 1.0 / (1.0 + math.exp(-(underlying - strike) / (underlying * 0.01)))
+                gamma = math.exp(-((strike - underlying) / (underlying * 0.02)) ** 2) * 0.02
+                vanna = -1.5 * m * gamma * 100.0
+                charm = -0.3 * cdelta * (1.0 - cdelta) / max(1.0, dte)
+                call = {"iv": round(iv, 4), "delta": round(cdelta, 3), "gamma": round(gamma, 5),
+                        "vanna": round(vanna, 4), "charm": round(charm, 5)}
+                put = {"iv": round(iv + 0.006, 4), "delta": round(cdelta - 1.0, 3),
+                       "gamma": round(gamma, 5), "vanna": round(-vanna, 4), "charm": round(charm, 5)}
+                # pathologie : IV/grecque NaN rare, ou patte call absente
+                if rng.random() < patho.get("nan_p", 0.0) + 0.01:
+                    rng.choice([call, put])[rng.choice(("iv", "gamma", "vanna"))] = math.nan
+                strikes.append({"strike": strike, "call": call, "put": put})
+            expirations.append({"expiry": label, "dte": dte, "strikes": strikes})
+        return {"underlying": round(underlying, 2), "expirations": expirations}
+
+    def _gen_term_structure(self, base: dict, vol: float) -> dict:
+        """Structure VIX9D/VIX/VIX3M/VIX6M : contango normal (prime de terme), bascule en
+        backwardation quand le régime de vol monte (base VIX élevée)."""
+        v = base["vix"]
+        stress = max(0.0, (v - 22.0) / 8.0)                     # régime tendu → aplatit/inverse
+        points = []
+        for tenor, days, prem in (("VIX9D", 9, -1.6), ("VIX", 30, 0.0), ("VIX3M", 93, 2.2), ("VIX6M", 186, 3.2)):
+            val = max(9.0, self._drift(f"vts_{tenor}", v + prem * (1.0 - stress), vol, 0.4))
+            points.append({"tenor": tenor, "days": days, "value": round(val, 2)})
+        return {"points": points}
 
     @staticmethod
     def _seed_econ(now: float) -> list[dict]:

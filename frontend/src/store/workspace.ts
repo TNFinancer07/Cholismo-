@@ -7,7 +7,7 @@ import { useTerminal } from './terminal'
 
 /** Identifiants canoniques des panneaux disponibles (couverts par panels/registry). */
 export const PANEL_IDS = ['A1', 'A2', 'A3', 'EC', 'S2P', 'MOCK', 'B1', 'B2', 'B3', 'B4',
-  'S1S', 'OB', 'TP', 'CVD', 'HM', 'FP', 'CDS', 'IA', 'C1', 'C2', 'C4', 'MODE'] as const
+  'S1S', 'OB', 'TP', 'CVD', 'HM', 'FP', 'CDS', 'OMON', 'VTS', 'IA', 'C1', 'C2', 'C4', 'MODE'] as const
 export type PanelId = (typeof PANEL_IDS)[number]
 
 export interface Workspace {
@@ -25,16 +25,16 @@ function builtins(): Workspace[] {
     { id: 'micro', name: 'MICRO · S1', builtin: true, showBlotter: true,
       columns: [['S1S', 'B2', 'IA', 'FP'], ['B4', 'OB', 'CVD', 'HM', 'CDS', 'B1'], ['TP', 'EC', 'B3', 'C1', 'C2', 'MOCK']] },
     { id: 'macro', name: 'MACRO · S2', builtin: true, showBlotter: false,
-      columns: [['A1', 'A3', 'EC'], ['S2P', 'A2'], ['B4', 'B3', 'MOCK']] },
+      columns: [['A1', 'A3', 'EC', 'VTS'], ['S2P', 'A2', 'OMON'], ['B4', 'B3', 'MOCK']] },
     { id: 'discipline', name: 'DISCIPLINE', builtin: true, showBlotter: true,
       columns: [['C1', 'C2'], ['B4', 'C4'], ['MODE', 'MOCK']] },
   ]
 }
 
-// v9 : ajout du panneau CDS (CVD stratifié par taille, D-038) à l'espace MICRO — bump de clé :
-// les layouts persistés antérieurs repartent des intégrés (les PERSO se recréent ; pas de
-// migration silencieuse d'un panneau invisible).
-const STORAGE_KEY = () => `cholismo.workspaces.${useTerminal.getState().operator}.v9`
+// v10 : ajout des panneaux OMON + VTS (chaîne d'options + term structure, D-039) à l'espace
+// MACRO — bump de clé : les layouts persistés antérieurs repartent des intégrés (les PERSO se
+// recréent ; pas de migration silencieuse d'un panneau invisible).
+const STORAGE_KEY = () => `cholismo.workspaces.${useTerminal.getState().operator}.v10`
 
 interface Persisted { workspaces: Workspace[]; activeId: string }
 

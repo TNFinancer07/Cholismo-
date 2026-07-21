@@ -250,6 +250,20 @@ class BridgeVariables(BaseModel):
     dxy: MetaField = Field(default_factory=MetaField)
 
 
+# --- vol_surface → OMON (chaîne d'options) + VTS (term structure) [slow] (D-039) ---
+
+class VolSurface(BaseModel):
+    """Surface de volatilité (canal LENT) : chaîne d'options + structure par échéance. Comme la
+    vitesse du moteur Greeks est INCONNUE (§8-B2), l'âge réel de la donnée pilote la fraîcheur —
+    STALE honnête, jamais un chiffre inventé (§3). Lecture seule (§2.1)."""
+    # value: {underlying, atm_strike, expirations: [{expiry, dte, atm_strike, rows: [{strike,
+    # call, put}]}]} ; call/put = {iv, delta, gamma, vanna, charm, moneyness ∈ ITM|ATM|OTM|null}.
+    options_chain: MetaField = Field(default_factory=MetaField)
+    # value: {points: [{tenor, days, value}], state ∈ CONTANGO|BACKWARDATION|FLAT|null,
+    # front_back_spread}. Structure de vol VIX9D/VIX/VIX3M/VIX6M.
+    term_structure: MetaField = Field(default_factory=MetaField)
+
+
 # --- sync_state → B3 [fast] ---
 
 class SyncVerdict(str, Enum):
@@ -350,8 +364,9 @@ class ContextSchema(BaseModel):
     unified_signal_output: UnifiedSignalOutput = Field(default_factory=UnifiedSignalOutput)
     econ_calendar: EconCalendar = Field(default_factory=EconCalendar)
     liquidity_sweep: LiquiditySweep = Field(default_factory=LiquiditySweep)
+    vol_surface: VolSurface = Field(default_factory=VolSurface)
 
 
 FAST_BLOCKS = ("session_identity", "s1_state", "bridge_variables", "sync_state",
                "unified_signal_output", "liquidity_sweep")
-SLOW_BLOCKS = ("s2_state", "econ_calendar")
+SLOW_BLOCKS = ("s2_state", "econ_calendar", "vol_surface")

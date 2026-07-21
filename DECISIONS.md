@@ -1115,6 +1115,42 @@ Loop 5 sur le rendu (aucune logique métier touchée). 3 axes :
   mesuré, échelle instant-expand/eased-contract mesurée au pixel) **0 erreur JS** + captures
   (live, survol net).
 
+## D-039 · Chaîne d'options (OMON) + Term Structure de volatilité (VTS)
+Moniteur de chaîne d'options (Calls/Puts, IV, Grecques) + structure de vol VIX. Décisions :
+- **Bloc `vol_surface` (canal LENT)** — 2 champs : `options_chain` + `term_structure`. Comme la
+  vitesse du moteur Greeks est INCONNUE (§8-B2), la fraîcheur suit l'ÂGE réel de la donnée →
+  STALE honnête, jamais un chiffre inventé (§3). Lecture seule (§2.1). 1 panneau = 1 champ (§1) :
+  OMON lit `options_chain`, VTS lit `term_structure`.
+- **`build_options_chain`** (`app/options_chain.py`, pur/déterministe) : agrège Calls/Puts par
+  EXPIRATION puis STRIKE, porte IV + Grecques (delta, gamma, vanna, charm) ; MONEYNESS
+  déterministe vs sous-jacent + bande ATM (CALL ITM si strike < U, PUT en miroir) ; strikes triés,
+  expirations triées DTE croissant (bornées), strikes bornés aux plus proches du sous-jacent ;
+  `atm_strike` = strike le plus proche. Fail-closed (§3) : strike non-fini → ligne ignorée ; IV/
+  grecque non-finie → None ; sous-jacent non-fini → moneyness None.
+- **`build_term_structure`** : ordonne VIX9D/VIX/VIX3M/VIX6M par jours, classe l'état CONTANGO
+  (front < back), BACKWARDATION (front > back), FLAT (|Δ| ≤ eps) ; `< 2` points finis → état None
+  (jamais un faux régime). Advisory (§2.1).
+- **Bande ATM + eps FLAT** = **v1 provisional** (PLACEHOLDER §11 — pas d'AUTORITÉ ; à calibrer).
+  Bornes d'affichage (4 échéances, 13 strikes) en config. Ténors VIX = jours CBOE standards.
+- **Mock (§4, « un mock propre est un piège »)** : chaîne synthétique (smile actions — IV↑ puts
+  OTM, delta logistique, gamma pic ATM, vanna/charm petits) + structure VIX (contango normal,
+  bascule backwardation en régime tendu). Pathologies injectées : IV/grecque NaN rare, patte
+  manquante → le moteur les écarte SEUL. Émise via `greeks_engine`/`cboe` ; le moteur lit + classe.
+- **Frontend** : `OptionsChainPanel` (OMON, code `OMON`) DIVISÉ en deux — SKEW/SMILE Canvas (IV
+  Call sky / Put rose vs strike, marqueur ATM or) + GRILLE haute densité (Call/Put, IV + grecque
+  SÉLECTIONNABLE Δ/Γ/Vanna/Charm, ligne ATM surlignée, moneyness par position+libellé, §3) ;
+  INTERACTIF (onglets d'échéance + sélecteur de grecque). `TermStructurePanel` (VTS, code `VTS`) :
+  courbe 4 ténors Canvas + badge CONTANGO ↗ / BACKWARDATION ↘ / FLAT (glyphe+texte+couleur, §3).
+  Câblés : registre, `SLOW_BLOCKS` SSE, espace MACRO (bump `STORAGE_KEY` v9→v10), mnémoniques
+  `OMON`/`VTS`, hook DEV `__setVolSurface`.
+- **Vérif** : 16 tests backend (moneyness ITM/ATM/OTM, atm proche, IV/greeks portés, tri, cap DTE/
+  strikes, fail-closed strike/greek/sous-jacent, contango/backwardation/flat, ordre, filtre
+  non-fini, insuffisant) ; 189 passed, ruff clean ; `tsc` + `vite build` OK ; essai Playwright réel :
+  chaîne live (underlying, 4 échéances × 13 strikes, smile, pathologie IV « · »), skew 2 lignes,
+  grille + bascule échéance/grecque, VTS courbe contango, **0 erreur JS** + captures.
+- **Hors-scope (une feature = un commit)** : surface 3D IV ; Greeks agrégés (net GEX/DEX par
+  strike) ; historique de skew ; pin risk ; smile arbitrage-free ; survol d'infobulle sur le skew.
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.

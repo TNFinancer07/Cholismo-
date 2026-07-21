@@ -7,7 +7,7 @@ import type { BlotterRow, Calibration, OrchestratorPayload } from '@/types/schem
 
 const FAST_BLOCKS = ['session_identity', 's1_state', 'bridge_variables', 'sync_state',
   'unified_signal_output', 'liquidity_sweep', 'extras']
-const SLOW_BLOCKS = ['s2_state', 'econ_calendar']
+const SLOW_BLOCKS = ['s2_state', 'econ_calendar', 'vol_surface']
 
 async function refreshProjections() {
   const store = useTerminal.getState()

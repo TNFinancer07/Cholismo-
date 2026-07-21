@@ -5,7 +5,7 @@ import { create } from 'zustand'
 import type {
   BlotterRow, BridgeVariables, Calibration, ContextSchema, EconCalendar, Extras,
   LiquiditySweep, OperationalMode, Operator, OrchestratorPayload, S1State, S2State,
-  SessionIdentity, SyncState, UnifiedSignalOutput,
+  SessionIdentity, SyncState, UnifiedSignalOutput, VolSurface,
 } from '@/types/schema'
 
 export type ZoneKey = 'A' | 'B' | 'C' | 'D'
@@ -34,6 +34,7 @@ interface TerminalStore {
   unified_signal_output: UnifiedSignalOutput | null
   econ_calendar: EconCalendar | null
   liquidity_sweep: LiquiditySweep | null
+  vol_surface: VolSurface | null
   extras: Extras | null
 
   // santé des canaux (fail-closed UI : canal muet => BLOQUÉ affiché)
@@ -79,6 +80,7 @@ export const useTerminal = create<TerminalStore>((set) => ({
   bridge_variables: null,
   econ_calendar: null,
   liquidity_sweep: null,
+  vol_surface: null,
   sync_state: null,
   unified_signal_output: null,
   extras: null,
@@ -137,6 +139,7 @@ export const useTerminal = create<TerminalStore>((set) => ({
         case 'sync_state': return { sync_state: payload as SyncState }
         case 'econ_calendar': return { econ_calendar: payload as EconCalendar }
         case 'liquidity_sweep': return { liquidity_sweep: payload as LiquiditySweep }
+        case 'vol_surface': return { vol_surface: payload as VolSurface }
         case 'unified_signal_output': {
           const signal = payload as UnifiedSignalOutput
           return { unified_signal_output: signal, history: push(state.history, 'score', signal.score) }
@@ -177,6 +180,12 @@ if (import.meta.env.DEV && typeof window !== 'undefined') {
   ;(window as unknown as { __setCvdStrat?: (cs: unknown) => void }).__setCvdStrat = (cvd) => {
     const s = useTerminal.getState()
     if (s.s1_state) s.set({ s1_state: { ...s.s1_state, cvd_stratified: cvd as never } })
+  }
+  // /devil D-039 : force un `vol_surface` pathologique (chaîne vide, IV/greeks non-finis,
+  // moneyness null, term structure inversée) pour vérifier que le rendu Canvas/grille ne crashe jamais.
+  ;(window as unknown as { __setVolSurface?: (vs: unknown) => void }).__setVolSurface = (vs) => {
+    const s = useTerminal.getState()
+    s.set({ vol_surface: vs as never })
   }
 }
 
