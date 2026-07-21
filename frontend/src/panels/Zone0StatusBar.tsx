@@ -24,20 +24,22 @@ function MacroRegimeBadge() {
   const now = useTerminal((s) => serverNow(s))
   if (!mr) return null
   const regime = mr.regime
+  // critique (PAUSED/WARNING) = fond + bordure + label bien visible ; NORMAL = discret (pas de
+  // fond, pas de bordure) pour ne pas surcharger. PAUSED pulse pour attirer l'œil immédiatement.
   const cfg = regime === 'EXECUTION_PAUSED'
-    ? { cls: 'border-risk-red bg-risk-red/10 text-risk-red', Icon: PauseOctagon, label: 'EXECUTION_PAUSED' }
+    ? { cls: 'border-x border-risk-red bg-risk-red/20 text-risk-red', Icon: PauseOctagon, label: 'EXECUTION_PAUSED', strong: true, pulse: true }
     : regime === 'WARNING'
-      ? { cls: 'border-risk-yellow bg-risk-yellow/10 text-risk-yellow', Icon: TriangleAlert, label: 'WARNING' }
-      : { cls: 'border-risk-green/60 bg-risk-green/5 text-risk-green', Icon: CalendarClock, label: 'NORMAL' }
+      ? { cls: 'border-x border-risk-yellow bg-risk-yellow/15 text-risk-yellow', Icon: TriangleAlert, label: 'WARNING', strong: true, pulse: false }
+      : { cls: 'text-risk-green/75', Icon: CalendarClock, label: 'NORMAL', strong: false, pulse: false }
   const ev = mr.event
   const delta = ev && Number.isFinite(ev.ts) ? ev.ts - now : null
   const when = delta === null ? '' : delta >= 0 ? `dans ${fmtDur(delta)}` : `publiée +${fmtDur(delta)}`
   return (
-    <div className={cn('flex h-full items-center gap-1.5 border-x px-2 text-xxs font-bold tabular-nums', cfg.cls)}
+    <div className={cn('flex h-full items-center gap-1.5 px-2 text-xxs font-bold tabular-nums', cfg.cls)}
       title="Régime macro (Risk Guard déterministe, câblé à Phase 0 — CLAUDE §2.2/§2.4)" aria-live="polite">
-      <cfg.Icon size={13} aria-hidden />
-      {ev?.name && <span className="font-mono">{ev.name}{when && ` ${when}`}</span>}
-      <span className="tracking-wide">· {cfg.label}</span>
+      <cfg.Icon size={cfg.strong ? 14 : 13} aria-hidden className={cfg.pulse ? 'animate-pulse' : undefined} />
+      {ev?.name && <span className="font-mono font-normal">{ev.name}{when && ` ${when}`}</span>}
+      {cfg.strong && <span className="tracking-wide">· {cfg.label}</span>}
     </div>
   )
 }

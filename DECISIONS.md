@@ -1280,6 +1280,24 @@ bornes exactes du blackout (t−15m, t, t+15m).
   parsées/garbage, bool→None, ts string écarté, absence) ; **242 passed**, ruff clean ; `tsc` +
   `vite build` OK ; essai Playwright 6 pathologies → **0 erreur JS**, UI réactive.
 
+### /polish D-040 — densité MCAL, badge Zone 0, lisibilité des surprises
+Loop 5 sur le rendu (aucune logique métier touchée). 3 axes :
+- **Densité & alignement (MCAL)** : numériques ALIGNÉS À DROITE (`text-right` explicite), jauge
+  d'impact CENTRÉE, `actual`/`surprise` en gras (le résultat prime). **Hiérarchie passé/à venir**
+  nette : séparateur « ▸ MAINTENANT » (or) inséré au basculement chrono, passé estompé (opacity-40),
+  **prochaine échéance** surlignée (fond `term-grid`). Nom tronqué proprement (`truncate` + title).
+- **Visibilité badge Zone 0** : critique = attention immédiate, calme = discret. EXECUTION_PAUSED →
+  fond `risk-red/20` + bordure + **icône pulsée** (`animate-pulse`) ; WARNING → fond `risk-yellow/15`
+  + bordure ; NORMAL → **sans fond ni bordure** (vert estompé, label masqué) → ne surcharge pas.
+  Régime encodé couleur + glyphe (⏸/△/📅) + texte (§3).
+- **Lisibilité des surprises (WCAG)** : ▲ dépasse consensus (vert) / ▼ sous consensus (rouge),
+  **gras + fond teinté** (0.10) → colonne de « beats/misses » lue en une fraction de seconde ;
+  contraste MESURÉ sur fond réel **▲ 9.99 · ▼ 6.94** (≥ 4.5:1, texte WCAG 1.4.3) ; glyphe + signe +
+  couleur + infobulle (« dépasse le consensus ») — jamais la couleur seule (§3).
+- **Vérif** : `tsc` + `vite build` OK ; essai Playwright `/polish` (contraste ≥ 4.5:1 mesuré,
+  séparateur MAINTENANT, badge PAUSED fort `bg 0.2`+bordure / WARNING `0.15` / NORMAL transparent)
+  → **0 erreur JS** + captures (MCAL, badges PAUSED/WARNING/NORMAL).
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.

@@ -4,6 +4,7 @@
  *  texte, jamais la couleur seule §3), consensus/previous/actual + ÉCART de surprise (signé). Les
  *  annonces HIGH dans la fenêtre blackout ±15 min sont surlignées (elles pilotent le Risk Guard →
  *  Phase 0). LECTURE SEULE (§2.1). FAIL-CLOSED (§3) : périmé → FIGÉ ; vide → « PAS DE DONNÉES ». */
+import { Fragment } from 'react'
 import { cn } from '@/lib/utils'
 import { serverNow, useTerminal } from '@/store/terminal'
 import { Panel } from '@/components/ui/panel'
@@ -38,6 +39,8 @@ export function MacroCalendarPanel() {
     ? mc!.value!.events.filter((e): e is MacroRelease => !!e && typeof e === 'object')
     : []
   const noData = fresh === 'ABSENT' || events.length === 0
+  // divide passé / à venir : index du 1er événement futur (les events sont triés chrono)
+  const firstFuture = events.findIndex((e) => Number.isFinite(e.ts) && e.ts - now >= 0)
 
   return (
     <Panel code="MCAL" title="Calendrier économique" block="macro_calendar" accent="none" owner="S1 + S2"
@@ -61,26 +64,37 @@ export function MacroCalendarPanel() {
               const delta = Number.isFinite(e.ts) ? e.ts - now : NaN
               const past = delta < 0
               const blackout = e.impact === 'HIGH' && Number.isFinite(delta) && Math.abs(delta) <= PAUSE_WINDOW
+              const next = i === firstFuture && !blackout           // prochaine échéance à venir
               const sur = e.surprise
               return (
-                <tr key={i} className={cn('border-t border-term-border/40',
-                  blackout && 'bg-risk-red/10', !blackout && past && 'opacity-45')}>
-                  <td className={cn('px-1 text-left', blackout ? 'font-bold text-risk-red' : 'text-term-text')}>
-                    {!Number.isFinite(delta) ? '·' : past ? `+${fmtDur(delta)}` : fmtDur(delta)}
-                    {blackout && <span title="Fenêtre blackout ±15 min — Phase 0 BLOCKED"> ⏸</span>}
-                  </td>
-                  <td className={cn('px-1 text-center', imp.cls)} title={imp.label}>{imp.dots}</td>
-                  <td className="px-1 text-left text-term-text">
-                    {e.name}<span className="text-term-faint"> {e.country ?? ''}</span>
-                  </td>
-                  <td className="px-1 text-term-dim">{num(e.previous)}</td>
-                  <td className="px-1 text-term-dim">{num(e.consensus)}</td>
-                  <td className={cn('px-1', e.actual != null ? 'text-term-text' : 'text-term-faint')}>{num(e.actual)}</td>
-                  <td className={cn('px-1', sur == null ? 'text-term-faint'
-                    : sur > 0 ? 'text-risk-green' : sur < 0 ? 'text-risk-red' : 'text-term-dim')}>
-                    {sur != null && sur > 0 && <span aria-hidden>▲</span>}{sur != null && sur < 0 && <span aria-hidden>▼</span>}{signed(sur)}
-                  </td>
-                </tr>
+                <Fragment key={i}>
+                  {/* séparateur MAINTENANT — divide net passé (au-dessus, estompé) / à venir */}
+                  {i === firstFuture && firstFuture > 0 && (
+                    <tr aria-hidden><td colSpan={7} className="border-t border-router/50 px-1 py-px text-center text-xxs font-bold tracking-widest text-router">▸ MAINTENANT</td></tr>
+                  )}
+                  <tr className={cn('border-t border-term-border/40',
+                    blackout && 'bg-risk-red/10', next && 'bg-term-grid/40',
+                    !blackout && past && 'opacity-40')}>
+                    <td className={cn('whitespace-nowrap px-1 text-left tabular-nums',
+                      blackout ? 'font-bold text-risk-red' : next ? 'font-semibold text-term-text' : 'text-term-dim')}>
+                      {!Number.isFinite(delta) ? '·' : past ? `+${fmtDur(delta)}` : fmtDur(delta)}
+                      {blackout && <span title="Fenêtre blackout ±15 min — Phase 0 BLOCKED"> ⏸</span>}
+                    </td>
+                    <td className={cn('px-1 text-center tracking-tighter', imp.cls)} title={imp.label}>{imp.dots}</td>
+                    <td className="max-w-0 truncate px-1 text-left text-term-text" title={e.name}>
+                      {e.name}<span className="text-term-faint"> {e.country ?? ''}</span>
+                    </td>
+                    <td className="px-1 text-right text-term-dim">{num(e.previous)}</td>
+                    <td className="px-1 text-right text-term-dim">{num(e.consensus)}</td>
+                    <td className={cn('px-1 text-right', e.actual != null ? 'font-semibold text-term-text' : 'text-term-faint')}>{num(e.actual)}</td>
+                    <td className={cn('px-1 text-right font-semibold', sur == null ? 'font-normal text-term-faint'
+                      : sur > 0 ? 'bg-[rgba(52,211,153,0.10)] text-risk-green'
+                        : sur < 0 ? 'bg-[rgba(248,113,113,0.10)] text-risk-red' : 'text-term-dim')}
+                      title={sur == null ? 'surprise indisponible' : sur > 0 ? 'dépasse le consensus' : sur < 0 ? 'sous le consensus' : 'conforme'}>
+                      {sur != null && sur > 0 && <span aria-hidden>▲</span>}{sur != null && sur < 0 && <span aria-hidden>▼</span>}{signed(sur)}
+                    </td>
+                  </tr>
+                </Fragment>
               )
             })}
           </tbody>
