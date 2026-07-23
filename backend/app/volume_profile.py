@@ -18,10 +18,14 @@ def _finite(x) -> bool:
 
 
 def build_volume_profile(volume_by_price, tick: float, va_pct: float,
-                         lvn_ratio: float, max_levels: int) -> dict:
+                         lvn_ratio: float, max_levels: int, buy_by_price=None) -> dict:
     """Construit le profil depuis une distribution `{prix: volume}`. Retourne `{tick, va_pct,
     total_volume, poc, vah, val, levels: [{price, volume}], lvn: [prix]}`. `levels` = grille
-    CONTIGUË (lacunes à 0) triée prix croissant ; POC/VAH/VAL/lvn = prix."""
+    CONTIGUË (lacunes à 0) triée prix croissant ; POC/VAH/VAL/lvn = prix.
+
+    `buy_by_price` (optionnel, source-backed depuis `side` du tape) : quand fourni, chaque niveau
+    porte AUSSI `buy`/`sell` (vendeur = total − acheteur, borné ≥ 0, fail-safe §3). Absent par
+    défaut → aucune valeur acheteur/vendeur INVENTÉE (§3)."""
     empty = {"tick": tick, "va_pct": va_pct, "total_volume": 0.0, "poc": None,
              "vah": None, "val": None, "levels": [], "lvn": []}
     if tick <= 0 or not isinstance(volume_by_price, dict):
@@ -36,6 +40,14 @@ def build_volume_profile(volume_by_price, tick: float, va_pct: float,
         kvol[k] = kvol.get(k, 0.0) + float(vol)
     if not kvol:
         return empty
+
+    # 1b) volume ACHETEUR par niveau (optionnel, même grille) — vendeur = total − acheteur
+    kbuy: dict[int, float] = {}
+    if isinstance(buy_by_price, dict):
+        for price, vol in buy_by_price.items():
+            if not (_finite(price) and _finite(vol) and vol > 0):
+                continue
+            kbuy[round(float(price) / tick)] = kbuy.get(round(float(price) / tick), 0.0) + float(vol)
 
     # 2) POC = volume max (égalité → k le plus bas = prix le plus bas, déterministe)
     poc_k = max(sorted(kvol), key=lambda k: kvol[k])
@@ -73,10 +85,17 @@ def build_volume_profile(volume_by_price, tick: float, va_pct: float,
         if v < grid[i - 1][1] and v < grid[i + 1][1] and v <= lvn_thresh:
             lvn.append(round(k * tick, 10))
 
+    def _level(k: int, v: float) -> dict:
+        d = {"price": round(k * tick, 10), "volume": v}
+        if buy_by_price is not None:                # split acheteur/vendeur seulement si fourni
+            buy = min(kbuy.get(k, 0.0), v)          # borné au total (vendeur jamais négatif §3)
+            d["buy"], d["sell"] = buy, v - buy
+        return d
+
     return {
         "tick": tick, "va_pct": va_pct, "total_volume": total,
         "poc": round(poc_k * tick, 10),
         "vah": round(va_hi * tick, 10), "val": round(va_lo * tick, 10),
-        "levels": [{"price": round(k * tick, 10), "volume": v} for k, v in grid],
+        "levels": [_level(k, v) for k, v in grid],
         "lvn": lvn,
     }

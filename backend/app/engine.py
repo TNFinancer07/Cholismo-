@@ -228,6 +228,7 @@ class Engine:
         self._cs_prints: deque = deque(maxlen=config.CVD_STRAT_MAX_PRINTS)  # buffer prints CVD stratifié (D-038)
         self._cs_last_seq: int = 0
         self._vp_levels: dict[int, float] = {}   # Volume Profile : k(prix) → volume accumulé (D-041)
+        self._vp_buy: dict[int, float] = {}      # k(prix) → volume ACHETEUR accumulé (side=BUY du tape)
         self._vp_last_seq: int = 0
         self._vp_prev: Optional[dict] = None     # snapshot POC/VAH/VAL de la session précédente
         self._vp_session_day: Optional[int] = None
@@ -467,6 +468,7 @@ class Engine:
                                         config.VP_MAX_LEVELS)
             self._vp_prev = {"poc": prof["poc"], "vah": prof["vah"], "val": prof["val"]}
             self._vp_levels = {}
+            self._vp_buy = {}
             self._vp_last_seq = 0
             self._vp_session_day = day
 
@@ -483,12 +485,15 @@ class Engine:
                         and isinstance(size, (int, float)) and math.isfinite(size) and size > 0:
                     k = round(float(price) / config.PRICE_TICK)
                     self._vp_levels[k] = self._vp_levels.get(k, 0.0) + float(size)
+                    if p.get("side") == "BUY":                # split acheteur source-backed (§3)
+                        self._vp_buy[k] = self._vp_buy.get(k, 0.0) + float(size)
                 new_max = max(new_max, seq)
             self._vp_last_seq = new_max
 
         value = build_volume_profile({k * config.PRICE_TICK: v for k, v in self._vp_levels.items()},
                                      config.PRICE_TICK, config.VP_VA_PCT, config.VP_LVN_RATIO,
-                                     config.VP_MAX_LEVELS)
+                                     config.VP_MAX_LEVELS,
+                                     buy_by_price={k * config.PRICE_TICK: v for k, v in self._vp_buy.items()})
         # previous : snapshot propre (session précédente) sinon niveaux fournis par la source
         prev = self._vp_prev
         if prev is None and isinstance(session_prev.value, dict):

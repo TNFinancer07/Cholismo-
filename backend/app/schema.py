@@ -156,7 +156,9 @@ class S1State(BaseModel):
     cvd_stratified: MetaField = Field(default_factory=MetaField)
     # Volume Profile dynamique (D-041) — DISTRIBUTION auto-calculée du volume par prix sur la
     # session (distinct des scalaires source `structure.*`). value: {tick, va_pct, total_volume,
-    # poc, vah, val, levels: [{price, volume}], lvn: [prix], previous: {poc, vah, val} | null}.
+    # poc, vah, val, levels: [{price, volume, buy?, sell?}], lvn: [prix], previous: {poc, vah, val}
+    # | null}. `buy`/`sell` (split acheteur/vendeur, source `side` du tape) présents seulement si
+    # fournis — jamais inventés (§3). Lecture seule (§2.1).
     volume_profile: MetaField = Field(default_factory=MetaField)
     # The two REAL Sony execution strategies (reference/sony/*), evaluated live (D-021).
     strategies: Optional[S1Strategies] = None

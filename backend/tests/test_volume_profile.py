@@ -137,3 +137,36 @@ def test_bool_volume_ignored():
     # bool est un int en Python → ne doit pas compter comme volume
     r = _vp({100: True, 101: 40})
     assert r["poc"] == 101 and r["total_volume"] == 40
+
+
+# ---------- /polish (D-041) : split acheteur/vendeur (source-backed) pour le tooltip ----------
+# Le tape porte `side` (BUY|SELL) : le volume acheteur par niveau est une donnée RÉELLE (§3),
+# propagée de façon ADDITIVE (absente par défaut → rétrocompat). Le vendeur = total − acheteur.
+
+
+def test_buy_sell_split_when_provided():
+    r = build_volume_profile({100: 50, 101: 30}, TICK, VA, LVN_R, MAXL,
+                             buy_by_price={100: 20, 101: 25})
+    lv = {lvl["price"]: lvl for lvl in r["levels"]}
+    assert lv[100]["buy"] == 20 and lv[100]["sell"] == 30      # sell = 50 − 20
+    assert lv[101]["buy"] == 25 and lv[101]["sell"] == 5        # sell = 30 − 25
+
+
+def test_buy_sell_absent_when_not_provided():
+    # rétrocompat : sans buy_by_price, les niveaux ne portent PAS buy/sell (aucune valeur inventée)
+    r = _vp({100: 50})
+    assert "buy" not in r["levels"][0] and "sell" not in r["levels"][0]
+
+
+def test_buy_clamped_to_total_volume():
+    # garde-fou fail-safe (§3) : acheteur incohérent > total → borné, vendeur jamais négatif
+    r = build_volume_profile({100: 40}, TICK, VA, LVN_R, MAXL, buy_by_price={100: 999})
+    lv = r["levels"][0]
+    assert lv["buy"] == 40 and lv["sell"] == 0
+
+
+def test_buy_side_non_finite_ignored():
+    r = build_volume_profile({100: 50}, TICK, VA, LVN_R, MAXL,
+                             buy_by_price={100: float("nan"), float("inf"): 5})
+    lv = r["levels"][0]
+    assert lv["buy"] == 0 and lv["sell"] == 50                  # acheteur non-fini ignoré

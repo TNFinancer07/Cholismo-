@@ -162,8 +162,8 @@ export interface CvdStratifiedValue {
   divergence: CvdDivergence | null
 }
 
-// Volume Profile dynamique (D-041)
-export interface VolumeLevel { price: number; volume: number }
+// Volume Profile dynamique (D-041) — buy/sell présents seulement si la source les fournit (§3)
+export interface VolumeLevel { price: number; volume: number; buy?: number; sell?: number }
 export interface VolumeProfileValue {
   tick: number
   va_pct: number

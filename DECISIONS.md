@@ -1353,6 +1353,31 @@ afflux massif de ticks.
   unique, non-finis, scalaires non-finis, plate, massif+aberrant, non-tableau/vide, resize extrême)
   → **0 erreur JS**, UI réactive.
 
+### /polish D-041 — Retina/DPR, hiérarchie POC/VA, tooltip acheteur/vendeur
+Trois axes demandés : (1) rendu Retina/High-DPI net, (2) contraste & ergonomie Value Area + POC +
+veille, (3) tooltip de survol (prix, volume, part % session, split acheteur/vendeur).
+- **DPR exact (crispness)** : buffer canvas = `round(cssW × devicePixelRatio)` + `setTransform(dpr…)` ;
+  remplissages sur bornes ENTIÈRES (`Math.round`), traits 1px sur demi-pixels (`R(y)+0.5`). Essai :
+  `c.width === round(cssW × dpr)` **vrai** en live, étiré 2400×1400, et minuscule (largeur exacte ;
+  hauteur repliée proprement par la garde `H<4`, aucun crash).
+- **Hiérarchie visuelle** (jamais la couleur seule §3 — position + libellé aussi) : POC (barre + trait
+  OR épais, 1er plan) > Value Area (barres SKY + bande + **bornes VAH/VAL tracées**) > hors-VA (slate
+  atténué) ; veille = traits VIOLET tiretés libellés `yPOC/yVAH/yVAL` ; LVN = `◄` AMBRE.
+- **Tooltip de survol** (interactif, réticule horizontal + surbrillance de la barre, bornes entières) :
+  `prix`, `volume` (compact k/M), **`part` = % du volume total de session**, et — si la source le
+  fournit — `ach`/`vend` (split acheteur/vendeur). Tag POC / VALUE AREA / LVN en tête. Boîte COMPACTE
+  (9px, interligne 11) → tient dans un panneau court, `ach`/`vend` jamais rognés (couverture 8/8 au
+  balayage vertical). Bascule côté / clamp vertical pour ne jamais déborder du canvas.
+- **Split acheteur/vendeur — donnée RÉELLE, jamais inventée (§3)** : le tape porte `side` (BUY|SELL) ;
+  extension ADDITIVE & rétrocompatible de `build_volume_profile(…, buy_by_price=None)` (défaut absent
+  → aucun `buy`/`sell`, 0 test cassé), engine accumule `_vp_buy` par niveau, vendeur = total − acheteur
+  (borné ≥ 0, fail-safe). Sans donnée source, le tooltip **omet** ach/vend (essai : teal ABSENT confirmé)
+  plutôt que d'afficher un faux split. +4 tests (split, absence par défaut, clamp, non-fini ignoré).
+- **Vérif** : **266 passed** (Redis up), ruff clean ; check d'intégration réel engine→builder
+  (buy+sell = volume, source-backed, freshness propagée) ; `tsc` + `vite build` OK ; essai Playwright
+  (SSE gelé) — DPR exact, POC/VA rendus, tooltip 8/8 positions, split omis sans source, resize extrême
+  borné, **0 erreur JS** ; capture à l'appui.
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.
