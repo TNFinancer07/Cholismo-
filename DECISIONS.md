@@ -1329,6 +1329,30 @@ Profil volumétrique auto-calculé (POC / Value Area 70 % / VAH·VAL / LVN / vei
 - **Hors-scope (une feature = un commit)** : profils composites multi-sessions ; TPO/Market Profile
   par lettres ; naked POC (POC non-testés) ; split VA au-dessus/en-dessous ; delta par niveau.
 
+### /devil D-041 — conditions limites
+Attaques : distribution plate/uniforme (aucun POC net) · pic unique · prix aberrants · volumes
+négatifs/nuls · reset de session + accumulation massive · Canvas 0×0/étiré + niveaux non-finis ·
+afflux massif de ticks.
+- **Backend robuste (aucun bug — +7 tests)** : distribution PLATE → POC = prix bas déterministe,
+  aucun LVN strict, VA cohérente ; pic unique → POC seul ≥ 70 % → VA = {POC} ; volume ≤ 0 / bool
+  ignoré ; tick ≤ 0 ou entrée non-dict → profil vide (fail-closed §3) ; **massif 5000 niveaux** →
+  borné à `VP_MAX_LEVELS`, valeurs finies. L'accumulation moteur est bornée par le NOMBRE DE
+  NIVEAUX (dict, pas de prints) → un afflux massif de ticks ne fait grossir que ~centaines de
+  niveaux (crash-test structurellement impossible). Reset de session : snapshot POC/VAH/VAL →
+  `previous` puis clear au changement de jour (dict + seq re-baseline).
+- **1 bug RÉEL frontend trouvé & corrigé** : un profil à NIVEAU UNIQUE (`pmax == pmin`, début de
+  session) faisait retourner `draw` (division `/(pmax−pmin)` évitée) → **canvas VIDE sans message**
+  (`levels.length > 0` → pas de « PAS DE DONNÉES »). Corrigé : cas `flat` → barre CENTRÉE, jamais
+  un canvas muet.
+- **Chemins déjà sûrs confirmés** (essai Playwright SSE gelé, **0 erreur JS**) : niveaux
+  NaN/Inf/null/non-objet filtrés (`Number.isFinite` + typeof) ; POC/VAH/VAL/veille non-finis gardés
+  (`Number.isFinite` avant tout tracé) ; LVN hors-plage/NaN ignoré ; `levels` non-tableau/vide →
+  PAS DE DONNÉES ; prix aberrant 1e9 → hauteur bornée ; resize 0×0 (`W<4||H<4`) et étiré → OK.
+- **Vérif** : +7 tests backend (plate, pic unique, vol ≤ 0, tick ≤ 0, non-dict, massif 5000, bool) ;
+  **255 passed**, ruff clean ; `tsc` + `vite build` OK ; essai Playwright 8 pathologies (niveau
+  unique, non-finis, scalaires non-finis, plate, massif+aberrant, non-tableau/vide, resize extrême)
+  → **0 erreur JS**, UI réactive.
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.

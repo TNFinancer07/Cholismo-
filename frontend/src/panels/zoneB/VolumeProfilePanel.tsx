@@ -30,10 +30,12 @@ function draw(canvas: HTMLCanvasElement, vp: VolumeProfileValue | null | undefin
     if (l.price < pmin) pmin = l.price; if (l.price > pmax) pmax = l.price
     if (l.volume > maxVol) maxVol = l.volume
   }
-  if (!(pmax > pmin) || !(maxVol > 0)) return
+  if (!(maxVol > 0)) return
   const plotW = W - PAD_L - PAD_R, plotH = H - PAD_T - PAD_B
-  const yOf = (price: number) => PAD_T + ((pmax - price) / (pmax - pmin)) * plotH
-  const rowH = Math.max(1, plotH / levels.length)
+  // /devil : niveau unique (pmax==pmin, début de session) → barre centrée, jamais un canvas vide
+  const flat = !(pmax > pmin)
+  const yOf = (price: number) => flat ? PAD_T + plotH / 2 : PAD_T + ((pmax - price) / (pmax - pmin)) * plotH
+  const rowH = flat ? Math.min(plotH, 22) : Math.max(1, plotH / levels.length)
   const barW = (v: number) => Math.max(0, (v / maxVol) * plotW)
   const tick = vp?.tick && vp.tick > 0 ? vp.tick : 0.25
 

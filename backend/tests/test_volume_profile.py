@@ -90,3 +90,50 @@ def test_empty_distribution():
 def test_aberrant_far_price_bounded():
     r = build_volume_profile({100: 50, 1_000_000: 10}, TICK, VA, LVN_R, max_levels=50)
     assert len(r["levels"]) <= 50 and r["poc"] == 100       # fenêtre bornée autour du POC
+
+
+# ---------- /devil (D-041) : conditions limites ----------
+
+import math  # noqa: E402
+
+
+def test_uniform_flat_distribution_no_crash():
+    # distribution PLATE (aucun POC net) → POC = prix bas (déterministe), aucun LVN strict, pas de crash
+    r = _vp({100: 10, 101: 10, 102: 10, 103: 10})
+    assert r["poc"] == 100 and r["lvn"] == [] and r["total_volume"] == 40
+    assert r["val"] <= r["poc"] <= r["vah"]                  # VA cohérente
+
+
+def test_single_peak_va_is_poc_only():
+    # pic unique : le POC seul dépasse déjà 70 % → VA = {POC}, aucune extension
+    r = _vp({100: 5, 101: 5, 102: 1000, 103: 5})
+    assert r["poc"] == 102 and r["vah"] == 102 and r["val"] == 102
+
+
+def test_negative_and_zero_volume_ignored():
+    r = _vp({100: 50, 101: -10, 102: 0})                    # vol ≤ 0 → ignoré (fail-closed §3)
+    assert r["poc"] == 100 and r["total_volume"] == 50 and len(r["levels"]) == 1
+
+
+def test_zero_or_negative_tick_returns_empty():
+    assert build_volume_profile({100: 50}, 0.0, VA, LVN_R, MAXL)["poc"] is None
+    assert build_volume_profile({100: 50}, -0.25, VA, LVN_R, MAXL)["poc"] is None
+
+
+def test_non_dict_input_returns_empty():
+    assert build_volume_profile([(100, 50)], TICK, VA, LVN_R, MAXL)["poc"] is None
+    assert build_volume_profile(None, TICK, VA, LVN_R, MAXL)["levels"] == []
+
+
+def test_massive_distribution_bounded_and_finite():
+    dist = {100 + i * 0.25: (i % 50) + 1 for i in range(5000)}   # 5000 niveaux, gros volumes
+    r = build_volume_profile(dist, 0.25, VA, LVN_R, max_levels=400)
+    assert len(r["levels"]) <= 400
+    assert math.isfinite(r["total_volume"]) and math.isfinite(r["poc"])
+    assert all(math.isfinite(lvl["price"]) and math.isfinite(lvl["volume"]) for lvl in r["levels"])
+
+
+def test_bool_volume_ignored():
+    # bool est un int en Python → ne doit pas compter comme volume
+    r = _vp({100: True, 101: 40})
+    assert r["poc"] == 101 and r["total_volume"] == 40
