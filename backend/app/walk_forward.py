@@ -88,12 +88,17 @@ class WalkForwardEngine:
             n_is = max(1, min(w - 1, round(self.is_frac * w)))             # borné → n_oos ≥ 1
             is_seg, oos_seg = seg[:n_is], seg[n_is:]
             is_profit, oos_profit = sum(is_seg), sum(oos_seg)
-            if is_profit > 0:                                              # WFE défini
-                wfe = (oos_profit / len(oos_seg)) / (is_profit / n_is)
+            if is_profit > 0 and math.isfinite((oos_profit / len(oos_seg)) / (is_profit / n_is)):
+                wfe = (oos_profit / len(oos_seg)) / (is_profit / n_is)      # WFE défini ET fini
                 windows.append(WalkForwardWindow(
                     start=start, n_is=n_is, n_oos=len(oos_seg),
                     is_profit=round(is_profit, 6), oos_profit=round(oos_profit, 6),
                     wfe=round(wfe, 6), overfit=wfe < self.threshold))
+            elif is_profit > 0:                                            # /devil : overflow → nan → indéterminé (§3)
+                windows.append(WalkForwardWindow(
+                    start=start, n_is=n_is, n_oos=len(oos_seg),
+                    is_profit=is_profit, oos_profit=oos_profit,
+                    wfe=None, overfit=None, reason="UNDEFINED"))
             else:                                                         # IS non profitable → indéfini (§3)
                 windows.append(WalkForwardWindow(
                     start=start, n_is=n_is, n_oos=len(oos_seg),

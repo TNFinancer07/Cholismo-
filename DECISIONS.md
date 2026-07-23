@@ -1433,6 +1433,28 @@ réconciliée.
   backtest réelle existera. Note : l'import NT8 existant est **CSV** (`trade_reconciliator`), le
   cahier D-043 cite du JSON → parseur découplé à prévoir.
 
+### /devil D-043 — pathologies backend (Monte Carlo & Walk-Forward)
+Attaques : séries 0/1 trade, Inf/NaN/types mixtes, **charge 10 000×10 000**, seuils DD aberrants
+(négatif/nul/absent/Inf), distributions à queue lourde (cygnes noirs).
+- **2 bugs RÉELS trouvés & corrigés :**
+  1. **Hang CPU (mesuré)** : 10 000 trades × 10 000 sims = 1e8 itérations Python pur → **> 125 s**
+     (worker d'endpoint synchrone « pendu »). Corrigé : **borne `MC_MAX_WORK` (2e6)** → réduit
+     `n_sims` pour tenir le budget, `capped=True` reporté (jamais silencieux). **125 s → 0,60 s**,
+     `n_sims=200`. Le cas réel (≤ 200 trades réconciliés) garde les 10 000 sims.
+  2. **Overflow silencieux → faux 0** : `max_drawdown([1e308,1e308,-1e308])` renvoyait **0.0** car
+     `inf−inf=nan` et `nan>mdd` est False (valeur inventée, §3 violé). Corrigé : `max_drawdown`
+     renvoie `inf` sur overflow ; le simulateur **exclut** toute sim non-finie (tout exclu →
+     `INSUFFICIENT_DATA`, jamais un p95 fabriqué) ; WF renvoie `wfe=None` (`UNDEFINED`) si `inf/inf`.
+- **Mémoire : aucune fuite** (pic 0,05 MB — `dds` = `n_sims` floats, bornée par les sims pas le
+  produit).
+- **Chemins déjà sûrs confirmés** : 0/1 trade → INSUFFICIENT_DATA ; Inf/NaN/str/None/bool/list →
+  filtrés (`_finite`) ; seuil négatif/nul/None/Inf → `prob_exceed=None` (jamais fabriqué), mais la
+  distribution reste calculée ; fat-tails → P50 ≤ P95 ≤ P99 monotones, la queue extrême (cygne noir
+  −100 R) est **captée par P99** ; réglage `risk.max_drawdown_r_day` corrompu/absent → seuil None
+  (pas de crash de l'endpoint).
+- **Vérif** : +9 tests /devil (0/1 trade, types mixtes, seuils aberrants, borne CPU, overflow, fat-tail
+  MC ; overflow/types/vide WF) ; **281 passed**, ruff clean.
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.

@@ -108,3 +108,55 @@ def test_projection_insufficient_when_few_reconciled():
     outcomes = [{"decision_id": "d0", "r_multiple": 1.0}]
     recons = [{"decision_id": "d0", "matched": True}]
     assert monte_carlo(_StubStore(outcomes, recons))["verdict"] == "INSUFFICIENT_DATA"
+
+
+# ---------- /devil (D-043) : pathologies backend ----------
+
+import math  # noqa: E402
+
+
+def test_devil_zero_and_single_trade():
+    assert MonteCarloSimulator(n_sims=100, threshold=2.0, seed=1).run([]).verdict == "INSUFFICIENT_DATA"
+    assert MonteCarloSimulator(n_sims=100, threshold=2.0, min_trades=4, seed=1).run(
+        [1.0]).verdict == "INSUFFICIENT_DATA"
+
+
+def test_devil_mixed_types_filtered():
+    # types mixtes : str/None/bool/list/objet retirés → ne restent que les floats finis (§3)
+    r = [1.0, "2", None, True, [1, 2], {"x": 1}, -1.0, 0.5, -0.5, 1.0, -1.0, 0.3]
+    res = MonteCarloSimulator(n_sims=200, threshold=2.0, seed=1).run(r)
+    assert res.verdict == "OK" and res.n_trades == 7       # 7 floats finis conservés
+
+
+def test_devil_aberrant_thresholds_prob_none():
+    r = [1.0, -2.0, 1.0, -1.0, 0.5, -0.5, 1.0, -1.5]
+    for bad in (-3.0, 0.0, None, float("inf"), float("nan")):
+        res = MonteCarloSimulator(n_sims=300, threshold=bad, seed=2).run(r)
+        assert res.prob_exceed is None                     # seuil aberrant → jamais de proba fabriquée
+        assert res.max_dd_p95 is not None                  # mais la distribution reste calculée
+
+
+def test_devil_compute_budget_caps_nsims():
+    # entrée énorme : 1000 trades × 10000 sims bornée par max_work → n_sims RÉDUIT, jamais un hang
+    r = [0.1 if i % 2 else -0.1 for i in range(1000)]
+    res = MonteCarloSimulator(n_sims=10000, threshold=2.0, seed=1, max_work=100_000).run(r)
+    assert res.capped is True and res.n_sims == 100        # 100_000 // 1000
+    assert res.verdict == "OK" and res.max_dd_p50 <= res.max_dd_p95 <= res.max_dd_p99
+
+
+def test_devil_overflow_no_fake_zero():
+    # overflow (somme → inf) : la fonction pure renvoie inf (pas un faux 0), le simulateur EXCLUT
+    assert math.isinf(max_drawdown([1e308, 1e308, -1e308]))     # jamais 0.0 masqué par nan
+    # même signe → CHAQUE rééchantillon déborde dès le 2e tirage → tout exclu
+    res = MonteCarloSimulator(n_sims=50, threshold=2.0, seed=1).run([1e308] * 4)
+    assert res.verdict == "INSUFFICIENT_DATA"              # tout exclu → jamais un p95 inventé
+    assert res.max_dd_p95 is None
+
+
+def test_devil_fat_tail_percentiles_capture_black_swan():
+    # cygne noir : 99 gains 0.1 + 1 perte -100 → distribution MaxDD à queue lourde, P99 la capture
+    r = [0.1] * 99 + [-100.0]
+    res = MonteCarloSimulator(n_sims=5000, threshold=50.0, seed=7).run(r)
+    assert res.max_dd_p50 <= res.max_dd_p95 <= res.max_dd_p99      # monotone, jamais désordonné
+    assert res.max_dd_p99 >= 100                                   # la queue extrême est captée
+    assert 0.0 < res.prob_exceed <= 1.0                            # proba de dépasser 50 R non nulle

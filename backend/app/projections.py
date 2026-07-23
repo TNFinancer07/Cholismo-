@@ -95,9 +95,13 @@ def monte_carlo(store: EventStore) -> dict[str, Any]:
     from . import settings
     from .monte_carlo import MonteCarloSimulator
     rs = _reconciled_r_multiples(store)
-    threshold = float(settings.value("risk.max_drawdown_r_day"))
+    try:                                                   # réglage corrompu/absent → seuil None
+        threshold = float(settings.value("risk.max_drawdown_r_day"))
+    except (TypeError, ValueError):
+        threshold = None
     sim = MonteCarloSimulator(n_sims=config.MC_N_SIMS, threshold=threshold,
-                              min_trades=config.MC_MIN_TRADES, seed=config.MC_SEED)
+                              min_trades=config.MC_MIN_TRADES, seed=config.MC_SEED,
+                              max_work=config.MC_MAX_WORK)
     return sim.run(rs).model_dump()
 
 

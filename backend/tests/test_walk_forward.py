@@ -121,3 +121,25 @@ def test_projection_ignores_unmatched_and_none_r():
     recons = [{"decision_id": "d0", "matched": True}, {"decision_id": "d2", "matched": False}]
     res = walk_forward(_StubStore(outcomes, recons))
     assert res["verdict"] == "INSUFFICIENT_DATA"               # 1 seul r valide < WF_MIN_TRADES
+
+
+# ---------- /devil (D-043) : pathologies backend ----------
+
+
+def test_devil_wf_overflow_wfe_none():
+    # overflow : IS et OOS somment à inf → inf/inf = nan → WFE indéterminé (None), jamais un nan émis
+    r = [1e308] * 7 + [1e308] * 3
+    res = WalkForwardEngine(is_frac=0.7, window=10).run(r)
+    w = res.windows[0]
+    assert w.wfe is None and w.overfit is None and w.reason == "UNDEFINED"
+
+
+def test_devil_wf_mixed_types_and_non_finite_filtered():
+    r = [float("nan"), "boom", None, True, [1]] + [1.0] * 7 + [0.4, 0.4, 0.4] + [float("inf")]
+    res = WalkForwardEngine(is_frac=0.7, window=10).run(r)     # tout non-float fini retiré → 10
+    assert res.n_windows == 1 and abs(res.windows[0].wfe - 0.4) < 1e-9
+
+
+def test_devil_wf_zero_and_single_trade():
+    assert WalkForwardEngine(window=10).run([]).verdict == "INSUFFICIENT_DATA"
+    assert WalkForwardEngine(window=10, min_trades=4).run([1.0]).verdict == "INSUFFICIENT_DATA"

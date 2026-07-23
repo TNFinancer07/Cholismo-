@@ -23,10 +23,14 @@ def _finite(x) -> bool:
 
 def max_drawdown(returns) -> float:
     """Max Drawdown (magnitude ≥ 0) de la courbe d'équité cumulée. Le pic inclut le 0 initial :
-    une perte d'ouverture depuis 0 compte déjà comme drawdown (pas de biais optimiste)."""
+    une perte d'ouverture depuis 0 compte déjà comme drawdown (pas de biais optimiste).
+    /devil : overflow (somme → ±inf) → `inf` (indéterminé), JAMAIS un faux 0 masqué par `nan`
+    (`inf−inf=nan` et `nan>mdd` est False sinon)."""
     peak = equity = mdd = 0.0
     for r in returns:
         equity += r
+        if not math.isfinite(equity):
+            return math.inf                        # overflow → drawdown indéterminé (§3)
         if equity > peak:
             peak = equity
         dd = peak - equity
@@ -61,6 +65,7 @@ class MonteCarloResult(BaseModel):
     prob_exceed: float | None       # P(MaxDD ≥ threshold) ; None si seuil invalide
     mean_max_dd: float | None
     seed: int | None
+    capped: bool = False            # /devil : n_sims réduit pour tenir le budget CPU (entrée énorme)
 
 
 class MonteCarloSimulator:
@@ -69,26 +74,34 @@ class MonteCarloSimulator:
     - `n_sims` : nombre de rééchantillonnages (5 000–10 000 typique) ;
     - `threshold` : seuil d'invalidation (R, magnitude > 0) — sinon `prob_exceed` None ;
     - `min_trades` : plancher sous lequel → INSUFFICIENT_DATA (jamais un faux nombre §8) ;
-    - `seed` : graine optionnelle → **répétabilité** (None = entropie système)."""
+    - `seed` : graine optionnelle → **répétabilité** (None = entropie système) ;
+    - `max_work` : budget CPU `n_sims × n_trades` (0 = illimité) → /devil : borne le temps de
+      calcul sur entrée énorme en RÉDUISANT n_sims (jamais un hang de worker), réduction reportée."""
 
     def __init__(self, n_sims: int = 10000, threshold: float | None = None,
-                 min_trades: int = 4, seed: int | None = None):
+                 min_trades: int = 4, seed: int | None = None, max_work: int = 0):
         self.n_sims = n_sims
         self.threshold = threshold
         self.min_trades = min_trades
         self.seed = seed
+        self.max_work = max_work
+
+    def _insufficient(self, n: int, thr: float | None) -> MonteCarloResult:
+        return MonteCarloResult(verdict="INSUFFICIENT_DATA", n_sims=0, n_trades=n, threshold=thr,
+                                max_dd_p50=None, max_dd_p95=None, max_dd_p99=None,
+                                prob_exceed=None, mean_max_dd=None, seed=self.seed)
 
     def run(self, returns) -> MonteCarloResult:
         clean = [float(r) for r in (returns or []) if _finite(r)]          # fail-closed §3
         n = len(clean)
         thr = self.threshold if (_finite(self.threshold) and self.threshold > 0) else None
         if n < max(self.min_trades, 2):
-            return MonteCarloResult(verdict="INSUFFICIENT_DATA", n_sims=0, n_trades=n,
-                                    threshold=thr, max_dd_p50=None, max_dd_p95=None,
-                                    max_dd_p99=None, prob_exceed=None, mean_max_dd=None,
-                                    seed=self.seed)
+            return self._insufficient(n, thr)
         rng = random.Random(self.seed)                                     # seed None → entropie
         n_sims = max(1, self.n_sims)
+        capped = bool(self.max_work) and n * n_sims > self.max_work        # borne CPU (entrée énorme)
+        if capped:
+            n_sims = max(1, self.max_work // n)
         randrange = rng.randrange
         dds: list[float] = []
         exceed = 0
@@ -101,14 +114,18 @@ class MonteCarloSimulator:
                 dd = peak - equity
                 if dd > mdd:
                     mdd = dd
+            if not (math.isfinite(equity) and math.isfinite(mdd)):         # overflow → exclu (§3)
+                continue                                                   # jamais un faux 0/nan
             dds.append(mdd)
             if thr is not None and mdd >= thr:
                 exceed += 1
+        if not dds:                                                        # tout exclu (overflow)
+            return self._insufficient(n, thr)
         dds.sort()
         return MonteCarloResult(
-            verdict="OK", n_sims=n_sims, n_trades=n, threshold=thr,
+            verdict="OK", n_sims=len(dds), n_trades=n, threshold=thr,
             max_dd_p50=round(_percentile(dds, 50), 6),
             max_dd_p95=round(_percentile(dds, 95), 6),
             max_dd_p99=round(_percentile(dds, 99), 6),
-            prob_exceed=round(exceed / n_sims, 6) if thr is not None else None,
-            mean_max_dd=round(sum(dds) / len(dds), 6), seed=self.seed)
+            prob_exceed=round(exceed / len(dds), 6) if thr is not None else None,
+            mean_max_dd=round(sum(dds) / len(dds), 6), seed=self.seed, capped=capped)
