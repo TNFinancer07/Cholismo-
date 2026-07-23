@@ -88,6 +88,19 @@ def walk_forward(store: EventStore) -> dict[str, Any]:
     return engine.run(rs).model_dump()
 
 
+def monte_carlo(store: EventStore) -> dict[str, Any]:
+    """Monte Carlo du Max Drawdown (D-043 tranche 2) sur les R-multiples RÉCONCILIÉS. Analyse
+    OFFLINE de recherche — HORS ContextSchema live (§1). Seuil testé = `risk.max_drawdown_r_day`
+    (réglage, source unique). Données insuffisantes → INSUFFICIENT_DATA (jamais fabriqué §8)."""
+    from . import settings
+    from .monte_carlo import MonteCarloSimulator
+    rs = _reconciled_r_multiples(store)
+    threshold = float(settings.value("risk.max_drawdown_r_day"))
+    sim = MonteCarloSimulator(n_sims=config.MC_N_SIMS, threshold=threshold,
+                              min_trades=config.MC_MIN_TRADES, seed=config.MC_SEED)
+    return sim.run(rs).model_dump()
+
+
 def sharpe(store: EventStore) -> dict[str, Any]:
     """Per-trade Sharpe = mean(r)/stdev(r), reconciled outcomes only.
     Result score is displayed ONLY after 20+ trades (CLAUDE §2.7)."""

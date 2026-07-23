@@ -1410,11 +1410,28 @@ aucune source live) sur une série de rendements ordonnée dans le temps.
 - **Vérif** : 13 tests (WFE normalisé, seuil strict, rolling+step, IS non profitable→None, insuffisant,
   non-fini/bool ignorés, fenêtre unique, déterminisme, vide, + 2 projection sur store stub réconcilié) ;
   **261 passed**, ruff clean.
-- **À venir** (tranches suivantes, chacune `/feature`→`/devil`→`/polish`→`/done`) : Monte Carlo
-  (permutations des P&L réconciliés → Max DD P95/P99 + proba de toucher le DD challenge) ; endpoint
-  GET + vue frontend « ROBUSTESSE » (Canvas) ; heatmap paramétrique **quand** une source de backtest
-  réelle existera. Note : l'import NT8 existant est **CSV** (`trade_reconciliator`), le cahier D-043
-  cite du JSON → parseur découplé à prévoir.
+### Tranche 2 (`/feature`) — simulateur Monte Carlo du Max Drawdown
+`backend/app/monte_carlo.py` : **`MonteCarloSimulator`** pur, typé Pydantic, sur la série
+réconciliée.
+- **Bootstrap AVEC REMISE** : chaque simulation tire `len(série)` trades avec remise (5 000–10 000
+  simulations, `MC_N_SIMS`). Fonction pure `max_drawdown(returns)` = MaxDD (magnitude ≥ 0) de la
+  courbe d'équité, **pic incluant le 0 initial** (une perte d'ouverture compte → pas de biais).
+- **Distribution** : P50/P95/P99 du MaxDD (percentile par interpolation linéaire) + `mean_max_dd` +
+  **`prob_exceed` = P(MaxDD ≥ seuil)** où le seuil = `risk.max_drawdown_r_day` (réglage, source
+  unique — pas de doublon). Python pur (numpy absent), hors hot path (§7).
+- **Répétable** : `seed` optionnel (`MC_SEED`, défaut None = entropie). Cas dégénérés déterministes
+  (tout-gagnant → MaxDD ≡ 0 ; tout-perdant → MaxDD ≡ N) → tests EXACTS sans flakiness.
+- **FAIL-CLOSED (§3/§8)** : non-fini/bool ignoré ; série < plancher → `INSUFFICIENT_DATA`
+  (percentiles/proba `None`) ; seuil ≤ 0/non-fini → `prob_exceed` None (jamais fabriqué).
+- **Branchement source réelle** : `projections.monte_carlo(store)` sur `_reconciled_r_multiples`,
+  seuil lu dans `settings`, params `config.MC_*`.
+- **Vérif** : 11 tests (MaxDD pur, tout-gagnant/perdant exacts, percentiles ordonnés, répétabilité
+  seed, convergence vers ~(0.5)¹⁰, insuffisant, non-fini/bool, seuil invalide, + 2 projection stub) ;
+  **272 passed**, ruff clean.
+- **À venir** (chacune `/feature`→`/devil`→`/polish`→`/done`) : endpoint GET + vue frontend
+  « ROBUSTESSE » (Canvas) exposant WFE + Monte Carlo ; heatmap paramétrique **quand** une source de
+  backtest réelle existera. Note : l'import NT8 existant est **CSV** (`trade_reconciliator`), le
+  cahier D-043 cite du JSON → parseur découplé à prévoir.
 
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events

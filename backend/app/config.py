@@ -148,3 +148,10 @@ WF_WINDOW = int(os.getenv("WF_WINDOW", "0"))                 # trades/fenêtre (
 WF_STEP = int(os.getenv("WF_STEP", "0"))                     # décalage (0 → = window, non chevauchant)
 WF_OVERFIT_THRESHOLD = float(os.getenv("WF_OVERFIT_THRESHOLD", "0.50"))  # WFE < seuil ⇒ OVERFIT
 WF_MIN_TRADES = int(os.getenv("WF_MIN_TRADES", "4"))        # plancher → INSUFFICIENT_DATA sinon
+
+# --- Monte Carlo robustness (analyse OFFLINE, bootstrap avec remise — D-043 tranche 2) ---
+# n_sims 5000–10000 (spec D-043) ; min/seed = PLACEHOLDER v1 provisional. Le seuil testé vient du
+# réglage `risk.max_drawdown_r_day` (projection), pas d'un doublon ici.
+MC_N_SIMS = int(os.getenv("MC_N_SIMS", "10000"))            # rééchantillonnages bootstrap
+MC_MIN_TRADES = int(os.getenv("MC_MIN_TRADES", "4"))        # plancher → INSUFFICIENT_DATA sinon
+MC_SEED = int(os.getenv("MC_SEED")) if os.getenv("MC_SEED") else None  # None → entropie (non répétable)
