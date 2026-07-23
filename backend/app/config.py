@@ -155,6 +155,6 @@ WF_MIN_TRADES = int(os.getenv("WF_MIN_TRADES", "4"))        # plancher → INSUF
 MC_N_SIMS = int(os.getenv("MC_N_SIMS", "10000"))            # rééchantillonnages bootstrap
 MC_MIN_TRADES = int(os.getenv("MC_MIN_TRADES", "4"))        # plancher → INSUFFICIENT_DATA sinon
 MC_SEED = int(os.getenv("MC_SEED")) if os.getenv("MC_SEED") else None  # None → entropie (non répétable)
-# /devil : borne CPU n_sims×n_trades → jamais de hang de worker sur entrée énorme (n_sims réduit,
-# reporté). 2e6 ≈ < ~3 s Python pur ; garde 10000 sims tant que ≤ 200 trades (cas réel réconcilié).
+# Borne CPU n_sims×n_trades → jamais de hang de worker sur entrée énorme (n_sims réduit, reporté via
+# `capped`). 2e6 ≈ < ~3 s Python pur ; garde 10000 sims tant que ≤ 200 trades (cas réel réconcilié).
 MC_MAX_WORK = int(os.getenv("MC_MAX_WORK", "2000000"))

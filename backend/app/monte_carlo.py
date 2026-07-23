@@ -13,19 +13,21 @@ from __future__ import annotations
 
 import math
 import random
+from collections.abc import Iterable
+from typing import Any
 
 from pydantic import BaseModel
 
 
-def _finite(x) -> bool:
+def _finite(x: object) -> bool:
     return isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x)
 
 
-def max_drawdown(returns) -> float:
+def max_drawdown(returns: Iterable[float]) -> float:
     """Max Drawdown (magnitude ≥ 0) de la courbe d'équité cumulée. Le pic inclut le 0 initial :
     une perte d'ouverture depuis 0 compte déjà comme drawdown (pas de biais optimiste).
-    /devil : overflow (somme → ±inf) → `inf` (indéterminé), JAMAIS un faux 0 masqué par `nan`
-    (`inf−inf=nan` et `nan>mdd` est False sinon)."""
+    Overflow IEEE 754 (somme → ±inf) → renvoie `inf` (indéterminé), jamais un faux 0 masqué par
+    `nan` (`inf−inf=nan` et `nan>mdd` vaut False)."""
     peak = equity = mdd = 0.0
     for r in returns:
         equity += r
@@ -65,7 +67,7 @@ class MonteCarloResult(BaseModel):
     prob_exceed: float | None       # P(MaxDD ≥ threshold) ; None si seuil invalide
     mean_max_dd: float | None
     seed: int | None
-    capped: bool = False            # /devil : n_sims réduit pour tenir le budget CPU (entrée énorme)
+    capped: bool = False            # n_sims réduit pour tenir le budget CPU (entrée énorme)
 
 
 class MonteCarloSimulator:
@@ -75,8 +77,8 @@ class MonteCarloSimulator:
     - `threshold` : seuil d'invalidation (R, magnitude > 0) — sinon `prob_exceed` None ;
     - `min_trades` : plancher sous lequel → INSUFFICIENT_DATA (jamais un faux nombre §8) ;
     - `seed` : graine optionnelle → **répétabilité** (None = entropie système) ;
-    - `max_work` : budget CPU `n_sims × n_trades` (0 = illimité) → /devil : borne le temps de
-      calcul sur entrée énorme en RÉDUISANT n_sims (jamais un hang de worker), réduction reportée."""
+    - `max_work` : budget CPU `n_sims × n_trades` (0 = illimité) → borne le temps de calcul sur
+      entrée énorme en RÉDUISANT n_sims (jamais un hang de worker), réduction reportée via `capped`."""
 
     def __init__(self, n_sims: int = 10000, threshold: float | None = None,
                  min_trades: int = 4, seed: int | None = None, max_work: int = 0):
@@ -91,7 +93,7 @@ class MonteCarloSimulator:
                                 max_dd_p50=None, max_dd_p95=None, max_dd_p99=None,
                                 prob_exceed=None, mean_max_dd=None, seed=self.seed)
 
-    def run(self, returns) -> MonteCarloResult:
+    def run(self, returns: Iterable[Any] | None) -> MonteCarloResult:
         clean = [float(r) for r in (returns or []) if _finite(r)]          # fail-closed §3
         n = len(clean)
         thr = self.threshold if (_finite(self.threshold) and self.threshold > 0) else None

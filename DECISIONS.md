@@ -1455,6 +1455,26 @@ Attaques : séries 0/1 trade, Inf/NaN/types mixtes, **charge 10 000×10 000**, s
 - **Vérif** : +9 tests /devil (0/1 trade, types mixtes, seuils aberrants, borne CPU, overflow, fat-tail
   MC ; overflow/types/vide WF) ; **281 passed**, ruff clean.
 
+### /polish D-043 — nettoyage & choix de conception scellés
+Nettoyage sans changement de comportement (281 passed avant/après, ruff clean) : docstrings et
+nommage vérifiés ; tags process « /devil » des commentaires → **rationale durable** (le POURQUOI
+reste, la référence au loop part) ; **double calcul du WFE éliminé** dans `WalkForwardEngine.run`
+(`wfe` calculé une seule fois, branche sur `math.isfinite`) ; **typage complété de bout en bout**
+(`returns: Iterable[Any] | None`, `_finite(x: object)`, `params: dict[str, Any]`, `max_drawdown:
+Iterable[float]`). Trois choix de conception **scellés** :
+1. **Borne CPU `MC_MAX_WORK` (2e6).** Le bootstrap est en O(`n_sims × n_trades`) Python pur (numpy
+   absent) : 10 000×10 000 = 1e8 → hang. Plutôt qu'un timeout opaque, on **réduit `n_sims`** pour
+   tenir le budget et on **reporte** `capped=True` + le `n_sims` réellement exécuté (jamais une
+   troncature silencieuse §8). Le cas réel (≤ 200 trades réconciliés) garde ses 10 000 sims.
+2. **Overflow IEEE 754 explicite.** Une somme d'équité qui déborde donne `±inf`, et `inf−inf = nan`
+   avec `nan > x` toujours `False` → un drawdown se **masquerait en faux 0**. On détecte le
+   non-fini (`max_drawdown` renvoie `inf` ; le simulateur exclut la sim ; WF renvoie `wfe=None`
+   `UNDEFINED`) plutôt que d'émettre un `0`/`nan` trompeur.
+3. **Fail-closed strict (§3/§8) — un seul principe partout.** Au moindre doute — série < plancher,
+   rendement non-fini/bool, seuil ≤ 0/absent, IS non profitable, overflow, tout exclu — la sortie
+   est `INSUFFICIENT_DATA` / `None` / `IS_UNPROFITABLE` / `UNDEFINED`, **jamais un nombre fabriqué**.
+   Le contrat de type l'impose : chaque champ numérique est `float | None`.
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.

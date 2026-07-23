@@ -13,12 +13,14 @@ insuffisantes → verdict `INSUFFICIENT_DATA`, jamais un faux nombre autoritaire
 from __future__ import annotations
 
 import math
+from collections.abc import Iterable
 from statistics import median
+from typing import Any
 
 from pydantic import BaseModel
 
 
-def _finite(x) -> bool:
+def _finite(x: object) -> bool:
     return isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x)
 
 
@@ -67,11 +69,11 @@ class WalkForwardEngine:
         self.threshold = threshold
         self.min_trades = min_trades
 
-    def _insufficient(self, params: dict) -> WalkForwardResult:
+    def _insufficient(self, params: dict[str, Any]) -> WalkForwardResult:
         return WalkForwardResult(verdict="INSUFFICIENT_DATA", wfe=None, n_windows=0,
                                  overfit_windows=0, overfit_ratio=None, windows=[], **params)
 
-    def run(self, returns) -> WalkForwardResult:
+    def run(self, returns: Iterable[Any] | None) -> WalkForwardResult:
         params = {"is_frac": self.is_frac, "window": self.window, "step": self.step,
                   "threshold": self.threshold}
         clean = [float(r) for r in (returns or []) if _finite(r)]           # fail-closed §3
@@ -88,22 +90,19 @@ class WalkForwardEngine:
             n_is = max(1, min(w - 1, round(self.is_frac * w)))             # borné → n_oos ≥ 1
             is_seg, oos_seg = seg[:n_is], seg[n_is:]
             is_profit, oos_profit = sum(is_seg), sum(oos_seg)
-            if is_profit > 0 and math.isfinite((oos_profit / len(oos_seg)) / (is_profit / n_is)):
-                wfe = (oos_profit / len(oos_seg)) / (is_profit / n_is)      # WFE défini ET fini
-                windows.append(WalkForwardWindow(
-                    start=start, n_is=n_is, n_oos=len(oos_seg),
-                    is_profit=round(is_profit, 6), oos_profit=round(oos_profit, 6),
-                    wfe=round(wfe, 6), overfit=wfe < self.threshold))
-            elif is_profit > 0:                                            # /devil : overflow → nan → indéterminé (§3)
-                windows.append(WalkForwardWindow(
-                    start=start, n_is=n_is, n_oos=len(oos_seg),
-                    is_profit=is_profit, oos_profit=oos_profit,
-                    wfe=None, overfit=None, reason="UNDEFINED"))
-            else:                                                         # IS non profitable → indéfini (§3)
-                windows.append(WalkForwardWindow(
-                    start=start, n_is=n_is, n_oos=len(oos_seg),
-                    is_profit=round(is_profit, 6), oos_profit=round(oos_profit, 6),
-                    wfe=None, overfit=None, reason="IS_UNPROFITABLE"))
+            if is_profit <= 0:                                             # IS non profitable → indéfini (§3)
+                wfe, overfit, reason = None, None, "IS_UNPROFITABLE"
+            else:
+                wfe = (oos_profit / len(oos_seg)) / (is_profit / n_is)     # rendement/trade OOS ÷ IS
+                if math.isfinite(wfe):
+                    overfit, reason = wfe < self.threshold, ""
+                else:                                                      # overflow → nan → indéterminé (§3)
+                    wfe, overfit, reason = None, None, "UNDEFINED"
+            windows.append(WalkForwardWindow(
+                start=start, n_is=n_is, n_oos=len(oos_seg),
+                is_profit=round(is_profit, 6) if math.isfinite(is_profit) else is_profit,
+                oos_profit=round(oos_profit, 6) if math.isfinite(oos_profit) else oos_profit,
+                wfe=None if wfe is None else round(wfe, 6), overfit=overfit, reason=reason))
             start += step
 
         valid = [win.wfe for win in windows if win.wfe is not None]
