@@ -75,6 +75,19 @@ def _reconciled_r_multiples(store: EventStore) -> list[float]:
     return rs
 
 
+def walk_forward(store: EventStore) -> dict[str, Any]:
+    """Walk-Forward robustness (D-043) sur les R-multiples RÉCONCILIÉS, dans l'ordre chronologique
+    (event store append-only). Analyse OFFLINE de recherche — HORS ContextSchema live (§1). Renvoie
+    la projection typée du `WalkForwardEngine` (verdict, WFE, fenêtres). Données insuffisantes →
+    INSUFFICIENT_DATA (jamais un faux nombre autoritaire §8)."""
+    from .walk_forward import WalkForwardEngine
+    rs = _reconciled_r_multiples(store)
+    engine = WalkForwardEngine(is_frac=config.WF_IS_FRAC, window=config.WF_WINDOW,
+                               step=config.WF_STEP, threshold=config.WF_OVERFIT_THRESHOLD,
+                               min_trades=config.WF_MIN_TRADES)
+    return engine.run(rs).model_dump()
+
+
 def sharpe(store: EventStore) -> dict[str, Any]:
     """Per-trade Sharpe = mean(r)/stdev(r), reconciled outcomes only.
     Result score is displayed ONLY after 20+ trades (CLAUDE §2.7)."""

@@ -139,3 +139,12 @@ LOG_SCRAPER_POLL_SECONDS = float(os.getenv("LOG_SCRAPER_POLL_SECONDS", "1.0"))  
 # --- Session windows CET (PLACEHOLDER D-006) ---
 LONDON_OBS_CET = (8, 12)      # 08:00–12:00 CET
 OVERLAP_NY_CET = (14.5, 17.5)  # 14:30–17:30 CET
+
+# --- Walk-Forward robustness engine (analyse OFFLINE sur trades réconciliés — D-043) ---
+# Convention Walk-Forward Analysis (Pardo) : 70/30 IS/OOS = AUTORITÉ de facto ; seuil WFE < 0.5 =
+# overfit (spec D-043). window/step/min = PLACEHOLDER (v1 provisional, à calibrer sur 50+ trades).
+WF_IS_FRAC = float(os.getenv("WF_IS_FRAC", "0.70"))          # part In-Sample de chaque fenêtre
+WF_WINDOW = int(os.getenv("WF_WINDOW", "0"))                 # trades/fenêtre (0 → toute la série)
+WF_STEP = int(os.getenv("WF_STEP", "0"))                     # décalage (0 → = window, non chevauchant)
+WF_OVERFIT_THRESHOLD = float(os.getenv("WF_OVERFIT_THRESHOLD", "0.50"))  # WFE < seuil ⇒ OVERFIT
+WF_MIN_TRADES = int(os.getenv("WF_MIN_TRADES", "4"))        # plancher → INSUFFICIENT_DATA sinon

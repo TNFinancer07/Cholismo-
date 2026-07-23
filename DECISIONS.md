@@ -1378,6 +1378,44 @@ veille, (3) tooltip de survol (prix, volume, part % session, split acheteur/vend
   (SSE gelé) — DPR exact, POC/VA rendus, tooltip 8/8 positions, split omis sans source, resize extrême
   borné, **0 erreur JS** ; capture à l'appui.
 
+## D-043 · Moteur de Robustesse & Walk-Forward (analyse OFFLINE, `WalkForwardEngine`)
+Nouveau module de validation quantitative de la stabilité des stratégies sur l'historique
+réconcilié. **Deux forks d'architecture tranchés avec l'opérateur (AskUserQuestion) :**
+1. **Surface analytics OFFLINE, pas un bloc de schéma.** Walk-Forward / Heatmap / Monte Carlo sont
+   de la RECHERCHE sur l'historique réconcilié, pas un état temps-réel. Les forcer en blocs
+   ContextSchema trahirait `CLAUDE §1` (« un panneau = un bloc ») et `§6` (cadences). **Exception §1
+   assumée** : ils vivent comme PROJECTIONS/vues sur l'event store (précédent RECAP/PNL/Sharpe),
+   servies par endpoint GET, jamais poussées en SSE live.
+2. **Réel d'abord, heatmap différée (§3/§8).** WFE + Monte Carlo se branchent sur une donnée RÉELLE
+   (`projections._reconciled_r_multiples`). La **heatmap de stabilité paramétrique** (Seuil Imbalance
+   × Spread) suppose un backtest balayé par paramètres qui **n'existe pas** (terminal live, pas
+   backtester) → **différée** jusqu'à une source réelle (export optimiseur NT8 ou vrai harnais de
+   backtest). Remplir la heatmap avec une grille inventée violerait « no signal without data » (§3)
+   et « ne pas afficher un faux nombre autoritaire » (§8). Aucun mock autoritaire.
+
+### Tranche 1 (`/feature`) — moteur de calcul Walk-Forward
+`backend/app/walk_forward.py` : classe **`WalkForwardEngine`** pure et déterministe (aucun LLM,
+aucune source live) sur une série de rendements ordonnée dans le temps.
+- **Fenêtres glissantes** IS/OOS : `window` trades/fenêtre (0 → toute la série), `step` (0 → non
+  chevauchant), part In-Sample `is_frac` (défaut 0.70) bornée pour garantir n_oos ≥ 1.
+- **WFE** = (profit OOS / n_oos) ÷ (profit IS / n_is) — **normalisé par trade** (le déséquilibre
+  70/30 ne biaise pas le ratio). Verdict **`OVERFIT_DETECTED`** si WFE agrégé (médiane des fenêtres
+  valides) < seuil (0.50, spec D-043), sinon `ROBUST`.
+- **FAIL-CLOSED (§3/§8)** : rendement non-fini / bool ignoré ; **IS non profitable → WFE `None`**
+  (`IS_UNPROFITABLE`, jamais un ratio fabriqué) ; données insuffisantes → **`INSUFFICIENT_DATA`**
+  (jamais un faux nombre autoritaire). Résultats typés Pydantic (`WalkForwardResult`/`Window`).
+- **Branchement source réelle** : `projections.walk_forward(store)` exécute le moteur sur les
+  R-multiples RÉCONCILIÉS (`_reconciled_r_multiples`, ordre chronologique append-only), paramètres
+  depuis `config.WF_*` (70/30 = AUTORITÉ de facto Pardo ; window/step/min = `v1 provisional`).
+- **Vérif** : 13 tests (WFE normalisé, seuil strict, rolling+step, IS non profitable→None, insuffisant,
+  non-fini/bool ignorés, fenêtre unique, déterminisme, vide, + 2 projection sur store stub réconcilié) ;
+  **261 passed**, ruff clean.
+- **À venir** (tranches suivantes, chacune `/feature`→`/devil`→`/polish`→`/done`) : Monte Carlo
+  (permutations des P&L réconciliés → Max DD P95/P99 + proba de toucher le DD challenge) ; endpoint
+  GET + vue frontend « ROBUSTESSE » (Canvas) ; heatmap paramétrique **quand** une source de backtest
+  réelle existera. Note : l'import NT8 existant est **CSV** (`trade_reconciliator`), le cahier D-043
+  cite du JSON → parseur découplé à prévoir.
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.
