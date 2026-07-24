@@ -126,13 +126,24 @@ export interface FootprintLevel {
   price: number
   bid_vol: number
   ask_vol: number
+  delta: number                   // ask_vol − bid_vol : agresseur net du niveau (D-042)
   imbalance: 'ASK' | 'BID' | null
+  // Liquidité AU REPOS du carnet L2 (D-042) — présente UNIQUEMENT sur la bougie en formation et
+  // seulement si `book_state === 'LIVE'` : absente = pas de donnée, jamais « zéro mur ».
+  bid_liq?: number
+  ask_liq?: number
 }
+/** État du carnet L2 pour cette bougie : `LIVE` = instantané courant appliqué à la bougie en
+ *  formation ; `ABSENT` = bougie passée, ou carnet gelé/corrompu (fail-closed §3). */
+export type BookState = 'LIVE' | 'ABSENT'
 export interface FootprintCandle {
   start_ts: number; end_ts: number
   open: number; high: number; low: number; close: number
   poc: number | null
   total_volume: number
+  delta: number                   // agresseur net de la bougie = Σ delta des niveaux (D-042)
+  n_prints: number
+  book_state: BookState
   levels: FootprintLevel[]        // trié prix décroissant
 }
 export interface FootprintValue {
@@ -140,6 +151,7 @@ export interface FootprintValue {
   tick: number
   ratio: number
   candle_seconds: number
+  ticks_per_candle: number        // > 0 = bougies TICK-BASED ; 0 = bucket temporel (D-042)
 }
 
 // CVD granulaire stratifié par taille (D-038)

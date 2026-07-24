@@ -1648,6 +1648,32 @@ Nettoyage sans changement de comportement (38 tests footprint / 323 verts avant 
 - **Vérif** : aucun log de debug ni code mort ; **323 passed**, ruff clean ; check d'intégration
   moteur (carnet FRESH → `LIVE`, delta et intégrité corrects).
 
+### Tranche 2 (`/feature`) — miroir TS + rendu Canvas (delta, murs L2)
+Le panneau `FP` (`s1_state.footprint`, D-037) rend désormais les champs de la tranche 1.
+- **Types TS** : `FootprintLevel` + `delta`, `bid_liq?`/`ask_liq?` (**optionnels** — présents
+  seulement si le carnet est vivant : absent = pas de donnée, jamais « zéro mur ») ;
+  `FootprintCandle` + `delta`, `n_prints`, `book_state` (`BookState = 'LIVE' | 'ABSENT'`) ;
+  `FootprintValue` + `ticks_per_candle`.
+- **Delta** : en-tête du panneau = delta de la **bougie en formation** (`▲/▼ Δ ±N`, DOM) ; en-tête
+  de CHAQUE colonne du Canvas = heure + delta de la bougie (`HEAD_H` 15 → 27, deux lignes). Signe
+  **et** glyphe portent le sens — la couleur n'est jamais seule (§3).
+- **Murs L2** : bande dédiée à droite du Canvas, **bougie en formation UNIQUEMENT**. Le **côté est
+  encodé par la POSITION** (moitié gauche = bid/support, moitié droite = ask/résistance) avec un
+  séparateur central, pas seulement par la teinte — SKY, distincte du vert/rouge (agresseur) et de
+  l'or (POC). Longueur ∝ liquidité relative. **Vérifié par mesure de pixels** : bid seul → 960 px à
+  gauche / 0 à droite ; ask seul → 0 / 960.
+- **FAIL-CLOSED (§3)** : la bande n'apparaît que si `book_state === 'LIVE'` **ET** qu'au moins une
+  liquidité finie > 0 existe. Sinon **rien n'est dessiné** et l'absence est **DITE** en légende
+  (« L2 carnet absent — murs non affichés ») : une bande vide se lirait « aucun mur » alors qu'on
+  n'en sait rien.
+- **Déjà livré, non retouché** : la surbrillance des imbalances (fond gradué + ▲/▼) et le POC or
+  existaient depuis D-037 — vérifié à l'essai plutôt que réimplémenté.
+- **Vérif** : essai Playwright **RED → GREEN** sur 4 scénarios (carnet LIVE → murs + delta + légende ;
+  `ABSENT` → aucun mur et absence annoncée ; imbalances/POC conservés ; LIVE sans liquidité → aucun
+  mur inventé), **0 erreur JS** ; probe d'encodage de position ; **essai sur flux réel** (delta
+  `▲ Δ +149`, 1570 px de murs, légende vivante) ; `tsc` + `vite build` OK ; **323 passed** (backend
+  inchangé) ; captures à l'appui.
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.
