@@ -53,3 +53,21 @@ def test_robustness_endpoint_200_and_contract():
     assert "walk_forward" in body and "monte_carlo" in body
     assert body["walk_forward"]["verdict"] in _WF_VERDICTS  # contrat (store de test partagé → valeurs libres)
     assert body["monte_carlo"]["verdict"] in _MC_VERDICTS
+
+
+def test_robustness_endpoint_no_unhandled_500_when_projection_raises(monkeypatch):
+    """Calcul IMPOSSIBLE (store illisible) → 503 MAÎTRISÉE avec motif, jamais une 500 non gérée
+    ni une stack exposée — et surtout PAS un faux `INSUFFICIENT_DATA` qui dirait « pas assez de
+    trades » alors que la cause est une panne (§3)."""
+    from app import projections
+
+    def _boom(_store):
+        raise RuntimeError("base verrouillée")
+
+    monkeypatch.setattr(projections, "robustness", _boom)
+    client = TestClient(_app, raise_server_exceptions=False)
+    r = client.get("/analyses/robustness")
+    assert r.status_code == 503
+    detail = r.json()["detail"]
+    assert "indisponible" in detail and "RuntimeError" in detail
+    assert "base verrouillée" not in detail                # message interne non exposé

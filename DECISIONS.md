@@ -1544,6 +1544,22 @@ durable) ET **3 défauts trouvés en cours de revue, corrigés** — ils dépass
   500-après-succès, JSON invalide) → **0 erreur JS** ; `npm run typecheck` + `vite build` OK ;
   **284 passed**, ruff clean ; capture du bandeau PÉRIMÉ à l'appui.
 
+### /done D-043 — lacune comblée à la clôture : 500 non maîtrisée sur l'endpoint
+La checklist de clôture a testé un chemin jamais couvert : **la projection qui LÈVE** (store
+illisible, base verrouillée). L'endpoint renvoyait une **500 non maîtrisée** alors que le cahier de
+la tranche 3 exigeait un fail-closed sans 500. Corrigé — et les deux causes restent **distinctes**,
+jamais confondues (§3) :
+- **trades insuffisants** → `INSUFFICIENT_DATA` en **200** (condition de donnée) ;
+- **calcul impossible** → **503 maîtrisée** avec motif (`type` de l'exception seulement, message
+  interne non exposé). Choix assumé : on ne le maquille PAS en `INSUFFICIENT_DATA` — cela dirait
+  « pas assez de trades » alors que la cause est une panne ; l'UI affiche « PÉRIMÉ », honnête sur la
+  vraie cause. Écart documenté vs l'exemple littéral du cahier (« renvoyer INSUFFICIENT_DATA »).
+- **+1 test** (503, motif présent, message interne non exposé) → **285 passed**, ruff clean.
+- **Angles restants vérifiés à la clôture** : démontage pendant un fetch → **0 erreur JS** ; resize
+  320→2400 px → panneau **sans débordement**. À 320 px le body déborde de 509 px, **identiquement
+  sur TERMINAL/PNL/RECAP/ROBUST** → propriété **pré-existante** de la coquille (largeurs minimales
+  Zone 0 / barre de commande), hors périmètre D-043 ; le terminal dense ne cible pas 320 px.
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.

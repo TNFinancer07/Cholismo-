@@ -91,9 +91,17 @@ async def analyses_robustness() -> dict[str, Any]:
     """Consolide le Walk-Forward Efficiency (verdict ROBUST/OVERFIT_DETECTED) et la distribution
     Monte Carlo du Max Drawdown (P50/P95/P99 + proba de dépasser le seuil challenge) sur les
     R-multiples RÉCONCILIÉS. ANALYTIQUE hors-ligne, ADVISORY : jamais un ordre (§2.1). Calcul
-    CPU-borné (`MC_MAX_WORK`) offloadé hors de la boucle d'événements. Fail-closed : trades
-    insuffisants → verdicts `INSUFFICIENT_DATA` en 200, jamais une 500 (§3)."""
-    return await asyncio.to_thread(projections.robustness, get_store())
+    CPU-borné (`MC_MAX_WORK`) offloadé hors de la boucle d'événements.
+
+    Fail-closed (§3), deux cas DISTINCTS et jamais confondus :
+    - trades insuffisants → verdicts `INSUFFICIENT_DATA` en **200** (condition de donnée) ;
+    - calcul IMPOSSIBLE (store illisible, projection qui lève) → **503 maîtrisée** avec un motif
+      explicite. On ne le maquille PAS en `INSUFFICIENT_DATA` : cela dirait « pas assez de trades »
+      alors que la cause est une panne — l'UI affiche « PÉRIMÉ », honnête sur la vraie cause."""
+    try:
+        return await asyncio.to_thread(projections.robustness, get_store())
+    except Exception as exc:                       # jamais une 500 non maîtrisée (ni stack exposée)
+        raise HTTPException(503, f"analyse de robustesse indisponible : {type(exc).__name__}") from exc
 
 
 # ---------- SSE — cadence-segmented channels (CLAUDE §6) ----------
