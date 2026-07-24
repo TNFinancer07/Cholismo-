@@ -1674,6 +1674,29 @@ Le panneau `FP` (`s1_state.footprint`, D-037) rend désormais les champs de la t
   `▲ Δ +149`, 1570 px de murs, légende vivante) ; `tsc` + `vite build` OK ; **323 passed** (backend
   inchangé) ; captures à l'appui.
 
+### /devil D-042 tranche 2 — L2 aberrant, clignotement du carnet, delta extrême, resize
+Attaques : liquidités L2 gigantesques (1e12)/négatives/non-finies, bascule rapide `book_state`
+LIVE↔ABSENT, delta massif (1,23e9) et nul (0 print), redimensionnement extrême + Retina.
+- **1 défaut RÉEL trouvé & corrigé — saut de grille au clignotement du carnet.** La largeur du
+  canvas incluait la bande L2 **conditionnellement** (`walls ? L2_W : 0`) : à chaque bascule
+  LIVE↔ABSENT — situation NORMALE dès que le carnet passe STALE — toute la grille se décalait
+  latéralement. Mesuré : 12 bascules rapides → **2 largeurs distinctes (314 et 216 px)**. Corrigé :
+  la bande L2 est **TOUJOURS réservée** (colonne stable) ; seul son CONTENU varie → **1 seule
+  largeur (348 px)** sur 12 bascules.
+- **Corollaire (§3)** : une colonne réservée mais vide se lirait « aucun mur ». Quand le carnet est
+  indisponible, la colonne affiche un **tiret neutre par niveau** + la légende « L2 carnet absent —
+  murs non affichés ». Le vide est EXPLIQUÉ, jamais muet.
+- **Chemins déjà sûrs confirmés** : liquidités **1e12 / négatives / NaN / Infinity** → barres bornées
+  à la demi-bande, canvas borné, **DPR exact** (les gardes `Number.isFinite` + `> 0` tiennent) ;
+  **delta 1,23e9** → texte 34 px dans une colonne de 132 px (aucun débordement), **delta 0** rendu
+  sans glyphe directionnel (ni ▲ ni ▼ : pas de sens inventé) ; resize 2400×1400 et 1600×950 →
+  **DPR exact**, murs peints, canvas borné.
+- **Hors périmètre, signalé** : à 360×300 le panneau se replie (canvas 1×1, aucun crash) — la
+  coquille du terminal déborde déjà à cette largeur sur TOUTES les vues (mesuré au `/devil` D-043),
+  ce n'est pas un défaut introduit ici et le terminal dense ne cible pas ce format.
+- **Vérif** : essai Playwright 4 axes, **0 erreur JS** ; `tsc` + `vite build` OK ; **323 passed**
+  (backend inchangé) ; captures LIVE et ABSENT à l'appui.
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.

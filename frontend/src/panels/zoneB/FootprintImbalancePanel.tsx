@@ -68,10 +68,13 @@ function draw(canvas: HTMLCanvasElement, fp: FootprintValue | null | undefined, 
   const pminD = pmax - (rows - 1) * tick
   // cellules AJUSTÉES au panneau, bornées (s'étirent si grand, défilent si dense).
   const walls = l2Walls(cands[cands.length - 1])          // murs L2 : bougie en formation seule
+  // La bande L2 est TOUJOURS réservée : sa largeur ne doit pas dépendre de `book_state`, sinon un
+  // carnet qui clignote (LIVE↔ABSENT au gré de la fraîcheur) ferait sauter toute la grille
+  // latéralement à chaque bascule. Colonne stable ; c'est son CONTENU qui varie.
   const CW = Math.max(MIN_CW, Math.min(MAX_CW,
-    Math.floor((box.w - PRICE_W - (walls ? L2_W : 0)) / cands.length)))
+    Math.floor((box.w - PRICE_W - L2_W) / cands.length)))
   const RH = Math.max(MIN_RH, Math.min(MAX_RH, Math.floor((box.h - HEAD_H) / rows)))
-  const W = PRICE_W + cands.length * CW + (walls ? L2_W : 0), H = HEAD_H + rows * RH
+  const W = PRICE_W + cands.length * CW + L2_W, H = HEAD_H + rows * RH
   canvas.style.width = W + 'px'; canvas.style.height = H + 'px'
   canvas.width = R(W * dpr); canvas.height = R(H * dpr)
   const ctx = canvas.getContext('2d'); if (!ctx) return
@@ -165,29 +168,41 @@ function draw(canvas: HTMLCanvasElement, fp: FootprintValue | null | undefined, 
   // Le carnet est un instantané COURANT : l'étendre aux bougies passées serait une association
   // historique fausse. Côté encodé par la POSITION (moitié gauche = bid/support, moitié droite =
   // ask/résistance), pas seulement par la couleur (§3).
-  if (walls) {
+  {
     const bx = PRICE_W + cands.length * CW
     const half = (L2_W - 3) / 2
     const forming = cands[cands.length - 1]
+    const mid0 = R(bx + L2_W / 2)
     ctx.fillStyle = '#67788f'; ctx.textAlign = 'center'
-    if (showText) ctx.fillText('L2', R(bx + L2_W / 2), R(HEAD_H / 3))
+    if (showText) ctx.fillText('L2', mid0, R(HEAD_H / 3))
     // séparateur central : marque la frontière bid | ask
     ctx.strokeStyle = 'rgba(103, 120, 143, 0.5)'; ctx.lineWidth = 1
-    ctx.beginPath(); ctx.moveTo(R(bx + L2_W / 2) + 0.5, HEAD_H)
-    ctx.lineTo(R(bx + L2_W / 2) + 0.5, H); ctx.stroke()
-    for (const l of forming.levels) {
-      if (!Number.isFinite(l.price) || l.price < pminD) continue
-      const y = R(yOf(l.price)) + 1, h = Math.max(1, R(RH) - 2)
-      const bid = Number.isFinite(l.bid_liq) ? (l.bid_liq as number) : 0
-      const ask = Number.isFinite(l.ask_liq) ? (l.ask_liq as number) : 0
-      const mid = R(bx + L2_W / 2)
-      if (bid > 0) {                                   // support : barre vers la GAUCHE du centre
-        const w = Math.max(1, R((bid / walls.max) * half))
-        ctx.fillStyle = `rgba(${SKY}, 0.75)`; ctx.fillRect(mid - w, y, w, h)
+    ctx.beginPath(); ctx.moveTo(mid0 + 0.5, HEAD_H); ctx.lineTo(mid0 + 0.5, H); ctx.stroke()
+    if (!walls) {
+      // Carnet indisponible : la colonne reste (géométrie stable) mais son vide est EXPLIQUÉ —
+      // un tiret neutre par niveau, jamais un blanc qui se lirait « aucun mur » (§3).
+      ctx.strokeStyle = 'rgba(148, 163, 184, 0.35)'
+      for (const l of forming.levels) {
+        if (!Number.isFinite(l.price) || l.price < pminD) continue
+        const y = R(yOf(l.price)) + R(RH / 2) + 0.5
+        ctx.beginPath(); ctx.moveTo(mid0 - 4, y); ctx.lineTo(mid0 + 5, y); ctx.stroke()
       }
-      if (ask > 0) {                                   // résistance : barre vers la DROITE
-        const w = Math.max(1, R((ask / walls.max) * half))
-        ctx.fillStyle = `rgba(${SKY}, 0.45)`; ctx.fillRect(mid + 1, y, w, h)
+    }
+    if (walls) {
+      const maxLiq = walls.max
+      for (const l of forming.levels) {
+        if (!Number.isFinite(l.price) || l.price < pminD) continue
+        const y = R(yOf(l.price)) + 1, h = Math.max(1, R(RH) - 2)
+        const bid = Number.isFinite(l.bid_liq) ? (l.bid_liq as number) : 0
+        const ask = Number.isFinite(l.ask_liq) ? (l.ask_liq as number) : 0
+        if (bid > 0) {                                 // support : barre vers la GAUCHE du centre
+          const w = Math.max(1, R((bid / maxLiq) * half))
+          ctx.fillStyle = `rgba(${SKY}, 0.75)`; ctx.fillRect(mid0 - w, y, w, h)
+        }
+        if (ask > 0) {                                 // résistance : barre vers la DROITE
+          const w = Math.max(1, R((ask / maxLiq) * half))
+          ctx.fillStyle = `rgba(${SKY}, 0.45)`; ctx.fillRect(mid0 + 1, y, w, h)
+        }
       }
     }
   }
