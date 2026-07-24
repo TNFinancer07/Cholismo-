@@ -55,18 +55,33 @@ const pctOf = (v: number | null): string =>
   v === null || !Number.isFinite(v) ? '·' : (v * 100).toFixed(1) + ' %'
 const rOf = (v: number | null): string =>
   v === null || !Number.isFinite(v) ? '·' : fmtNum(v, 2) + ' R'
+// /devil : un run BORNÉ (n_sims réduit) affichait « 0k sims » — le nombre réel est justement
+// l'information critique dans ce cas. En dessous de 1000, on montre le compte EXACT.
+const simsOf = (n: number): string =>
+  !Number.isFinite(n) ? '·' : n >= 1000 ? Math.round(n / 1000) + 'k sims' : n + ' sims'
+
+// Bande de fenêtres BORNÉE (/devil : 200 fenêtres = mur illisible, croissance non bornée).
+const MAX_STRIP = 48
 
 function useRobustness() {
   const [data, setData] = useState<RobustnessPayload | null>(null)
   const [failed, setFailed] = useState(false)
+  const [busy, setBusy] = useState(false)
   const reqSeq = useRef(0)
+  const inFlight = useRef(false)
   const refresh = useCallback(async () => {
+    // /devil (backpressure) : chaque appel déclenche un calcul Monte Carlo complet côté serveur.
+    // Une rafale de clics en lançait autant en parallèle → on IGNORE tant qu'une requête est en vol.
+    if (inFlight.current) return
+    inFlight.current = true; setBusy(true)
     const seq = ++reqSeq.current
     try {
       const d = await api.analysesRobustness() as RobustnessPayload
       if (seq === reqSeq.current) { setData(d); setFailed(false) }
     } catch {
       if (seq === reqSeq.current) setFailed(true)   // bandeau flux global couvre aussi
+    } finally {
+      inFlight.current = false; setBusy(false)
     }
   }, [])
   useEffect(() => {
@@ -74,7 +89,7 @@ function useRobustness() {
     const timer = window.setInterval(() => void refresh(), POLL_MS)
     return () => { reqSeq.current++; window.clearInterval(timer) }
   }, [refresh])
-  return { data, failed, refresh }
+  return { data, failed, busy, refresh }
 }
 
 // ---------- Walk-Forward (colonne gauche) ----------
@@ -82,6 +97,9 @@ function useRobustness() {
 function WalkForwardCard({ wf }: { wf: WalkForward }) {
   const b = wfBadge(wf.verdict)
   const insufficient = wf.verdict === 'INSUFFICIENT_DATA'
+  const all = Array.isArray(wf.windows) ? wf.windows : []
+  const shown = all.slice(-MAX_STRIP)                 // les plus RÉCENTES (fin du tableau)
+  const hidden = all.length - shown.length
   return (
     <section className="flex min-h-0 flex-1 flex-col gap-2 border border-term-border bg-term-panel2 p-3">
       <header className="flex items-baseline justify-between">
@@ -105,13 +123,18 @@ function WalkForwardCard({ wf }: { wf: WalkForward }) {
             <Row label="Fenêtres surajustées" value={`${wf.overfit_windows} / ${wf.n_windows}`}
               danger={wf.overfit_windows > 0} />
           </div>
-          {/* strip par fenêtre : ◼ = OOS conforme, ◻ surajusté (rouge), · indéterminé — jamais couleur seule */}
+          {/* Strip par fenêtre. /devil : ordre RÉTABLI — `start` croissant = trades les plus ANCIENS
+              d'abord (le libellé disait l'inverse) ; et affichage BORNÉ aux dernières fenêtres, le
+              reste étant annoncé (jamais une troncature silencieuse §8). */}
           <div className="mt-1">
-            <span className="mb-1 block text-xxs uppercase text-term-faint">Fenêtres (récent → ancien)</span>
+            <span className="mb-1 block text-xxs uppercase text-term-faint">
+              Fenêtres (ancien → récent)
+              {hidden > 0 && <span className="normal-case text-term-dim"> · {hidden} plus anciennes masquées</span>}
+            </span>
             <div className="flex flex-wrap gap-1">
-              {wf.windows.length === 0 && <span className="text-xxs text-term-dim">—</span>}
-              {wf.windows.map((w, i) => (
-                <span key={i} title={`fenêtre @${w.start} · WFE ${w.wfe === null ? '·' : fmtNum(w.wfe, 2)}${w.reason ? ` · ${w.reason}` : ''}`}
+              {shown.length === 0 && <span className="text-xxs text-term-dim">—</span>}
+              {shown.map((w, i) => (
+                <span key={hidden + i} title={`fenêtre @${w.start} · WFE ${w.wfe === null ? '·' : fmtNum(w.wfe, 2)}${w.reason ? ` · ${w.reason}` : ''}`}
                   className={cn('inline-flex h-5 min-w-[2.1rem] items-center justify-center border px-1 text-xxs font-bold tabular-nums',
                     w.overfit === true ? 'border-risk-red/60 text-risk-red'
                       : w.overfit === false ? 'border-risk-green/50 text-risk-green'
@@ -146,12 +169,24 @@ function MonteCarloCard({ mc }: { mc: MonteCarlo }) {
     { key: 'p95', label: 'P95', v: mc.max_dd_p95 },
     { key: 'p99', label: 'P99', v: mc.max_dd_p99 },
   ]
+  // /devil : sur une distribution dégénérée (P50 = P95 = P99 — ex. perte totale en un jour, ou
+  // aucun drawdown) les trois étiquettes se superposaient en bouillie illisible. Le TRAIT reste à
+  // la position VRAIE (honnêteté §3) ; seule l'ÉTIQUETTE glisse pour rester lisible.
+  const LABEL_GAP = 8
+  const labelPos = ((): number[] => {
+    const out = marks.map((m) => pos(m.v))
+    for (let i = 1; i < out.length; i++) out[i] = Math.max(out[i], out[i - 1] + LABEL_GAP)
+    const over = out[out.length - 1] - 96
+    if (over > 0) for (let i = 0; i < out.length; i++) out[i] -= over      // recale dans le cadre
+    return out.map((x) => Math.max(4, Math.min(96, x)))
+  })()
   return (
     <section className="flex min-h-0 flex-1 flex-col gap-2 border border-term-border bg-term-panel2 p-3">
       <header className="flex items-baseline justify-between">
         <h3 className="text-xs font-bold uppercase tracking-wide text-term-text">Monte Carlo · Max Drawdown</h3>
-        <span className="text-xxs text-term-faint">
-          {insufficient ? '—' : `${fmtNum(mc.n_sims / 1000, 0)}k sims`}{mc.capped ? ' (borné)' : ''}
+        <span className="text-xxs text-term-faint"
+          title={mc.capped ? 'budget CPU atteint : nombre de simulations réduit (résultat valide, précision moindre)' : undefined}>
+          {insufficient ? '—' : simsOf(mc.n_sims)}{mc.capped ? ' (borné)' : ''}
         </span>
       </header>
       {insufficient ? (
@@ -179,13 +214,16 @@ function MonteCarloCard({ mc }: { mc: MonteCarlo }) {
                     style={{ left: `${pos(thr)}%` }}>seuil {rOf(thr)}</span>
                 </>
               )}
-              {marks.map((m) => {
+              {marks.map((m, i) => {
                 const over = m.v !== null && thr !== null && m.v >= thr
                 return (
-                  <div key={m.key} className="absolute inset-y-0 flex flex-col items-center justify-end"
-                    style={{ left: `${pos(m.v)}%` }} aria-hidden>
-                    <div className={cn('h-4 w-px', over ? 'bg-risk-red' : 'bg-term-text')} />
-                    <span className={cn('mb-0.5 text-[9px] font-bold tabular-nums', over ? 'text-risk-red' : 'text-term-dim')}>{m.label}</span>
+                  <div key={m.key} aria-hidden>
+                    {/* trait = position RÉELLE de la valeur */}
+                    <div className={cn('absolute top-0 h-4 w-px', over ? 'bg-risk-red' : 'bg-term-text')}
+                      style={{ left: `${pos(m.v)}%` }} />
+                    {/* étiquette = position dé-chevauchée (lisible même si P50 = P95 = P99) */}
+                    <span className={cn('absolute bottom-0.5 -translate-x-1/2 text-[9px] font-bold tabular-nums',
+                      over ? 'text-risk-red' : 'text-term-dim')} style={{ left: `${labelPos[i]}%` }}>{m.label}</span>
                   </div>
                 )
               })}
@@ -224,16 +262,18 @@ function Row({ label, value, danger }: { label: string; value: string; danger?: 
 }
 
 export function RobustnessView() {
-  const { data, failed, refresh } = useRobustness()
+  const { data, failed, busy, refresh } = useRobustness()
 
   return (
     <div className="flex min-h-0 flex-1 flex-col p-1.5">
       <Panel code="ROBUST" title="Robustesse — Walk-Forward & Monte Carlo" accent="none"
         block="projection · /analyses/robustness" className="min-h-0 flex-1"
         right={
-          <button onClick={() => void refresh()} title="Rafraîchir l'analyse"
-            className="inline-flex items-center gap-1 border border-term-border px-1.5 py-0.5 text-xxs font-semibold uppercase text-term-dim hover:text-term-text">
-            <RefreshCw className="h-3 w-3" /> maj
+          <button onClick={() => void refresh()} disabled={busy}
+            title={busy ? 'calcul en cours…' : "Rafraîchir l'analyse"}
+            className={cn('inline-flex items-center gap-1 border border-term-border px-1.5 py-0.5 text-xxs font-semibold uppercase',
+              busy ? 'cursor-wait text-term-faint' : 'text-term-dim hover:text-term-text')}>
+            <RefreshCw className={cn('h-3 w-3', busy && 'animate-spin')} /> maj
           </button>
         }>
         {data === null ? (

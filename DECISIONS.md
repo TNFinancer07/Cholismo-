@@ -1496,6 +1496,35 @@ endpoint, pas un bloc SSE — §1, comme PNL/RECAP).
 - **À venir** : heatmap paramétrique **quand** une source de backtest réelle existera (export
   optimiseur NT8 ou harnais de backtest) — jamais une grille inventée (§3/§8).
 
+### /devil D-043 tranche 3 — pathologies de rendu de la vue ROBUSTESSE
+Attaques : percentiles extrêmes/identiques (P50 = P95 = P99), 200 fenêtres Walk-Forward, rafale de
+rafraîchissements, WFE négatif/non-fini.
+- **4 défauts RÉELS trouvés & corrigés :**
+  1. **Étiquettes P50/P95/P99 superposées** — sur distribution dégénérée (perte totale en un jour →
+     P50 = P99, ou stratégie sans drawdown → tous à 0) les 3 étiquettes se rendaient au même point :
+     **3 chevauchements sur 3 paires** (mesuré). Corrigé : le **trait reste à la position VRAIE**
+     (honnêteté §3), seule l'**étiquette** glisse (écart minimal 8 %, recalage dans le cadre) →
+     **0 chevauchement**, valeurs exactes toujours lisibles dans les tuiles.
+  2. **« 0k sims » sur un run borné** — `fmtNum(n_sims/1000, 0)` arrondissait 200 sims à `0k`,
+     effaçant l'information au moment précis où elle compte (budget CPU atteint). Corrigé : compte
+     **exact** sous 1000 (« 200 sims (borné) ») + infobulle expliquant la réduction.
+  3. **Bande de fenêtres non bornée** — 200 fenêtres = mur de 11 rangées (pas de débordement de div,
+     mais croissance illimitée et illisible). Corrigé : **48 dernières** affichées + « N plus
+     anciennes masquées » (jamais une troncature silencieuse §8).
+  4. **Ordre des fenêtres annoncé À L'ENVERS** — l'UI disait « récent → ancien » alors que le moteur
+     produit `start` CROISSANT, donc `windows[0]` couvre les trades les **plus anciens** (vérifié sur
+     série témoin). L'opérateur lisait sa dégradation temporelle inversée. Corrigé : « ancien →
+     récent ».
+- **Backpressure corrigée** : chaque rafraîchissement déclenche un calcul Monte Carlo complet côté
+  serveur ; 30 clics simultanés émettaient **30 requêtes**. Garde « en vol » (bouton désactivé +
+  requête ignorée si une est en cours) → **1 requête** pour 30 clics (mesuré).
+- **Chemins déjà sûrs confirmés** : WFE **négatif** (cas RÉEL — le moteur en produit) affiché
+  correctement ; percentiles/WFE **infinis** (JSON `1e400`) → ni `NaN` ni `Infinity` dans le DOM,
+  **aucun style CSS invalide** (les gardes `Number.isFinite` + `|| 1` sur l'échelle tiennent) ;
+  aucun débordement horizontal (panneau ni body).
+- **Vérif** : essai Playwright 5 pathologies → **0 chevauchement, 48 cases bornées, 1 requête sur 30
+  clics, 0 erreur JS** ; `tsc` + `vite build` OK ; **284 passed**, ruff clean (backend inchangé).
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.
