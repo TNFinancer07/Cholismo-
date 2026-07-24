@@ -17,8 +17,12 @@ def _bucket(ts: float, candle_seconds: float) -> float:
     return math.floor(ts / candle_seconds) * candle_seconds
 
 
-def _valid(p: dict) -> tuple | None:
-    """Print normalisé `(ts, price, size, side)` ou None si invalide (fail-closed §3)."""
+def _valid(p) -> tuple | None:
+    """Print normalisé `(ts, price, size, side)` ou None si invalide (fail-closed §3). Une entrée
+    NON-DICT (None, str, nombre) est écartée seule : garbage is not data, et surtout elle ne doit
+    jamais faire tomber le hot path (`p.get` levait `AttributeError`)."""
+    if not isinstance(p, dict):
+        return None
     price, size, side, ts = p.get("price"), p.get("size"), p.get("side"), p.get("ts")
     if (isinstance(price, (int, float)) and math.isfinite(price)
             and isinstance(size, (int, float)) and math.isfinite(size) and size > 0
@@ -77,6 +81,11 @@ def build_footprint(prints: list[dict], candle_seconds: float, tick: float,
     last = len(buckets) - 1
     candles = [_finalize_candle(b, tick, ratio, min_vol, book_maps if i == last else None)
                for i, b in enumerate(buckets)]
+    # Agrégat non-fini (volumes absurdes → débordement de la somme) : on ne publie JAMAIS un
+    # `delta`/`total_volume` égal à `inf`, qui s'afficherait comme une mesure réelle. La bougie
+    # corrompue est retirée — pas de donnée plutôt qu'une fausse (§3).
+    candles = [c for c in candles
+               if math.isfinite(c["delta"]) and math.isfinite(c["total_volume"])]
     candles.sort(key=lambda c: c["start_ts"])
     return candles[-max_candles:] if max_candles > 0 else candles
 
@@ -124,9 +133,12 @@ def _book_maps(book, tick: float) -> tuple[dict[int, float], dict[int, float]] |
             if not (isinstance(row, (list, tuple)) and len(row) >= 2):
                 continue
             price, size = row[0], row[1]
-            if not (isinstance(price, (int, float)) and math.isfinite(price)
+            # `price > 0` exigé, comme la validation DOM du moteur : un carnet 100 % aberrant
+            # (prix ≤ 0) serait sinon déclaré « vivant » tout en affirmant 0 liquidité sur des
+            # niveaux réels — une affirmation FAUSSE, pire qu'une absence (§3).
+            if not (isinstance(price, (int, float)) and math.isfinite(price) and price > 0
                     and isinstance(size, (int, float)) and math.isfinite(size) and size > 0):
-                continue                               # entrée non-finie → ignorée (§3)
+                continue                               # entrée aberrante/non-finie → ignorée (§3)
             k = round(float(price) / tick)
             out[i][k] = out[i].get(k, 0.0) + float(size)
     return (out[0], out[1]) if (out[0] or out[1]) else None

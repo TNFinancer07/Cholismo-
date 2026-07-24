@@ -1602,6 +1602,32 @@ aurait dupliqué l'agrégation : deux jeux de seuils à maintenir, divergence ga
   aucun champ de liquidité (§3).
 - **À venir** : miroir TS + rendu frontend (delta par bougie, murs L2 sur le Canvas footprint).
 
+### /devil D-042 — ticks désordonnés, carnets corrompus, intégrité du delta
+Attaques : séries tick-based désordonnées/incomplètes, `ticks_per_candle` extrême, carnets
+corrompus/aberrants, intégrité du delta sur gros volumes et prints simultanés.
+- **3 défauts RÉELS trouvés & corrigés :**
+  1. **Carnet 100 % aberrant déclaré « vivant ».** Un carnet ne contenant que des prix ≤ 0 passait
+     `book_state = LIVE` et affirmait alors **0 liquidité** sur des niveaux réels — une **affirmation
+     fausse, pire qu'une absence** (§3). `_book_maps` exige désormais `price > 0`, comme la
+     validation DOM du moteur ; un carnet entièrement aberrant retombe sur `ABSENT`. Un carnet
+     PARTIELLEMENT corrompu garde ses entrées saines (testé).
+  2. **Crash du hot path sur print non-dict** (`None`/`str`/nombre dans la liste) : `p.get` levait
+     `AttributeError` et aurait tué la boucle rapide. **Défaut PRÉ-EXISTANT à D-037** (vérifié sur
+     `7b05fec~1`) que le refactor avait conservé — corrigé : entrée non-dict écartée seule.
+  3. **Débordement publié en `inf`.** Des volumes absurdes faisaient déborder la somme →
+     `delta`/`total_volume` = `inf`, affiché comme une mesure réelle. La bougie corrompue est
+     désormais **retirée** (pas de donnée plutôt qu'une fausse, §3) ; les bougies saines de la même
+     série sont conservées.
+- **Chemins déjà sûrs confirmés** : tri chronologique **stable et déterministe** en mode tick
+  (série désordonnée + prints incomplets → 4 valides sur 6, découpage identique à chaque appel) ;
+  `ticks_per_candle = 10⁹` → une seule bougie (aucune boucle folle) ; `≤ 0` → repli propre sur le
+  bucket temporel ; liste vide → aucune bougie. **Intégrité du delta EXACTE** (`delta_bougie ==
+  Σ delta_niveaux`, bit à bit — même ordre d'accumulation) vérifiée sur **120 prints simultanés à
+  gros volumes** (1e6) sur 60 niveaux, et en mode tick.
+- **Vérif** : +8 tests /devil → **38 tests footprint**, **323 passed** (Redis relancé : les 18 tests
+  jusque-là skippés s'exécutent), ruff clean ; hot path moteur re-vérifié (carnet mêlant prix
+  aberrant et valide → aberrant ignoré, `bid_liq` correct, intégrité conservée).
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.

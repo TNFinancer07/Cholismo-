@@ -242,3 +242,85 @@ def test_backward_compatible_signature_unchanged():
     # les appels existants (sans les nouveaux paramètres) gardent leur comportement
     cs = build_footprint([_p(0, 100, 5, "BUY")], 60, 1.0, 3.0, 1, 5)
     assert len(cs) == 1 and cs[0]["total_volume"] == 5 and cs[0]["end_ts"] == 60
+
+
+# ---------- /devil (D-042) : ticks désordonnés, carnets corrompus, intégrité du delta ----------
+
+import math  # noqa: E402
+
+
+def test_devil_book_with_only_non_positive_prices_is_absent():
+    # Un carnet ne contenant QUE des prix ≤ 0 était déclaré LIVE et affirmait « 0 liquidité » sur
+    # des niveaux réels : affirmation FAUSSE (§3). Un carnet 100 % aberrant n'est pas vivant.
+    c = build_footprint([_p(0, 100, 1, "BUY")], 60, 1.0, 3.0, 1, 5,
+                        book=_book([[-100, 50], [0, 30]], []))[-1]
+    assert c["book_state"] == "ABSENT"
+    assert "bid_liq" not in c["levels"][0]
+
+
+def test_devil_book_mixes_valid_and_aberrant_prices():
+    # carnet partiellement corrompu : les entrées valides comptent, les aberrantes sont ignorées
+    c = build_footprint([_p(0, 100, 1, "BUY")], 60, 1.0, 3.0, 1, 5,
+                        book=_book([[-5, 999], [100, 40], [0, 12]], []))[-1]
+    assert c["book_state"] == "LIVE"
+    assert _levels(c)[100]["bid_liq"] == 40          # seule l'entrée saine est retenue
+
+
+def test_devil_non_dict_prints_do_not_crash():
+    # défaut PRÉ-EXISTANT (D-037) conservé par l'extension : `p.get` sur un non-dict levait
+    # AttributeError et tuait le hot path. Garbage is not data → ignoré (§3).
+    cs = build_footprint([None, "boom", 42, _p(0, 100, 3, "BUY")], 60, 1.0, 3.0, 1, 5)
+    assert len(cs) == 1 and cs[0]["total_volume"] == 3
+    assert build_footprint([None, "boom"], 60, 1.0, 3.0, 1, 5) == []
+
+
+def test_devil_overflowing_candle_is_dropped_not_infinite():
+    # volumes absurdes → agrégat non-fini : on ne publie JAMAIS un delta/volume `inf` (§3),
+    # la bougie corrompue est retirée (fail-closed : pas de donnée plutôt qu'une fausse).
+    cs = build_footprint([_p(0, 100, 1e308, "BUY"), _p(0, 101, 1e308, "BUY")], 60, 1.0, 3.0, 1, 5)
+    assert cs == []
+    for c in build_footprint([_p(0, 100, 1e308, "BUY"), _p(0, 101, 1e308, "BUY"),
+                              _p(120, 200, 5, "BUY")], 60, 1.0, 3.0, 1, 5):
+        assert math.isfinite(c["delta"]) and math.isfinite(c["total_volume"])
+
+
+def test_devil_tick_mode_unordered_incomplete_series():
+    # série désordonnée ET incomplète (champs manquants) : tri chronologique, prints invalides
+    # écartés, découpage stable et déterministe
+    prints = [_p(9, 100, 1, "BUY"), {"price": 101, "size": 1, "side": "BUY"},   # ts manquant
+              _p(1, 102, 2, "SELL"), {"ts": 5, "size": 1, "side": "BUY"},        # prix manquant
+              _p(5, 103, 1, "BUY"), _p(3, 104, 1, "SELL")]
+    cs = build_footprint(prints, 60, 1.0, 3.0, 1, 10, ticks_per_candle=2)
+    assert [c["start_ts"] for c in cs] == [1, 5]      # 4 prints valides → 2 bougies
+    assert sum(c["n_prints"] for c in cs) == 4
+    assert cs == build_footprint(prints, 60, 1.0, 3.0, 1, 10, ticks_per_candle=2)
+
+
+def test_devil_ticks_per_candle_extremes():
+    prints = [_p(i, 100 + i, 1, "BUY") for i in range(6)]
+    huge = build_footprint(prints, 60, 1.0, 3.0, 1, 10, ticks_per_candle=10**9)
+    assert len(huge) == 1 and huge[0]["n_prints"] == 6      # une seule bougie, pas de boucle folle
+    neg = build_footprint(prints, 60, 1.0, 3.0, 1, 10, ticks_per_candle=-5)
+    assert len(neg) == 1                                    # ≤ 0 → repli sur le bucket temporel
+    assert build_footprint([], 60, 1.0, 3.0, 1, 10, ticks_per_candle=3) == []
+
+
+def test_devil_delta_integrity_large_volumes_and_simultaneous_prints():
+    # gros volumes + prints SIMULTANÉS sur de nombreux niveaux : l'identité doit rester EXACTE
+    prints = []
+    for i in range(60):
+        prints.append(_p(0, 5000 + i * 0.25, 1e6 + i, "BUY"))     # même ts → rafale simultanée
+        prints.append(_p(0, 5000 + i * 0.25, 3.7e5 + i, "SELL"))
+    c = build_footprint(prints, 60, 0.25, 3.0, 1, 5)[0]
+    assert c["delta"] == sum(lvl["delta"] for lvl in c["levels"])          # identité EXACTE
+    ask = sum(lvl["ask_vol"] for lvl in c["levels"])
+    bid = sum(lvl["bid_vol"] for lvl in c["levels"])
+    assert abs(c["delta"] - (ask - bid)) < 1e-6
+    assert abs(c["total_volume"] - (ask + bid)) < 1e-6
+    assert c["n_prints"] == 120
+
+
+def test_devil_delta_integrity_holds_in_tick_mode():
+    prints = [_p(i, 100 + (i % 5), 10 ** 6, "BUY" if i % 3 else "SELL") for i in range(30)]
+    for c in build_footprint(prints, 60, 1.0, 3.0, 1, 20, ticks_per_candle=7):
+        assert c["delta"] == sum(lvl["delta"] for lvl in c["levels"])
