@@ -22,6 +22,7 @@ import { OrchestratorConsole } from '@/panels/views/OrchestratorConsole'
 import { ParamsView } from '@/panels/views/ParamsView'
 import { PromptsView } from '@/panels/views/PromptsView'
 import { RecapView } from '@/panels/views/RecapView'
+import { RobustnessView } from '@/panels/views/RobustnessView'
 
 const COLUMN_ZONES: ZoneKey[] = ['A', 'B', 'C']
 
@@ -104,6 +105,7 @@ export default function App() {
       {view === 'PARAMS' && <main className="flex min-h-0 flex-1 flex-col"><ParamsView /></main>}
       {view === 'JBORD' && <main className="flex min-h-0 flex-1 flex-col"><JournalDeBordView /></main>}
       {view === 'PNL' && <main className="flex min-h-0 flex-1 flex-col"><AnalysePnlView /></main>}
+      {view === 'ROBUST' && <main className="flex min-h-0 flex-1 flex-col"><RobustnessView /></main>}
       {view === 'TERMINAL' && <WorkspaceGrid />}
 
       <FunctionKeyBar />

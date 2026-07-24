@@ -105,6 +105,13 @@ def monte_carlo(store: EventStore) -> dict[str, Any]:
     return sim.run(rs).model_dump()
 
 
+def robustness(store: EventStore) -> dict[str, Any]:
+    """Consolide Walk-Forward + Monte Carlo (D-043 tranche 3) en UN payload pour la vue ROBUSTESSE.
+    Analyse OFFLINE de recherche — HORS ContextSchema live (§1). Chaque moteur est fail-closed :
+    données insuffisantes → verdict `INSUFFICIENT_DATA`, jamais une valeur fabriquée (§3/§8)."""
+    return {"walk_forward": walk_forward(store), "monte_carlo": monte_carlo(store)}
+
+
 def sharpe(store: EventStore) -> dict[str, Any]:
     """Per-trade Sharpe = mean(r)/stdev(r), reconciled outcomes only.
     Result score is displayed ONLY after 20+ trades (CLAUDE §2.7)."""

@@ -84,6 +84,18 @@ async def analyses_trades() -> dict[str, Any]:
     return await asyncio.to_thread(analyze_trades, config.SNAPSHOT_DIR)
 
 
+# ---------- Robustesse — Walk-Forward + Monte Carlo sur trades réconciliés (D-043) ----------
+
+@router.get("/analyses/robustness")
+async def analyses_robustness() -> dict[str, Any]:
+    """Consolide le Walk-Forward Efficiency (verdict ROBUST/OVERFIT_DETECTED) et la distribution
+    Monte Carlo du Max Drawdown (P50/P95/P99 + proba de dépasser le seuil challenge) sur les
+    R-multiples RÉCONCILIÉS. ANALYTIQUE hors-ligne, ADVISORY : jamais un ordre (§2.1). Calcul
+    CPU-borné (`MC_MAX_WORK`) offloadé hors de la boucle d'événements. Fail-closed : trades
+    insuffisants → verdicts `INSUFFICIENT_DATA` en 200, jamais une 500 (§3)."""
+    return await asyncio.to_thread(projections.robustness, get_store())
+
+
 # ---------- SSE — cadence-segmented channels (CLAUDE §6) ----------
 
 @router.get("/sse/{channel}")

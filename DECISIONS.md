@@ -1475,6 +1475,27 @@ Iterable[float]`). Trois choix de conception **scellés** :
    est `INSUFFICIENT_DATA` / `None` / `IS_UNPROFITABLE` / `UNDEFINED`, **jamais un nombre fabriqué**.
    Le contrat de type l'impose : chaque champ numérique est `float | None`.
 
+### Tranche 3 (`/feature`) — endpoint `GET /analyses/robustness` + vue « ROBUSTESSE »
+Exposition des deux moteurs sur les trades réconciliés, en surface **analytics OFFLINE** (fetch
+endpoint, pas un bloc SSE — §1, comme PNL/RECAP).
+- **Backend** : `projections.robustness(store)` consolide `walk_forward` + `monte_carlo` en un payload
+  typé ; `GET /analyses/robustness` l'offloade (`asyncio.to_thread`, calcul CPU-borné hors de la
+  boucle d'événements). **Fail-closed** : trades insuffisants → verdicts `INSUFFICIENT_DATA` en
+  **HTTP 200**, jamais une 500 (§3).
+- **Frontend** : vue `RobustnessView` (types miroirs locaux, `api.analysesRobustness`, poll 15 s +
+  anti-race). GAUCHE = verdict Walk-Forward (badge **ROBUSTE** ✓ vert / **SURAJUSTEMENT** ⚠ rouge /
+  IS non profitable ∅ / DONNÉES INSUFFISANTES), WFE, strip par fenêtre. DROITE = distribution Monte
+  Carlo : échelle P50/P95/P99 avec **trait OR du seuil** challenge + zone de danger, et la
+  **probabilité d'invalidation** (bande faible ✓ / modérée ⚠ / élevée ▲). Code couleur §3 STRICT :
+  glyphe + texte + position, jamais la couleur seule ; OR = seuil de référence. Câblée `ViewKey`
+  `ROBUST` + App.tsx + CommandBar (mnémonique `ROBUST`, alias ROBUSTESSE/WFE/MC…).
+- **Vérif** : 3 tests d'intégration (consolidation stub, fail-closed vide, endpoint 200 + contrat) →
+  **284 passed**, ruff clean ; `tsc` + `vite build` OK ; essai Playwright (endpoint réel → fail-closed
+  « DONNÉES INSUFFISANTES » ; payloads interceptés → ROBUSTE et SURAJUSTEMENT rendus, P50/P95/P99 vs
+  seuil, proba, **0 erreur JS**) ; captures à l'appui.
+- **À venir** : heatmap paramétrique **quand** une source de backtest réelle existera (export
+  optimiseur NT8 ou harnais de backtest) — jamais une grille inventée (§3/§8).
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.

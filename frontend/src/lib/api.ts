@@ -70,6 +70,7 @@ export const api = {
     request('/settings/import', {
       method: 'POST', body: JSON.stringify({ payload, unlock_live: unlockLive }) }),
   analysesTrades: () => request<unknown>('/analyses/trades'),
+  analysesRobustness: () => request<unknown>('/analyses/robustness'),
   snapshotsList: () => request<unknown>('/snapshots/list'),
   snapshot: (id: string) => request<unknown>(`/snapshots/${encodeURIComponent(id)}`),
   captureSnapshot: () => request<unknown>('/snapshot', { method: 'POST' }),
