@@ -1525,6 +1525,25 @@ rafraîchissements, WFE négatif/non-fini.
 - **Vérif** : essai Playwright 5 pathologies → **0 chevauchement, 48 cases bornées, 1 requête sur 30
   clics, 0 erreur JS** ; `tsc` + `vite build` OK ; **284 passed**, ruff clean (backend inchangé).
 
+### /polish D-043 tranche 3 — robustesse du contrat de réponse + honnêteté du périmé
+Nettoyage (aucun log de debug ni code mort ; tags process « /devil » des commentaires → rationale
+durable) ET **3 défauts trouvés en cours de revue, corrigés** — ils dépassaient le cosmétique :
+1. **Écran blanc TOTAL sur réponse partielle (critique).** Un payload sans `walk_forward` (ou sans
+   `monte_carlo`, ou un JSON mutilé) provoquait `Cannot read properties of undefined (reading
+   'verdict')` : `root.innerText.length = 0` — **tout le terminal mourait**, Zone 0 et Phase 0
+   comprises, à cause d'une simple hoquet backend sur une vue d'analyse secondaire. Corrigé : la
+   **forme est validée avant tout rendu** (`normalize()`), bloc absent/non-objet → objet fail-closed
+   `INSUFFICIENT_DATA` (§3). Mesure : **11 erreurs JS → 0**, panneau vivant dans les 5 cas.
+2. **Chiffres périmés présentés comme courants.** Après un premier succès, un échec ultérieur (HTTP
+   500) laissait les anciens percentiles à l'écran **sans le dire** — un drawdown périmé se lisait
+   comme courant (§3). Corrigé : bandeau **PÉRIMÉ** (glyphe ⚠ + texte + heure du dernier succès +
+   action « relancer avec maj ») et panneau atténué ; les données restent visibles mais **marquées**.
+3. **« IS NaN% »** quand `is_frac` manque : repli sur la convention 70/30 (jamais un NaN affiché).
+- **Vérif** : régression complète de l'essai `/devil` (0 chevauchement, 48 cases bornées, 1 requête
+  sur 30 clics, WFE négatif/infini propres) + probe contrat (bloc manquant ×2, champs manquants,
+  500-après-succès, JSON invalide) → **0 erreur JS** ; `npm run typecheck` + `vite build` OK ;
+  **284 passed**, ruff clean ; capture du bandeau PÉRIMÉ à l'appui.
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.

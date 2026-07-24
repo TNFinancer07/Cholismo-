@@ -33,6 +33,29 @@ interface RobustnessPayload { walk_forward: WalkForward; monte_carlo: MonteCarlo
 
 const POLL_MS = 15000
 
+// Une réponse PARTIELLE (bloc manquant, JSON mutilé) faisait planter la vue — et avec elle le
+// terminal entier (écran blanc, Zone 0 comprise). La forme est donc VALIDÉE avant tout rendu :
+// bloc absent/non-objet → on substitue un objet fail-closed `INSUFFICIENT_DATA` (§3), jamais un
+// accès sur `undefined`. Aucune valeur n'est inventée : l'absence est affichée comme telle.
+const isObj = (x: unknown): x is Record<string, unknown> =>
+  typeof x === 'object' && x !== null && !Array.isArray(x)
+
+const WF_EMPTY: WalkForward = { verdict: 'INSUFFICIENT_DATA', wfe: null, n_windows: 0,
+  overfit_windows: 0, overfit_ratio: null, is_frac: 0.7, window: 0, step: 0, threshold: 0.5, windows: [] }
+const MC_EMPTY: MonteCarlo = { verdict: 'INSUFFICIENT_DATA', n_sims: 0, n_trades: 0, threshold: null,
+  max_dd_p50: null, max_dd_p95: null, max_dd_p99: null, prob_exceed: null, mean_max_dd: null,
+  seed: null, capped: false }
+
+function normalize(raw: unknown): RobustnessPayload {
+  const r = isObj(raw) ? raw : {}
+  const wf = isObj(r.walk_forward) ? { ...WF_EMPTY, ...r.walk_forward } as WalkForward : WF_EMPTY
+  const mc = isObj(r.monte_carlo) ? { ...MC_EMPTY, ...r.monte_carlo } as MonteCarlo : MC_EMPTY
+  // un `is_frac` manquant produisait « IS NaN% » — on retombe sur la convention 70/30
+  if (!Number.isFinite(wf.is_frac)) wf.is_frac = WF_EMPTY.is_frac
+  if (!Number.isFinite(wf.threshold)) wf.threshold = WF_EMPTY.threshold
+  return { walk_forward: wf, monte_carlo: mc }
+}
+
 // verdict Walk-Forward → glyphe + libellé + classe (jamais la couleur seule §3)
 function wfBadge(verdict: string): { glyph: string; label: string; cls: string } {
   switch (verdict) {
@@ -55,31 +78,33 @@ const pctOf = (v: number | null): string =>
   v === null || !Number.isFinite(v) ? '·' : (v * 100).toFixed(1) + ' %'
 const rOf = (v: number | null): string =>
   v === null || !Number.isFinite(v) ? '·' : fmtNum(v, 2) + ' R'
-// /devil : un run BORNÉ (n_sims réduit) affichait « 0k sims » — le nombre réel est justement
-// l'information critique dans ce cas. En dessous de 1000, on montre le compte EXACT.
+// Un run BORNÉ (n_sims réduit par le budget CPU) doit montrer son compte EXACT : c'est là que
+// l'information est critique. Sous 1000, pas d'arrondi en « k » (qui affichait « 0k sims »).
 const simsOf = (n: number): string =>
   !Number.isFinite(n) ? '·' : n >= 1000 ? Math.round(n / 1000) + 'k sims' : n + ' sims'
 
-// Bande de fenêtres BORNÉE (/devil : 200 fenêtres = mur illisible, croissance non bornée).
+// Bande de fenêtres BORNÉE : le nombre de fenêtres croît avec l'historique et devient vite un mur
+// illisible ; on affiche les plus récentes et on ANNONCE le reste (jamais de troncature muette §8).
 const MAX_STRIP = 48
 
 function useRobustness() {
   const [data, setData] = useState<RobustnessPayload | null>(null)
   const [failed, setFailed] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [okTs, setOkTs] = useState<number | null>(null)   // horodatage du dernier succès
   const reqSeq = useRef(0)
   const inFlight = useRef(false)
   const refresh = useCallback(async () => {
-    // /devil (backpressure) : chaque appel déclenche un calcul Monte Carlo complet côté serveur.
-    // Une rafale de clics en lançait autant en parallèle → on IGNORE tant qu'une requête est en vol.
+    // Backpressure : chaque appel déclenche un calcul Monte Carlo complet côté serveur. Une rafale
+    // de clics en lançait autant en parallèle → on IGNORE tant qu'une requête est en vol.
     if (inFlight.current) return
     inFlight.current = true; setBusy(true)
     const seq = ++reqSeq.current
     try {
-      const d = await api.analysesRobustness() as RobustnessPayload
-      if (seq === reqSeq.current) { setData(d); setFailed(false) }
+      const d = normalize(await api.analysesRobustness())   // forme validée avant tout rendu
+      if (seq === reqSeq.current) { setData(d); setFailed(false); setOkTs(Date.now()) }
     } catch {
-      if (seq === reqSeq.current) setFailed(true)   // bandeau flux global couvre aussi
+      if (seq === reqSeq.current) setFailed(true)   // conserve l'affichage mais le marque PÉRIMÉ
     } finally {
       inFlight.current = false; setBusy(false)
     }
@@ -89,7 +114,7 @@ function useRobustness() {
     const timer = window.setInterval(() => void refresh(), POLL_MS)
     return () => { reqSeq.current++; window.clearInterval(timer) }
   }, [refresh])
-  return { data, failed, busy, refresh }
+  return { data, failed, busy, okTs, refresh }
 }
 
 // ---------- Walk-Forward (colonne gauche) ----------
@@ -123,9 +148,9 @@ function WalkForwardCard({ wf }: { wf: WalkForward }) {
             <Row label="Fenêtres surajustées" value={`${wf.overfit_windows} / ${wf.n_windows}`}
               danger={wf.overfit_windows > 0} />
           </div>
-          {/* Strip par fenêtre. /devil : ordre RÉTABLI — `start` croissant = trades les plus ANCIENS
-              d'abord (le libellé disait l'inverse) ; et affichage BORNÉ aux dernières fenêtres, le
-              reste étant annoncé (jamais une troncature silencieuse §8). */}
+          {/* Strip par fenêtre. Ordre : `start` CROISSANT côté moteur ⇒ `windows[0]` couvre les trades
+              les plus ANCIENS — le libellé doit donc dire « ancien → récent », sinon l'opérateur lit
+              sa dégradation temporelle à l'envers. Affichage borné aux dernières, reste annoncé. */}
           <div className="mt-1">
             <span className="mb-1 block text-xxs uppercase text-term-faint">
               Fenêtres (ancien → récent)
@@ -169,9 +194,9 @@ function MonteCarloCard({ mc }: { mc: MonteCarlo }) {
     { key: 'p95', label: 'P95', v: mc.max_dd_p95 },
     { key: 'p99', label: 'P99', v: mc.max_dd_p99 },
   ]
-  // /devil : sur une distribution dégénérée (P50 = P95 = P99 — ex. perte totale en un jour, ou
-  // aucun drawdown) les trois étiquettes se superposaient en bouillie illisible. Le TRAIT reste à
-  // la position VRAIE (honnêteté §3) ; seule l'ÉTIQUETTE glisse pour rester lisible.
+  // Sur une distribution dégénérée (P50 = P95 = P99 — perte totale en un jour, ou aucun drawdown)
+  // les trois étiquettes tombent au même point. Le TRAIT reste à la position VRAIE (honnêteté §3) ;
+  // seule l'ÉTIQUETTE glisse d'un écart minimal pour rester lisible.
   const LABEL_GAP = 8
   const labelPos = ((): number[] => {
     const out = marks.map((m) => pos(m.v))
@@ -262,7 +287,10 @@ function Row({ label, value, danger }: { label: string; value: string; danger?: 
 }
 
 export function RobustnessView() {
-  const { data, failed, busy, refresh } = useRobustness()
+  const { data, failed, busy, okTs, refresh } = useRobustness()
+  // Un échec APRÈS un succès laissait les anciens chiffres à l'écran sans le dire : un drawdown
+  // périmé se lisait comme courant (§3). Les données restent visibles — mais marquées PÉRIMÉ.
+  const stale = failed && data !== null
 
   return (
     <div className="flex min-h-0 flex-1 flex-col p-1.5">
@@ -281,9 +309,18 @@ export function RobustnessView() {
             {failed ? 'analyse indisponible — flux backend interrompu' : 'chargement de l’analyse…'}
           </p>
         ) : (
-          <div className="grid min-h-0 flex-1 grid-cols-1 gap-2 overflow-auto p-2 lg:grid-cols-2">
-            <WalkForwardCard wf={data.walk_forward} />
-            <MonteCarloCard mc={data.monte_carlo} />
+          <div className={cn('flex min-h-0 flex-1 flex-col', stale && 'opacity-70')}>
+            {stale && (
+              <p className="flex shrink-0 items-center gap-1.5 border border-stale/50 bg-stale/10 px-2 py-1 text-xxs font-bold text-stale">
+                <span aria-hidden>⚠</span> PÉRIMÉ — le calcul n'a pas pu être rafraîchi
+                {okTs !== null && <span className="font-normal"> · dernier succès {new Date(okTs).toLocaleTimeString('fr-CA')}</span>}
+                <span className="ml-auto font-normal">relancer avec « maj »</span>
+              </p>
+            )}
+            <div className="grid min-h-0 flex-1 grid-cols-1 gap-2 overflow-auto p-2 lg:grid-cols-2">
+              <WalkForwardCard wf={data.walk_forward} />
+              <MonteCarloCard mc={data.monte_carlo} />
+            </div>
           </div>
         )}
       </Panel>
