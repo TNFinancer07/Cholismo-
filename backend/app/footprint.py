@@ -1,26 +1,44 @@
-"""Footprint + détection d'imbalances (D-037).
+"""Footprint, imbalances, delta et fusion carnet L2 (D-037 + D-042).
 
-Agrège le flux Time & Sales (prints OBSERVÉS, §2.1) par BOUGIE (bucket temporel) puis par
-NIVEAU de prix (quantifié sur la grille de tick) : BUY = agresseur à l'ASK (`ask_vol`), SELL =
-agresseur au BID (`bid_vol`). Par bougie : OHLC, POC (volume total max), et IMBALANCES
-DIAGONALES (comparaison en diagonale ask[k]↔bid[k−1] / bid[k]↔ask[k+1]).
+Agrège le flux Time & Sales (prints OBSERVÉS, §2.1) par BOUGIE puis par NIVEAU de prix (quantifié
+sur la grille de tick) : BUY = agresseur à l'ASK (`ask_vol`), SELL = agresseur au BID (`bid_vol`).
+Par bougie : OHLC, POC (volume total max), IMBALANCES DIAGONALES (ask[k]↔bid[k−1] / bid[k]↔ask[k+1]),
+DELTA (agresseur net) et, sur la bougie en formation, la LIQUIDITÉ AU REPOS du carnet L2.
 
-Pur et déterministe (aucun LLM, aucun état caché) : `build_footprint(prints, …)` ne dépend que
-de ses entrées. FAIL-CLOSED (§3) : prix/taille non-fini, côté inconnu → ignorés (jamais un
-volume inventé)."""
+Notes de conception :
+- **Bougies** : bucket temporel (`candle_seconds`) ou TICK-BASED (`ticks_per_candle` prints par
+  bougie). En mode tick, les prints sont triés chronologiquement d'abord — le tampon amont arrive
+  dans l'ordre d'accumulation, pas nécessairement trié ; sans ce tri le découpage ne serait pas
+  déterministe.
+- **Delta** : par niveau `ask_vol − bid_vol`, par bougie la somme. L'accumulation suit le MÊME
+  ordre que la construction des niveaux, donc l'identité `delta_bougie == Σ delta_niveaux` est
+  exacte bit à bit (aucune dérive de virgule flottante entre les deux).
+- **Carnet L2** : c'est un instantané COURANT. Il n'enrichit QUE la bougie en formation ; l'attacher
+  aux bougies passées fabriquerait une association historique fausse (le carnet d'il y a dix minutes
+  n'est pas celui d'alors).
+
+Pur et déterministe (aucun LLM, aucun état caché) : `build_footprint(prints, …)` ne dépend que de
+ses entrées. FAIL-CLOSED (§3) : print malformé, prix/taille non-fini, côté inconnu → ignorés ;
+carnet absent/gelé/aberrant → aucune liquidité exposée ; agrégat qui déborde → bougie retirée.
+Jamais un volume, un mur ou une mesure inventés."""
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
+from typing import Any
+
+# Print normalisé, validé : (ts, prix, taille, côté)
+Print = tuple[float, float, float, str]
 
 
 def _bucket(ts: float, candle_seconds: float) -> float:
     return math.floor(ts / candle_seconds) * candle_seconds
 
 
-def _valid(p) -> tuple | None:
+def _valid(p: Any) -> Print | None:
     """Print normalisé `(ts, price, size, side)` ou None si invalide (fail-closed §3). Une entrée
-    NON-DICT (None, str, nombre) est écartée seule : garbage is not data, et surtout elle ne doit
-    jamais faire tomber le hot path (`p.get` levait `AttributeError`)."""
+    NON-DICT (None, str, nombre) est écartée SEULE : garbage is not data, et une liste de prints
+    corrompue ne doit jamais faire tomber le hot path."""
     if not isinstance(p, dict):
         return None
     price, size, side, ts = p.get("price"), p.get("size"), p.get("side"), p.get("ts")
@@ -32,22 +50,20 @@ def _valid(p) -> tuple | None:
     return None
 
 
-def build_footprint(prints: list[dict], candle_seconds: float, tick: float,
+def build_footprint(prints: Sequence[Any], candle_seconds: float, tick: float,
                     ratio: float, min_vol: float, max_candles: int,
-                    ticks_per_candle: int = 0, book=None) -> list[dict]:
+                    ticks_per_candle: int = 0, book: Any = None) -> list[dict]:
     """Construit les bougies footprint depuis les prints. Retourne les `max_candles` bougies les
     plus récentes, triées par `start_ts` croissant. Chaque bougie : `{start_ts, end_ts, open,
     high, low, close, poc, total_volume, delta, n_prints, book_state, levels}` où chaque niveau est
-    `{price, bid_vol, ask_vol, delta, imbalance ∈ ASK|BID|None}` (trié prix décroissant).
+    `{price, bid_vol, ask_vol, delta, imbalance ∈ ASK|BID|None}` (trié prix décroissant), plus
+    `bid_liq`/`ask_liq` quand le carnet est vivant.
 
-    - `delta` (D-042) : par niveau `ask_vol − bid_vol` (agresseur net) ; par bougie, la somme.
-    - `ticks_per_candle > 0` (D-042) : bougies **TICK-BASED** (N prints par bougie) au lieu du
-      bucket temporel ; prints ordonnés chronologiquement d'abord (déterminisme), `start_ts`/
-      `end_ts` = ts du premier/dernier print.
-    - `book` (D-042) : instantané L2 COURANT. Il n'enrichit QUE la bougie en formation (la
-      dernière) — l'attacher aux bougies passées fabriquerait une association historique fausse.
-      Chaque bougie porte `book_state ∈ LIVE|ABSENT` ; carnet absent/gelé/corrompu → `ABSENT` et
-      aucun champ de liquidité (jamais un faux mur, §3)."""
+    `prints` est délibérément `Sequence[Any]` : la source peut livrer des entrées corrompues, et
+    chacune est validée puis écartée isolément (§3) plutôt que de faire confiance au type déclaré.
+    `ticks_per_candle > 0` bascule en bougies TICK-BASED (sinon bucket temporel) ; `book` est
+    l'instantané L2 courant, appliqué à la seule bougie en formation. Voir les notes de conception
+    en tête de module."""
     if tick <= 0 or (ticks_per_candle <= 0 and candle_seconds <= 0):
         return []
 
@@ -90,14 +106,14 @@ def build_footprint(prints: list[dict], candle_seconds: float, tick: float,
     return candles[-max_candles:] if max_candles > 0 else candles
 
 
-def _new_bucket(v: tuple) -> dict:
+def _new_bucket(v: Print) -> dict:
     ts, price, _size, _side = v
     return {"start_ts": ts, "end_ts": ts, "levels": {},   # k → [bid_vol, ask_vol]
             "first_ts": ts, "last_ts": ts, "n_prints": 0,
             "open": price, "close": price, "high": price, "low": price}
 
 
-def _add(b: dict, v: tuple, tick: float) -> None:
+def _add(b: dict, v: Print, tick: float) -> None:
     ts, price, size, side = v
     k = round(price / tick)
     lvl = b["levels"].get(k)
@@ -118,7 +134,7 @@ def _add(b: dict, v: tuple, tick: float) -> None:
     b["low"] = min(b["low"], price)
 
 
-def _book_maps(book, tick: float) -> tuple[dict[int, float], dict[int, float]] | None:
+def _book_maps(book: Any, tick: float) -> tuple[dict[int, float], dict[int, float]] | None:
     """Carnet L2 `{bids: [[prix, taille]…], asks: […]}` → deux cartes `k → liquidité au repos`.
     None si absent/mal formé, ou si AUCUNE entrée n'est exploitable : un carnet vide ou corrompu
     n'est pas « vivant » — on ne fabrique jamais de mur de liquidité (§3)."""
@@ -133,9 +149,10 @@ def _book_maps(book, tick: float) -> tuple[dict[int, float], dict[int, float]] |
             if not (isinstance(row, (list, tuple)) and len(row) >= 2):
                 continue
             price, size = row[0], row[1]
-            # `price > 0` exigé, comme la validation DOM du moteur : un carnet 100 % aberrant
-            # (prix ≤ 0) serait sinon déclaré « vivant » tout en affirmant 0 liquidité sur des
-            # niveaux réels — une affirmation FAUSSE, pire qu'une absence (§3).
+            # `price > 0` exigé, comme la validation DOM du moteur : un carnet dont AUCUNE
+            # entrée n'est exploitable doit retomber sur ABSENT. Le déclarer « vivant » le ferait
+            # affirmer 0 liquidité sur des niveaux réels — une affirmation FAUSSE, pire qu'une
+            # absence (§3).
             if not (isinstance(price, (int, float)) and math.isfinite(price) and price > 0
                     and isinstance(size, (int, float)) and math.isfinite(size) and size > 0):
                 continue                               # entrée aberrante/non-finie → ignorée (§3)

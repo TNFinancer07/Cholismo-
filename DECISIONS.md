@@ -1628,6 +1628,26 @@ corrompus/aberrants, intégrité du delta sur gros volumes et prints simultanés
   jusque-là skippés s'exécutent), ruff clean ; hot path moteur re-vérifié (carnet mêlant prix
   aberrant et valide → aberrant ignoré, `bid_liq` correct, intégrité conservée).
 
+### /polish D-042 — notes de conception durables + typage strict
+Nettoyage sans changement de comportement (38 tests footprint / 323 verts avant comme après) :
+- **Docstring de module réécrit** : il ne décrivait plus que D-037 (bucket temporel, imbalances)
+  alors que le module porte désormais le delta, les bougies tick-based et la fusion L2. Les trois
+  arbitrages sont désormais des **notes de conception** en tête de module — pourquoi le tri
+  chronologique est obligatoire en mode tick (le tampon amont n'est pas trié), pourquoi l'identité
+  `delta_bougie == Σ delta_niveaux` est exacte **bit à bit** (même ordre d'accumulation), et pourquoi
+  le carnet n'enrichit que la bougie en formation (instantané courant, pas d'histoire).
+- **Commentaires de passe `/devil` convertis** : ils racontaient le bug (« `p.get` levait
+  `AttributeError` », « serait sinon déclaré vivant ») ; ils énoncent maintenant la **règle**
+  (garbage is not data ; un carnet sans entrée exploitable retombe sur ABSENT). Aucun tag process ne
+  subsiste dans le code applicatif.
+- **Typage strict** : alias `Print = tuple[float, float, float, str]` pour le print validé ;
+  `_new_bucket`/`_add` typés dessus ; `_valid(p: Any)`, `_book_maps(book: Any)`, et surtout
+  `prints: Sequence[Any]` **délibérément** — la source peut livrer des entrées corrompues et chacune
+  est validée puis écartée isolément, plutôt que de faire confiance au type déclaré (le mensonge
+  `list[dict]` avait précisément masqué le crash non-dict).
+- **Vérif** : aucun log de debug ni code mort ; **323 passed**, ruff clean ; check d'intégration
+  moteur (carnet FRESH → `LIVE`, delta et intégrité corrects).
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.
