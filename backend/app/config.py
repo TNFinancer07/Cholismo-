@@ -81,6 +81,9 @@ FOOTPRINT_CANDLES = int(os.getenv("FOOTPRINT_CANDLES", "12"))         # bougies 
 FOOTPRINT_IMBALANCE_RATIO = float(os.getenv("FOOTPRINT_IMBALANCE_RATIO", "3.0"))   # AUTORITÉ (300 %)
 FOOTPRINT_MIN_IMBALANCE_VOL = float(os.getenv("FOOTPRINT_MIN_IMBALANCE_VOL", "1"))  # plancher, v1
 FOOTPRINT_MAX_PRINTS = int(os.getenv("FOOTPRINT_MAX_PRINTS", "800"))  # tampon de prints accumulés
+# D-042 — bougies TICK-BASED : N prints par bougie au lieu du bucket temporel. 0 = temporel
+# (défaut, comportement D-037 inchangé). PLACEHOLDER v1 provisional, à calibrer par l'humain.
+FOOTPRINT_TICKS_PER_CANDLE = int(os.getenv("FOOTPRINT_TICKS_PER_CANDLE", "0"))
 
 # --- CVD granulaire stratifié par taille d'ordre (D-038) ---
 # Seuil retail/institutionnel = v1 provisional (PLACEHOLDER — pas d'AUTORITÉ dans /reference ;

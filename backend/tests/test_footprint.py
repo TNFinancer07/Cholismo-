@@ -137,3 +137,108 @@ def test_zero_diagonal_no_division_error():
 def test_zero_or_negative_tick_returns_empty():
     assert build_footprint([_p(0, 5000, 1, "BUY")], 60, 0.0, 3.0, 1, 12) == []
     assert build_footprint([_p(0, 5000, 1, "BUY")], 0.0, 0.25, 3.0, 1, 12) == []
+
+
+# ---------- D-042 tranche 1 : Delta, bougies tick-based, fusion carnet L2 ----------
+# Extension ADDITIVE de `build_footprint` (arbitrage tranché avec l'opérateur : une seule source de
+# vérité, pas de second moteur qui dupliquerait l'agrégation tape/niveaux/imbalances).
+#
+# - **Delta** : par NIVEAU `delta = ask_vol − bid_vol` (agresseur net) ; par BOUGIE `delta` = somme
+#   des deltas de niveau = `ask_total − bid_total` (intégrité vérifiée).
+# - **Bougies TICK-BASED** (`ticks_per_candle > 0`) : N prints par bougie au lieu d'un bucket
+#   temporel ; les prints sont ordonnés chronologiquement d'abord (déterminisme), `start_ts`/`end_ts`
+#   = ts du premier/dernier print de la bougie.
+# - **Fusion carnet L2** : le carnet est un instantané COURANT — l'attacher aux bougies PASSÉES
+#   fabriquerait une association historique fausse. Il n'enrichit donc QUE la bougie en formation
+#   (la dernière), avec `bid_liq`/`ask_liq` par niveau ; chaque bougie porte `book_state` ∈
+#   `LIVE`|`ABSENT`. Carnet absent/gelé/invalide → `ABSENT`, aucune liquidité inventée (§3).
+
+
+def _book(bids, asks):
+    return {"bids": bids, "asks": asks}
+
+
+def test_level_delta_is_ask_minus_bid():
+    c = build_footprint([_p(0, 100, 7, "BUY"), _p(0, 100, 2, "SELL")], 60, 1.0, 3.0, 1, 5)[0]
+    assert _levels(c)[100]["delta"] == 5              # 7 ask − 2 bid
+
+
+def test_candle_delta_equals_sum_of_level_deltas():
+    prints = [_p(0, 100, 7, "BUY"), _p(0, 100, 2, "SELL"),
+              _p(0, 101, 1, "BUY"), _p(0, 101, 6, "SELL")]
+    c = build_footprint(prints, 60, 1.0, 3.0, 1, 5)[0]
+    assert c["delta"] == sum(lvl["delta"] for lvl in c["levels"])
+    assert c["delta"] == (7 + 1) - (2 + 6)            # ask_total − bid_total = 0
+
+
+def test_candle_delta_sign_follows_aggressor():
+    buy = build_footprint([_p(0, 100, 9, "BUY")], 60, 1.0, 3.0, 1, 5)[0]
+    sell = build_footprint([_p(0, 100, 9, "SELL")], 60, 1.0, 3.0, 1, 5)[0]
+    assert buy["delta"] == 9 and sell["delta"] == -9
+
+
+def test_tick_based_candles_group_by_print_count():
+    prints = [_p(i, 100 + (i % 3), 1, "BUY") for i in range(10)]
+    cs = build_footprint(prints, 60, 1.0, 3.0, 1, 10, ticks_per_candle=4)
+    assert len(cs) == 3                                # 4 + 4 + 2
+    assert [c["n_prints"] for c in cs] == [4, 4, 2]
+
+
+def test_tick_based_candles_are_chronological_and_deterministic():
+    prints = [_p(5, 100, 1, "BUY"), _p(1, 101, 1, "SELL"), _p(3, 102, 1, "BUY"), _p(2, 103, 1, "SELL")]
+    cs = build_footprint(prints, 60, 1.0, 3.0, 1, 10, ticks_per_candle=2)
+    assert [c["start_ts"] for c in cs] == [1, 3]       # ordonné par ts, pas par ordre d'arrivée
+    assert cs[0]["end_ts"] == 2 and cs[1]["end_ts"] == 5
+    assert cs == build_footprint(prints, 60, 1.0, 3.0, 1, 10, ticks_per_candle=2)   # déterministe
+
+
+def test_tick_based_ohlc_from_first_and_last_print():
+    prints = [_p(1, 100, 1, "BUY"), _p(2, 105, 1, "BUY"), _p(3, 98, 1, "SELL")]
+    c = build_footprint(prints, 60, 1.0, 3.0, 1, 10, ticks_per_candle=3)[0]
+    assert c["open"] == 100 and c["close"] == 98 and c["high"] == 105 and c["low"] == 98
+
+
+def test_book_enriches_only_the_forming_candle():
+    prints = [_p(0, 100, 1, "BUY"), _p(120, 100, 1, "BUY")]      # 2 bougies de 60 s
+    cs = build_footprint(prints, 60, 1.0, 3.0, 1, 5, book=_book([[100, 40]], [[101, 25]]))
+    assert cs[0]["book_state"] == "ABSENT"            # bougie PASSÉE : jamais de mur rétro-attribué
+    assert cs[-1]["book_state"] == "LIVE"
+    assert "bid_liq" not in cs[0]["levels"][0]
+    assert _levels(cs[-1])[100]["bid_liq"] == 40
+
+
+def test_book_liquidity_matched_by_price_level():
+    prints = [_p(0, 100, 1, "BUY"), _p(0, 101, 1, "SELL")]
+    c = build_footprint(prints, 60, 1.0, 3.0, 1, 5,
+                        book=_book([[100, 40]], [[101, 25]]))[-1]
+    lv = _levels(c)
+    assert lv[100]["bid_liq"] == 40 and lv[100]["ask_liq"] == 0
+    assert lv[101]["ask_liq"] == 25 and lv[101]["bid_liq"] == 0
+
+
+def test_book_absent_is_explicit_never_invented():
+    c = build_footprint([_p(0, 100, 1, "BUY")], 60, 1.0, 3.0, 1, 5)[-1]
+    assert c["book_state"] == "ABSENT"
+    assert "bid_liq" not in c["levels"][0] and "ask_liq" not in c["levels"][0]
+
+
+def test_book_invalid_or_frozen_treated_as_absent():
+    p = [_p(0, 100, 1, "BUY")]
+    for bad in (None, "boom", {}, {"bids": "x", "asks": None}, _book([[float("nan"), 5]], [])):
+        c = build_footprint(p, 60, 1.0, 3.0, 1, 5, book=bad)[-1]
+        assert c["book_state"] == "ABSENT"            # fail-closed : aucun faux mur (§3)
+        assert "bid_liq" not in c["levels"][0]
+
+
+def test_book_non_finite_sizes_ignored_per_level():
+    c = build_footprint([_p(0, 100, 1, "BUY"), _p(0, 101, 1, "BUY")], 60, 1.0, 3.0, 1, 5,
+                        book=_book([[100, float("inf")], [101, 12]], []))[-1]
+    lv = _levels(c)
+    assert lv[100]["bid_liq"] == 0                    # taille non-finie → ignorée, jamais propagée
+    assert lv[101]["bid_liq"] == 12
+
+
+def test_backward_compatible_signature_unchanged():
+    # les appels existants (sans les nouveaux paramètres) gardent leur comportement
+    cs = build_footprint([_p(0, 100, 5, "BUY")], 60, 1.0, 3.0, 1, 5)
+    assert len(cs) == 1 and cs[0]["total_volume"] == 5 and cs[0]["end_ts"] == 60

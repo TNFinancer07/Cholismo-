@@ -397,7 +397,7 @@ class Engine:
                         last_reset_ts=self._cvd_reset_ts, reset_reason=self._cvd_reset_reason,
                         stale=stale, capped=len(self._cvd_levels) >= CVD_MAX_TRACKED)
 
-    def _build_footprint(self, tape: MetaField, now: float) -> MetaField:
+    def _build_footprint(self, tape: MetaField, order_book: MetaField, now: float) -> MetaField:
         """Footprint + imbalances (D-037) : accumule les prints NEUFS du tape (seq-dédup, comme
         le CVD) dans un buffer borné, puis en construit les bougies (agrégation Bid×Ask par
         niveau, POC, imbalances diagonales) — pur via `build_footprint`. Tape non FRESH → pas
@@ -416,13 +416,19 @@ class Engine:
                 new_max = max(new_max, seq)
             self._fp_last_seq = new_max
 
+        # Carnet L2 (D-042) : passé UNIQUEMENT s'il est FRESH — un carnet périmé/absent ne doit
+        # jamais devenir un mur de liquidité affiché comme réel (§3). Le moteur ne l'applique
+        # qu'à la bougie en formation (pas de rétro-attribution aux bougies passées).
+        book = order_book.value if order_book.freshness == Freshness.FRESH else None
         candles = build_footprint(
             list(self._fp_prints), config.FOOTPRINT_CANDLE_SECONDS, config.PRICE_TICK,
             config.FOOTPRINT_IMBALANCE_RATIO, config.FOOTPRINT_MIN_IMBALANCE_VOL,
-            config.FOOTPRINT_CANDLES)
+            config.FOOTPRINT_CANDLES, ticks_per_candle=config.FOOTPRINT_TICKS_PER_CANDLE,
+            book=book)
         value = {"candles": candles, "tick": config.PRICE_TICK,
                  "ratio": config.FOOTPRINT_IMBALANCE_RATIO,
-                 "candle_seconds": config.FOOTPRINT_CANDLE_SECONDS}
+                 "candle_seconds": config.FOOTPRINT_CANDLE_SECONDS,
+                 "ticks_per_candle": config.FOOTPRINT_TICKS_PER_CANDLE}
         return MetaField(value=value, last_update_ts=tape.last_update_ts, source=tape.source,
                          freshness=tape.freshness, flags=tape.flags)
 
@@ -538,7 +544,7 @@ class Engine:
             order_book=order_book,
             liquidity_heatmap=liquidity_heatmap,
             tape=tape,
-            footprint=self._build_footprint(tape, now),   # D-037 : agrégation Bid×Ask + imbalances
+            footprint=self._build_footprint(tape, order_book, now),  # D-037/042 : Bid×Ask + delta + L2
             cvd_stratified=self._build_cvd_stratified(tape),  # D-038 : CVD par strate de taille + divergence
             volume_profile=self._build_volume_profile(     # D-041 : profil volumétrique + VA/POC/LVN
                 tape, await self._meta("session_prev", raws, now), now),

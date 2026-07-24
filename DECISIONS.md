@@ -1560,6 +1560,48 @@ jamais confondues (§3) :
   sur TERMINAL/PNL/RECAP/ROBUST** → propriété **pré-existante** de la coquille (largeurs minimales
   Zone 0 / barre de commande), hors périmètre D-043 ; le terminal dense ne cible pas 320 px.
 
+## D-042 · Liquidity Heatmap L2 & Footprint — Delta, bougies tick-based, fusion carnet
+**Collision de spec constatée et tranchée avec l'opérateur (AskUserQuestion).** Le cahier D-042
+tranche 1 demandait un nouveau `footprint_engine.py` agrégeant tape BUY/SELL par niveau et par
+bougie avec imbalances à seuil paramétrable — or **c'est déjà livré** : `footprint.py` (D-037,
+imbalances diagonales, ratio `FOOTPRINT_IMBALANCE_RATIO=3.0`, POC, OHLC, fail-closed) et
+`heatmap.py` (D-036, colonne L2 courante, colonne `None` si carnet non FRESH). Un second moteur
+aurait dupliqué l'agrégation : deux jeux de seuils à maintenir, divergence garantie.
+**Décision : ÉTENDRE `footprint.py`** (une seule source de vérité) avec le réellement neuf.
+
+### Ce qui manquait vraiment (vérifié avant de coder)
+1. **Delta** : la bougie n'avait **aucun champ `delta`**, ni par niveau ni globale.
+2. **Bougies TICK-BASED** : seul le bucket temporel existait.
+3. **Fusion carnet L2** : `footprint.py` **ignorait totalement** le carnet (tape uniquement).
+
+### Implémentation (additive, rétrocompatible — 0 régression sur les 19 tests D-037)
+- `delta` par NIVEAU (`ask_vol − bid_vol`, agresseur net) et par BOUGIE (somme) ; `n_prints`.
+- `ticks_per_candle > 0` → N prints par bougie ; prints **ordonnés chronologiquement d'abord**
+  (déterminisme : le tampon arrive dans l'ordre d'accumulation, pas forcément trié), `start_ts`/
+  `end_ts` = ts du premier/dernier print. `0` = bucket temporel (défaut, D-037 inchangé).
+- **Fusion L2 — choix de conception honnête (§3)** : le carnet est un instantané **COURANT**.
+  L'attacher aux bougies **passées** fabriquerait une association historique fausse (le carnet
+  d'il y a 10 min n'est pas celui d'alors). Il n'enrichit donc **QUE la bougie en formation**, en
+  `bid_liq`/`ask_liq` par niveau ; chaque bougie porte `book_state ∈ LIVE|ABSENT`.
+- **Fail-closed (§3)** en cascade : carnet absent / non-dict / listes corrompues / **toutes entrées
+  invalides** → `ABSENT` sans aucun champ de liquidité ; entrée non-finie → ignorée par niveau ;
+  et côté moteur, le carnet n'est transmis **que s'il est FRESH** (gelé/absent → aucun mur exposé).
+- **Câblage** : `engine._build_footprint(tape, order_book, now)` passe le carnet et
+  `config.FOOTPRINT_TICKS_PER_CANDLE` (défaut 0, PLACEHOLDER v1 provisional).
+
+### Vérif
+- **+11 tests** (delta niveau/bougie + intégrité, signe du delta, bougies tick-based avec ordre
+  chronologique et déterminisme, OHLC tick-based, carnet limité à la bougie en formation,
+  appariement par prix, absent explicite, carnet invalide/gelé, tailles non-finies, rétrocompat) →
+  **297 passed**, ruff clean.
+- **Essai manuel réel** (moteur live, Redis relancé) : `book_state=LIVE`, delta `+78` sur 79 prints,
+  niveaux montrant **exécuté** (`bid_vol/ask_vol/delta`) **et liquidité au repos** (`bid_liq/ask_liq`
+  — ex. vente exécutée face à 99 contrats à l'ask), **intégrité `delta_bougie == Σ delta_niveaux`
+  vraie**, 15/24 niveaux en imbalance, **bougies passées toutes `ABSENT`** (aucune rétro-attribution).
+- **Gate moteur prouvé** : carnet FRESH → `LIVE` avec `bid_liq` ; **STALE et ABSENT → `ABSENT`**,
+  aucun champ de liquidité (§3).
+- **À venir** : miroir TS + rendu frontend (delta par bougie, murs L2 sur le Canvas footprint).
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.

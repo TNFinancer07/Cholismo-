@@ -17,56 +17,123 @@ def _bucket(ts: float, candle_seconds: float) -> float:
     return math.floor(ts / candle_seconds) * candle_seconds
 
 
+def _valid(p: dict) -> tuple | None:
+    """Print normalisé `(ts, price, size, side)` ou None si invalide (fail-closed §3)."""
+    price, size, side, ts = p.get("price"), p.get("size"), p.get("side"), p.get("ts")
+    if (isinstance(price, (int, float)) and math.isfinite(price)
+            and isinstance(size, (int, float)) and math.isfinite(size) and size > 0
+            and isinstance(ts, (int, float)) and math.isfinite(ts)
+            and side in ("BUY", "SELL")):
+        return float(ts), float(price), float(size), side
+    return None
+
+
 def build_footprint(prints: list[dict], candle_seconds: float, tick: float,
-                    ratio: float, min_vol: float, max_candles: int) -> list[dict]:
+                    ratio: float, min_vol: float, max_candles: int,
+                    ticks_per_candle: int = 0, book=None) -> list[dict]:
     """Construit les bougies footprint depuis les prints. Retourne les `max_candles` bougies les
     plus récentes, triées par `start_ts` croissant. Chaque bougie : `{start_ts, end_ts, open,
-    high, low, close, poc, total_volume, levels}` où chaque niveau est `{price, bid_vol, ask_vol,
-    imbalance ∈ ASK|BID|None}` (trié prix décroissant)."""
-    if candle_seconds <= 0 or tick <= 0:
+    high, low, close, poc, total_volume, delta, n_prints, book_state, levels}` où chaque niveau est
+    `{price, bid_vol, ask_vol, delta, imbalance ∈ ASK|BID|None}` (trié prix décroissant).
+
+    - `delta` (D-042) : par niveau `ask_vol − bid_vol` (agresseur net) ; par bougie, la somme.
+    - `ticks_per_candle > 0` (D-042) : bougies **TICK-BASED** (N prints par bougie) au lieu du
+      bucket temporel ; prints ordonnés chronologiquement d'abord (déterminisme), `start_ts`/
+      `end_ts` = ts du premier/dernier print.
+    - `book` (D-042) : instantané L2 COURANT. Il n'enrichit QUE la bougie en formation (la
+      dernière) — l'attacher aux bougies passées fabriquerait une association historique fausse.
+      Chaque bougie porte `book_state ∈ LIVE|ABSENT` ; carnet absent/gelé/corrompu → `ABSENT` et
+      aucun champ de liquidité (jamais un faux mur, §3)."""
+    if tick <= 0 or (ticks_per_candle <= 0 and candle_seconds <= 0):
         return []
 
-    # regroupe les prints par bucket ; chaque bucket agrège par index de tick k = round(prix/tick).
-    buckets: dict[float, dict] = {}
-    for p in prints:
-        price, size, side = p.get("price"), p.get("size"), p.get("side")
-        ts = p.get("ts")
-        if not (isinstance(price, (int, float)) and math.isfinite(price)
-                and isinstance(size, (int, float)) and math.isfinite(size) and size > 0
-                and isinstance(ts, (int, float)) and math.isfinite(ts)
-                and side in ("BUY", "SELL")):
-            continue                                   # fail-closed : print invalide ignoré (§3)
-        start = _bucket(float(ts), candle_seconds)
-        b = buckets.get(start)
-        if b is None:
-            b = buckets[start] = {"start_ts": start, "levels": {},   # k → [bid_vol, ask_vol]
-                                  "first_ts": ts, "last_ts": ts,
-                                  "open": float(price), "close": float(price),
-                                  "high": float(price), "low": float(price)}
-        k = round(float(price) / tick)
-        lvl = b["levels"].get(k)
-        if lvl is None:
-            lvl = b["levels"][k] = [0.0, 0.0]
-        if side == "BUY":
-            lvl[1] += float(size)                      # ask volume
-        else:
-            lvl[0] += float(size)                      # bid volume
-        # OHLC : open = print au ts le plus PETIT (rafale à ts égal → 1er de l'ordre d'entrée,
-        # d'où le `<` strict) ; close = ts le plus GRAND (rafale → dernier, d'où le `>=`).
-        if ts < b["first_ts"]:
-            b["first_ts"], b["open"] = ts, float(price)
-        if ts >= b["last_ts"]:
-            b["last_ts"], b["close"] = ts, float(price)
-        b["high"] = max(b["high"], float(price))
-        b["low"] = min(b["low"], float(price))
+    valid = [v for v in (_valid(p) for p in prints) if v is not None]
+    buckets: list[dict] = []
 
-    candles = [_finalize_candle(b, candle_seconds, tick, ratio, min_vol)
-               for b in buckets.values()]
+    if ticks_per_candle > 0:
+        # TICK-BASED : ordre chronologique stable (l'ordre d'arrivée départage les ts égaux),
+        # puis découpage en paquets de N prints.
+        ordered = sorted(valid, key=lambda v: v[0])
+        for i in range(0, len(ordered), ticks_per_candle):
+            chunk = ordered[i:i + ticks_per_candle]
+            b = _new_bucket(chunk[0])
+            for v in chunk:
+                _add(b, v, tick)
+            b["end_ts"] = b["last_ts"]                 # borne réelle : ts du dernier print
+            buckets.append(b)
+    else:
+        by_start: dict[float, dict] = {}
+        for v in valid:
+            start = _bucket(v[0], candle_seconds)
+            b = by_start.get(start)
+            if b is None:
+                b = by_start[start] = _new_bucket(v)
+                b["start_ts"] = start
+                b["end_ts"] = start + candle_seconds
+            _add(b, v, tick)
+        buckets = sorted(by_start.values(), key=lambda b: b["start_ts"])
+
+    book_maps = _book_maps(book, tick)
+    last = len(buckets) - 1
+    candles = [_finalize_candle(b, tick, ratio, min_vol, book_maps if i == last else None)
+               for i, b in enumerate(buckets)]
     candles.sort(key=lambda c: c["start_ts"])
     return candles[-max_candles:] if max_candles > 0 else candles
 
 
-def _finalize_candle(b: dict, candle_seconds: float, tick: float, ratio: float, min_vol: float) -> dict:
+def _new_bucket(v: tuple) -> dict:
+    ts, price, _size, _side = v
+    return {"start_ts": ts, "end_ts": ts, "levels": {},   # k → [bid_vol, ask_vol]
+            "first_ts": ts, "last_ts": ts, "n_prints": 0,
+            "open": price, "close": price, "high": price, "low": price}
+
+
+def _add(b: dict, v: tuple, tick: float) -> None:
+    ts, price, size, side = v
+    k = round(price / tick)
+    lvl = b["levels"].get(k)
+    if lvl is None:
+        lvl = b["levels"][k] = [0.0, 0.0]
+    if side == "BUY":
+        lvl[1] += size                                 # ask volume (agresseur à l'ask)
+    else:
+        lvl[0] += size                                 # bid volume
+    b["n_prints"] += 1
+    # OHLC : open = print au ts le plus PETIT (rafale à ts égal → 1er de l'ordre d'entrée, d'où le
+    # `<` strict) ; close = ts le plus GRAND (rafale → dernier, d'où le `>=`).
+    if ts < b["first_ts"]:
+        b["first_ts"], b["open"] = ts, price
+    if ts >= b["last_ts"]:
+        b["last_ts"], b["close"] = ts, price
+    b["high"] = max(b["high"], price)
+    b["low"] = min(b["low"], price)
+
+
+def _book_maps(book, tick: float) -> tuple[dict[int, float], dict[int, float]] | None:
+    """Carnet L2 `{bids: [[prix, taille]…], asks: […]}` → deux cartes `k → liquidité au repos`.
+    None si absent/mal formé, ou si AUCUNE entrée n'est exploitable : un carnet vide ou corrompu
+    n'est pas « vivant » — on ne fabrique jamais de mur de liquidité (§3)."""
+    if not isinstance(book, dict):
+        return None
+    out: list[dict[int, float]] = [{}, {}]
+    for i, key in enumerate(("bids", "asks")):
+        rows = book.get(key)
+        if not isinstance(rows, list):
+            continue
+        for row in rows:
+            if not (isinstance(row, (list, tuple)) and len(row) >= 2):
+                continue
+            price, size = row[0], row[1]
+            if not (isinstance(price, (int, float)) and math.isfinite(price)
+                    and isinstance(size, (int, float)) and math.isfinite(size) and size > 0):
+                continue                               # entrée non-finie → ignorée (§3)
+            k = round(float(price) / tick)
+            out[i][k] = out[i].get(k, 0.0) + float(size)
+    return (out[0], out[1]) if (out[0] or out[1]) else None
+
+
+def _finalize_candle(b: dict, tick: float, ratio: float, min_vol: float,
+                     book_maps: tuple[dict[int, float], dict[int, float]] | None) -> dict:
     vols = b["levels"]                                 # k → [bid, ask]
 
     def imbalance(k: int) -> str | None:
@@ -81,18 +148,26 @@ def _finalize_candle(b: dict, candle_seconds: float, tick: float, ratio: float, 
 
     levels = []
     total = 0.0
+    delta = 0.0
     poc_k, poc_total = None, -1.0
     for k in sorted(vols, reverse=True):               # prix décroissant
         bid, ask = vols[k]
         lvl_total = bid + ask
         total += lvl_total
+        delta += ask - bid                             # agresseur net du niveau (D-042)
         if lvl_total > poc_total:                      # POC = volume total max (1er = prix haut sur égalité)
             poc_total, poc_k = lvl_total, k
-        levels.append({"price": round(k * tick, 10), "bid_vol": bid, "ask_vol": ask,
-                       "imbalance": imbalance(k)})
+        lvl = {"price": round(k * tick, 10), "bid_vol": bid, "ask_vol": ask,
+               "delta": ask - bid, "imbalance": imbalance(k)}
+        if book_maps is not None:                      # liquidité AU REPOS (carnet vivant seulement)
+            lvl["bid_liq"] = book_maps[0].get(k, 0.0)
+            lvl["ask_liq"] = book_maps[1].get(k, 0.0)
+        levels.append(lvl)
     return {
-        "start_ts": b["start_ts"], "end_ts": b["start_ts"] + candle_seconds,
+        "start_ts": b["start_ts"], "end_ts": b["end_ts"],
         "open": b["open"], "high": b["high"], "low": b["low"], "close": b["close"],
         "poc": round(poc_k * tick, 10) if poc_k is not None else None,
-        "total_volume": total, "levels": levels,
+        "total_volume": total, "delta": delta, "n_prints": b["n_prints"],
+        "book_state": "LIVE" if book_maps is not None else "ABSENT",
+        "levels": levels,
     }
