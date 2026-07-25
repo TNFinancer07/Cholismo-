@@ -169,3 +169,108 @@ def test_price_chain_empty_and_non_list():
     assert price_chain(None, underlying=S, r=R) == []
     assert price_chain([{"strike": 100.0, "expiry_years": 0.5, "call_price": 6.0}],
                        underlying=0.0, r=R) == []        # sous-jacent invalide → rien
+
+
+# ---------- /devil (D-044) : pathologies de marché extrêmes ----------
+# Le module promet `None` sur donnée invalide (§3) : il ne doit JAMAIS lever. Or il ne validait que
+# la FINITUDE, pas la MAGNITUDE — trois chemins levaient une exception non maîtrisée.
+
+
+def test_devil_extreme_rate_does_not_raise():
+    # r·T très négatif → `math.exp` déborde (OverflowError), pas un simple inf
+    assert bs_price(S, K, T, -1000.0, SIG, "call") is None
+    assert bs_greeks(S, K, T, -1000.0, SIG, "call")["delta"] is None
+    assert implied_vol(10.0, S, K, T, -1000.0, "call") is None
+
+
+def test_devil_vol_time_underflow_does_not_raise():
+    # σ·√T s'annule par underflow → division par zéro sur d1
+    assert bs_price(S, K, 1e-300, R, 1e-300, "call") is None
+    assert bs_greeks(S, K, 1e-300, R, 1e-300, "call")["gamma"] is None
+
+
+def test_devil_moneyness_ratio_underflow_does_not_raise():
+    # S/K sous-déborde à 0 → `math.log(0)` lève ValueError
+    assert bs_price(1e-300, 1e308, T, R, SIG, "call") is None
+    assert bs_greeks(1e-300, 1e308, T, R, SIG, "put")["vega"] is None
+
+
+def test_devil_absurd_sigma_stays_finite():
+    # σ = 1000 : le call vaut le sous-jacent, jamais un NaN
+    p = bs_price(S, K, T, R, 1000.0, "call")
+    assert p is not None and math.isfinite(p) and abs(p - S) < 1e-6
+    g = bs_greeks(S, K, T, R, 1000.0, "call")
+    assert all(v is None or math.isfinite(v) for v in g.values())
+
+
+def test_devil_negative_rates_are_valid_market_data():
+    # taux négatifs = réalité de marché (EUR/CHF), pas une aberration : on price normalement
+    put = bs_price(S, K, T, -0.5, SIG, "put")
+    call = bs_price(S, K, T, -0.5, SIG, "call")
+    assert put is not None and call is not None
+    assert abs((call - put) - (S - K * math.exp(0.5 * T))) < 1e-9      # parité tient
+
+
+def test_devil_ultra_short_expiry_greeks_finite():
+    # T = 1 seconde : gamma explose, vega s'effondre — mais TOUT reste fini (jamais inf/NaN)
+    g = bs_greeks(S, K, 1.0 / 31_536_000, R, SIG, "call")
+    assert all(v is not None and math.isfinite(v) for v in g.values())
+    assert g["gamma"] > 1.0 and 0.0 < g["vega"] < 1.0                  # explosif mais borné
+
+
+def test_devil_aberrant_strikes_finite():
+    for strike in (10.0 * S, 0.01 * S, 1e6, 1e-6):
+        p = bs_price(S, strike, T, R, SIG, "call")
+        assert p is not None and math.isfinite(p) and p >= 0.0
+
+
+def test_devil_iv_on_put_call_parity_violation():
+    # prix incohérents entre les deux pattes : chacun est jugé sur SES bornes d'arbitrage
+    call = bs_price(S, K, T, R, SIG, "call")
+    assert implied_vol(call, S, K, T, R, "put") is None or \
+        implied_vol(call, S, K, T, R, "put") > 0          # jamais un NaN, jamais une exception
+
+
+def test_devil_price_chain_survives_crash_inducing_rows():
+    """GARANTIE D'INTÉGRATION : une ligne aux paramètres explosifs ne doit pas emporter la chaîne."""
+    good = {"strike": 100.0, "expiry_years": 0.5,
+            "call_price": bs_price(S, 100.0, 0.5, R, 0.25, "call"),
+            "put_price": bs_price(S, 100.0, 0.5, R, 0.25, "put")}
+    rows = [{"strike": 1e308, "expiry_years": 1e-300, "call_price": 1.0},
+            {"strike": 1e-300, "expiry_years": 1e300, "call_price": 1.0}, good]
+    out = price_chain(rows, underlying=S, r=R)
+    assert len(out) == 3                                   # aucune ligne perdue, aucune exception
+    assert abs(out[-1]["call"]["iv"] - 0.25) < 1e-6        # la ligne saine reste exacte
+    for row in out[:2]:
+        assert row["call"]["iv"] is None                   # les aberrantes → None, pas un nombre
+
+
+def test_devil_price_chain_extreme_rate_does_not_raise():
+    rows = [{"strike": 100.0, "expiry_years": 1.0, "call_price": 5.0}]
+    out = price_chain(rows, underlying=S, r=-1000.0)
+    assert len(out) == 1 and out[0]["call"]["iv"] is None
+
+
+def test_devil_exhaustive_magnitude_sweep_never_raises_nor_emits_non_finite():
+    """BALAYAGE EXHAUSTIF des magnitudes : le contrat du module (« jamais lever, jamais émettre
+    inf/NaN ») doit tenir sur TOUTE combinaison, pas seulement sur les cas qu'on a imaginés.
+    C'est ce balayage qui a montré qu'une première correction ne couvrait que `_core` et laissait
+    `gamma` diviser par un dénominateur sous-débordé."""
+    import itertools
+    vals = [1e-300, 1e-8, 0.01, 1.0, 100.0, 1e8, 1e300]
+    rates = [-1000.0, -0.5, 0.0, 0.05, 1e6]
+    sigs = [1e-300, 1e-8, 0.2, 1000.0, 1e300]
+    for s, k, t, r, sig, kind in itertools.product(vals, vals, vals, rates, sigs, ("call", "put")):
+        price = bs_price(s, k, t, r, sig, kind)                  # ne doit jamais lever
+        assert price is None or math.isfinite(price)
+        for v in bs_greeks(s, k, t, r, sig, kind).values():
+            assert v is None or math.isfinite(v)
+
+
+def test_devil_exhaustive_iv_sweep_never_raises_nor_emits_absurd_vol():
+    import itertools
+    for s, k, t, r, price, kind in itertools.product(
+            [1e-8, 100.0, 1e300], [1e-8, 100.0, 1e300], [1e-300, 1.0, 1e300],
+            [-1000.0, -0.5, 0.0, 0.05, 1e6], [0.0, 1e-9, 50.0, 1e300], ("call", "put")):
+        iv = implied_vol(price, s, k, t, r, kind)                # ne doit jamais lever
+        assert iv is None or (math.isfinite(iv) and iv > 0)

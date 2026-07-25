@@ -1762,6 +1762,30 @@ entière en un appel** (`price_chain`), chaque ligne isolée.
 - **À venir** : câblage au `ContextSchema` (Theta/Vega dans `OptionLeg`, calcul moteur au lieu du
   relais source) puis affichage dans la table OMON — tranche 2.
 
+### /devil D-044 — pathologies de marché extrêmes
+Attaques : `r`/`σ` absurdes ou négatifs, `T → 0`, strikes aberrants, prix violant la parité
+put-call ou l'intrinsèque.
+- **3 crashes NON MAÎTRISÉS trouvés & corrigés.** Le module promet `None` sur donnée invalide (§3)
+  — il ne validait que la **finitude**, jamais la **magnitude**, et **levait** sur trois chemins :
+  `math.exp` déborde (`OverflowError`) dès `r·T ≲ −710` ; `σ·√T` s'annule par underflow →
+  `ZeroDivisionError` ; `S/K` sous-déborde à 0 → `math.log(0)` (`ValueError`). Une seule ligne de
+  chaîne aux paramètres absurdes aurait emporté toute la chaîne. Corrigé par un noyau `_core`
+  gardé, plus une garde **par Grecque**.
+- **Correctif d'abord INCOMPLET — c'est le balayage exhaustif qui l'a montré.** Après la première
+  correction, un balayage de **17 150 combinaisons** de magnitudes signalait encore **432 crashes et
+  40 valeurs non-finies émises** : `_core` était gardé, mais pas les formules de Grecques, dont
+  `gamma = pdf/(S·σ·√T)` divise par un dénominateur qui sous-déborde à 0. Chaque Grecque est
+  désormais évaluée isolément → `None` si indéfinie (jamais `0.0`, qui se lirait comme une mesure,
+  ni `inf`). Le prix aussi est validé fini avant d'être renvoyé.
+- **Comportements corrects confirmés** (aucun défaut) : `σ = 1000` → le call vaut le sous-jacent ;
+  **`r = −0.5`** (taux négatifs = réalité de marché, pas une aberration) → parité put-call vérifiée
+  avec le facteur d'actualisation > 1 ; **`T` = 1 seconde** → gamma explosif mais **borné** (112) et
+  vega effondré (0.007), aucun `inf` ; strikes `10·S` et `0.01·S` → prix finis ; prix sous
+  l'intrinsèque ou hors bornes → `None`.
+- **Vérif** : +12 tests /devil dont **deux balayages exhaustifs en non-régression** (18 230
+  combinaisons : **0 crash, 0 valeur non-finie, 0 vol aberrante**) → **357 passed**, ruff clean ;
+  smile réel toujours retrouvé à **1,5e-13**.
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.

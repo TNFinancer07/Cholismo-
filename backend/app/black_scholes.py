@@ -47,10 +47,27 @@ def _kind(k: Any) -> str | None:
     return k if k in ("call", "put") else None
 
 
-def _d1_d2(S: float, K: float, T: float, r: float, sigma: float) -> tuple[float, float]:
-    vol_t = sigma * math.sqrt(T)
-    d1 = (math.log(S / K) + (r + 0.5 * sigma * sigma) * T) / vol_t
-    return d1, d1 - vol_t
+def _core(S: float, K: float, T: float, r: float, sigma: float) -> tuple[float, float, float] | None:
+    """`(d1, d2, K·e^{−rT})` ou `None` si le modèle est numériquement indéfini.
+
+    La finitude des ENTRÉES ne suffit pas : ce sont les MAGNITUDES qui cassent. Trois chemins
+    lèvent en float64 et doivent retomber sur `None` (§3) plutôt que sur une exception —
+    `math.exp` déborde (`OverflowError`) pour `r·T ≲ −710` ; `σ·√T` s'annule par underflow →
+    division par zéro ; `S/K` sous-déborde à 0 → `math.log(0)` (`ValueError`)."""
+    try:
+        vol_t = sigma * math.sqrt(T)
+        if not (math.isfinite(vol_t) and vol_t > 0):
+            return None                                # σ·√T annulé (underflow) ou dégénéré
+        ratio = S / K
+        if not (math.isfinite(ratio) and ratio > 0):
+            return None                                # S/K sous-déborde ou explose
+        d1 = (math.log(ratio) + (r + 0.5 * sigma * sigma) * T) / vol_t
+        disc = K * math.exp(-r * T)
+        if not (math.isfinite(d1) and math.isfinite(disc)):
+            return None
+        return d1, d1 - vol_t, disc
+    except (OverflowError, ValueError, ZeroDivisionError):
+        return None
 
 
 def _valid(S: Any, K: Any, T: Any, r: Any, sigma: Any) -> bool:
@@ -62,11 +79,13 @@ def bs_price(S: float, K: float, T: float, r: float, sigma: float, kind: Any) ->
     """Prix Black-Scholes européen, ou `None` si un paramètre rend le modèle indéfini (§3)."""
     if not _valid(S, K, T, r, sigma) or _kind(kind) is None:
         return None
-    d1, d2 = _d1_d2(S, K, T, r, sigma)
-    disc = K * math.exp(-r * T)
-    if kind == "call":
-        return S * _norm_cdf(d1) - disc * _norm_cdf(d2)
-    return disc * _norm_cdf(-d2) - S * _norm_cdf(-d1)
+    core = _core(S, K, T, r, sigma)
+    if core is None:
+        return None
+    d1, d2, disc = core
+    price = (S * _norm_cdf(d1) - disc * _norm_cdf(d2)) if kind == "call" \
+        else (disc * _norm_cdf(-d2) - S * _norm_cdf(-d1))
+    return price if math.isfinite(price) else None      # jamais un inf/NaN présenté comme un prix
 
 
 def bs_greeks(S: float, K: float, T: float, r: float, sigma: float, kind: Any) -> dict:
@@ -74,20 +93,33 @@ def bs_greeks(S: float, K: float, T: float, r: float, sigma: float, kind: Any) -
     renvoie jamais 0.0 pour « inconnu », qui se lirait comme une mesure réelle (§3)."""
     if not _valid(S, K, T, r, sigma) or _kind(kind) is None:
         return dict.fromkeys(_GREEK_KEYS)
-    d1, d2 = _d1_d2(S, K, T, r, sigma)
+    core = _core(S, K, T, r, sigma)
+    if core is None:
+        return dict.fromkeys(_GREEK_KEYS)
+    d1, d2, disc = core
     sqrt_t = math.sqrt(T)
     pdf = _norm_pdf(d1)
-    disc = K * math.exp(-r * T)
-    delta = _norm_cdf(d1) if kind == "call" else _norm_cdf(d1) - 1.0
-    theta_common = -S * pdf * sigma / (2.0 * sqrt_t)
-    theta = (theta_common - r * disc * _norm_cdf(d2)) if kind == "call" \
-        else (theta_common + r * disc * _norm_cdf(-d2))
+
+    def g(fn) -> float | None:
+        """Une Grecque, ou `None` si son calcul est numériquement indéfini. Chaque formule a son
+        propre dénominateur : `gamma` divise par `S·σ·√T`, qui sous-déborde à 0 sur des magnitudes
+        extrêmes (division par zéro) ; un débordement donnerait un `inf` qui s'afficherait comme une
+        mesure réelle. Grecque par Grecque : indéfinie → `None`, jamais 0.0 ni inf (§3)."""
+        try:
+            v = fn()
+        except (OverflowError, ValueError, ZeroDivisionError):
+            return None
+        return v if math.isfinite(v) else None
+
+    delta = g(lambda: _norm_cdf(d1) if kind == "call" else _norm_cdf(d1) - 1.0)
+    theta = g(lambda: (-S * pdf * sigma / (2.0 * sqrt_t))
+              + (-r * disc * _norm_cdf(d2) if kind == "call" else r * disc * _norm_cdf(-d2)))
     return {
         "delta": delta,
-        "gamma": pdf / (S * sigma * sqrt_t),
-        "theta": theta,                       # par an
-        "vega": S * pdf * sqrt_t,             # pour σ + 1.0
-        "vanna": -pdf * d2 / sigma,           # ∂Delta/∂σ
+        "gamma": g(lambda: pdf / (S * sigma * sqrt_t)),
+        "theta": theta,                                  # par an
+        "vega": g(lambda: S * pdf * sqrt_t),             # pour σ + 1.0
+        "vanna": g(lambda: -pdf * d2 / sigma),           # ∂Delta/∂σ
     }
 
 
@@ -97,7 +129,12 @@ def implied_vol(price: Any, S: float, K: float, T: float, r: float, kind: Any) -
     if not (_finite(price) and _finite(S) and _finite(K) and _finite(T) and _finite(r)
             and S > 0 and K > 0 and T > 0 and price >= 0) or _kind(kind) is None:
         return None
-    disc = K * math.exp(-r * T)
+    try:
+        disc = K * math.exp(-r * T)
+    except OverflowError:
+        return None                                   # r·T ingérable → aucune borne calculable
+    if not math.isfinite(disc):
+        return None
     # bornes d'arbitrage : sous l'intrinsèque ou au-dessus du plafond → donnée aberrante (§3)
     if kind == "call":
         lo_bound, hi_bound = max(0.0, S - disc), S
