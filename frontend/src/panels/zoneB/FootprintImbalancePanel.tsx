@@ -1,11 +1,22 @@
-/** Panneau FOOTPRINT + IMBALANCES (D-037) — lit UN champ : `s1_state.footprint` (CLAUDE §1).
- *  Rend en HTML5 Canvas les bougies footprint : colonnes = bougies (temps), lignes = niveaux de
- *  prix (axe partagé). Chaque cellule = `bid × ask` ; IMBALANCES diagonales en surbrillance
- *  (fond VERT = ASK/achat + ▲ / ROUGE = BID/vente + ▼ — couleur JAMAIS seule, §3, ALPHA gradué
- *  selon l'intensité du volume) ; POC de chaque bougie marqué en OR (au PREMIER PLAN) ; fine
- *  bougie OHLC en rappel de l'action des prix. /polish : cellules qui s'AJUSTENT à la taille du
- *  panneau (police adaptative sans chevauchement), tracé ALIGNÉ AU PIXEL (lignes nettes).
- *  LECTURE SEULE (§2.1). FAIL-CLOSED (§3) : périmé → FIGÉ ; vide → « PAS DE DONNÉES ». */
+/** Panneau FOOTPRINT · IMBALANCES · DELTA · MURS L2 (D-037 + D-042) — lit UN champ :
+ *  `s1_state.footprint` (CLAUDE §1). Rend en HTML5 Canvas : colonnes = bougies, lignes = niveaux de
+ *  prix (axe partagé), cellule = `bid × ask`.
+ *
+ *  - IMBALANCES diagonales en surbrillance (fond VERT = ASK/achat + ▲ / ROUGE = BID/vente + ▼,
+ *    ALPHA gradué selon l'intensité du volume) ; POC en OR au PREMIER PLAN ; fine bougie OHLC.
+ *  - DELTA (D-042) : agresseur net, en en-tête de chaque colonne et dans l'en-tête du panneau pour
+ *    la bougie en formation. Le SIGNE et le GLYPHE portent le sens — la couleur n'est jamais seule
+ *    (§3) ; un delta nul ne reçoit AUCUN glyphe directionnel (pas de sens inventé).
+ *  - MURS L2 (D-042) : liquidité AU REPOS du carnet, bande dédiée à droite, bougie EN FORMATION
+ *    uniquement (le carnet est un instantané courant : l'étendre au passé serait faux). Le CÔTÉ est
+ *    encodé par la POSITION (gauche = bid/support, droite = ask/résistance), pas par la seule teinte.
+ *    La bande est TOUJOURS réservée : si sa largeur dépendait de `book_state`, un carnet qui clignote
+ *    (LIVE↔ABSENT au gré de la fraîcheur) ferait sauter toute la grille latéralement.
+ *
+ *  Cellules AJUSTÉES à la taille du panneau (police adaptative sans chevauchement), tracé ALIGNÉ AU
+ *  PIXEL. LECTURE SEULE (§2.1). FAIL-CLOSED (§3) : périmé → FIGÉ ; vide → « PAS DE DONNÉES » ;
+ *  carnet indisponible → colonne L2 marquée d'un tiret neutre + légende explicite, jamais un blanc
+ *  qui se lirait « aucun mur ». */
 import { useEffect, useRef, useState } from 'react'
 import { cn } from '@/lib/utils'
 import { useTerminal } from '@/store/terminal'
@@ -20,18 +31,28 @@ const MIN_CW = 40, MAX_CW = 132, MIN_RH = 12, MAX_RH = 26
 const MAX_ROWS = 400, MAX_CANDLES = 60
 const R = Math.round
 
-// signé compact — non-fini → « · » (jamais une valeur inventée §3)
+/** Magnitude compacte (k/M) — garde la cellule à largeur bornée quel que soit le volume. */
+function compact(a: number): string {
+  if (a >= 1e6) return R(a / 1e5) / 10 + 'M'
+  if (a >= 1000) return R(a / 100) / 10 + 'k'
+  return String(R(a))
+}
+
+/** Volume (toujours ≥ 0) — non-fini → « · », jamais une valeur inventée (§3). */
+function fmt(v: number): string {
+  return Number.isFinite(v) ? compact(Math.abs(v)) : '·'
+}
+
+/** Delta signé — le SIGNE porte le sens, indépendamment de la couleur (§3). Zéro reste « 0 »,
+ *  sans signe : une absence de déséquilibre n'est ni une hausse ni une baisse. */
 function fmtSignedCompact(v: number): string {
   if (!Number.isFinite(v)) return '·'
-  const a = Math.abs(v), s = v > 0 ? '+' : v < 0 ? '−' : ''
-  if (a >= 1e6) return s + R(a / 1e5) / 10 + 'M'
-  if (a >= 1000) return s + R(a / 100) / 10 + 'k'
-  return s + R(a)
+  return (v > 0 ? '+' : v < 0 ? '−' : '') + compact(Math.abs(v))
 }
 
 /** Murs L2 exploitables de la bougie en formation, ou `null`. Exige `book_state === 'LIVE'` ET au
- *  moins une liquidité finie > 0 : sinon on n'affiche RIEN plutôt qu'une bande vide qui se lirait
- *  « aucun mur » alors qu'on n'en sait rien (§3). */
+ *  moins une liquidité finie > 0 : sinon aucune barre n'est tracée plutôt que d'en inventer (§3) —
+ *  la colonne reste en place et son vide est marqué explicitement. */
 function l2Walls(c: FootprintCandle | undefined): { max: number } | null {
   if (!c || c.book_state !== 'LIVE') return null
   let max = 0
@@ -40,15 +61,6 @@ function l2Walls(c: FootprintCandle | undefined): { max: number } | null {
     if (Number.isFinite(l.ask_liq)) max = Math.max(max, l.ask_liq as number)
   }
   return max > 0 ? { max } : null
-}
-
-// compact + robuste : non-fini → « · » ; gros volumes → k/M (cellule jamais débordée).
-function fmt(v: number): string {
-  if (!Number.isFinite(v)) return '·'
-  const a = Math.abs(v)
-  if (a >= 1e6) return R(v / 1e5) / 10 + 'M'
-  if (a >= 1000) return R(v / 100) / 10 + 'k'
-  return String(R(v))
 }
 
 function draw(canvas: HTMLCanvasElement, fp: FootprintValue | null | undefined, box: { w: number; h: number }) {
@@ -63,7 +75,7 @@ function draw(canvas: HTMLCanvasElement, fp: FootprintValue | null | undefined, 
       || !Number.isFinite(pmax) || pmax < pmin || !(tick > 0)) {
     canvas.width = 1; canvas.height = 1; return
   }
-  // fenêtre de prix bornée (un prix aberrant lointain n'explose pas le canvas — /devil).
+  // fenêtre de prix BORNÉE : un prix aberrant lointain n'explose jamais la hauteur du canvas.
   const rows = Math.max(1, Math.min(R((pmax - pmin) / tick) + 1, MAX_ROWS))
   const pminD = pmax - (rows - 1) * tick
   // cellules AJUSTÉES au panneau, bornées (s'étirent si grand, défilent si dense).
@@ -164,46 +176,50 @@ function draw(canvas: HTMLCanvasElement, fp: FootprintValue | null | undefined, 
     }
   })
 
-  // ---- Murs L2 : liquidité AU REPOS, bougie EN FORMATION uniquement (D-042) ----
-  // Le carnet est un instantané COURANT : l'étendre aux bougies passées serait une association
-  // historique fausse. Côté encodé par la POSITION (moitié gauche = bid/support, moitié droite =
-  // ask/résistance), pas seulement par la couleur (§3).
-  {
-    const bx = PRICE_W + cands.length * CW
-    const half = (L2_W - 3) / 2
-    const forming = cands[cands.length - 1]
-    const mid0 = R(bx + L2_W / 2)
-    ctx.fillStyle = '#67788f'; ctx.textAlign = 'center'
-    if (showText) ctx.fillText('L2', mid0, R(HEAD_H / 3))
-    // séparateur central : marque la frontière bid | ask
-    ctx.strokeStyle = 'rgba(103, 120, 143, 0.5)'; ctx.lineWidth = 1
-    ctx.beginPath(); ctx.moveTo(mid0 + 0.5, HEAD_H); ctx.lineTo(mid0 + 0.5, H); ctx.stroke()
-    if (!walls) {
-      // Carnet indisponible : la colonne reste (géométrie stable) mais son vide est EXPLIQUÉ —
-      // un tiret neutre par niveau, jamais un blanc qui se lirait « aucun mur » (§3).
-      ctx.strokeStyle = 'rgba(148, 163, 184, 0.35)'
-      for (const l of forming.levels) {
-        if (!Number.isFinite(l.price) || l.price < pminD) continue
-        const y = R(yOf(l.price)) + R(RH / 2) + 0.5
-        ctx.beginPath(); ctx.moveTo(mid0 - 4, y); ctx.lineTo(mid0 + 5, y); ctx.stroke()
-      }
+  drawL2Strip(ctx, { x: PRICE_W + cands.length * CW, H, RH, pminD, showText, yOf },
+    cands[cands.length - 1], walls)
+}
+
+/** Bande des murs L2, à droite de la grille — bougie EN FORMATION uniquement (voir en-tête de
+ *  fichier). Toujours dessinée pour garder la géométrie stable : avec un carnet vivant elle porte
+ *  les barres de liquidité (gauche = bid/support, droite = ask/résistance) ; sans carnet elle porte
+ *  un tiret neutre par niveau, qui DIT l'absence au lieu de la laisser passer pour « aucun mur ». */
+function drawL2Strip(
+  ctx: CanvasRenderingContext2D,
+  geo: { x: number; H: number; RH: number; pminD: number; showText: boolean; yOf: (p: number) => number },
+  forming: FootprintCandle | undefined,
+  walls: { max: number } | null,
+): void {
+  if (!forming) return
+  const { x, H, RH, pminD, showText, yOf } = geo
+  const half = (L2_W - 3) / 2
+  const mid = R(x + L2_W / 2)
+  const visible = forming.levels.filter((l) => Number.isFinite(l.price) && l.price >= pminD)
+
+  ctx.fillStyle = '#67788f'; ctx.textAlign = 'center'
+  if (showText) ctx.fillText('L2', mid, R(HEAD_H / 3))
+  ctx.strokeStyle = 'rgba(103, 120, 143, 0.5)'; ctx.lineWidth = 1   // frontière bid | ask
+  ctx.beginPath(); ctx.moveTo(mid + 0.5, HEAD_H); ctx.lineTo(mid + 0.5, H); ctx.stroke()
+
+  if (!walls) {
+    ctx.strokeStyle = 'rgba(148, 163, 184, 0.35)'
+    for (const l of visible) {
+      const y = R(yOf(l.price)) + R(RH / 2) + 0.5
+      ctx.beginPath(); ctx.moveTo(mid - 4, y); ctx.lineTo(mid + 5, y); ctx.stroke()
     }
-    if (walls) {
-      const maxLiq = walls.max
-      for (const l of forming.levels) {
-        if (!Number.isFinite(l.price) || l.price < pminD) continue
-        const y = R(yOf(l.price)) + 1, h = Math.max(1, R(RH) - 2)
-        const bid = Number.isFinite(l.bid_liq) ? (l.bid_liq as number) : 0
-        const ask = Number.isFinite(l.ask_liq) ? (l.ask_liq as number) : 0
-        if (bid > 0) {                                 // support : barre vers la GAUCHE du centre
-          const w = Math.max(1, R((bid / maxLiq) * half))
-          ctx.fillStyle = `rgba(${SKY}, 0.75)`; ctx.fillRect(mid0 - w, y, w, h)
-        }
-        if (ask > 0) {                                 // résistance : barre vers la DROITE
-          const w = Math.max(1, R((ask / maxLiq) * half))
-          ctx.fillStyle = `rgba(${SKY}, 0.45)`; ctx.fillRect(mid0 + 1, y, w, h)
-        }
-      }
+    return
+  }
+  for (const l of visible) {
+    const y = R(yOf(l.price)) + 1, h = Math.max(1, R(RH) - 2)
+    const bid = Number.isFinite(l.bid_liq) ? (l.bid_liq as number) : 0
+    const ask = Number.isFinite(l.ask_liq) ? (l.ask_liq as number) : 0
+    if (bid > 0) {                                     // support : barre vers la GAUCHE du centre
+      const w = Math.max(1, R((bid / walls.max) * half))
+      ctx.fillStyle = `rgba(${SKY}, 0.75)`; ctx.fillRect(mid - w, y, w, h)
+    }
+    if (ask > 0) {                                     // résistance : barre vers la DROITE
+      const w = Math.max(1, R((ask / walls.max) * half))
+      ctx.fillStyle = `rgba(${SKY}, 0.45)`; ctx.fillRect(mid + 1, y, w, h)
     }
   }
 }

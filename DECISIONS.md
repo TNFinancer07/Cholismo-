@@ -1697,6 +1697,28 @@ LIVE↔ABSENT, delta massif (1,23e9) et nul (0 print), redimensionnement extrêm
 - **Vérif** : essai Playwright 4 axes, **0 erreur JS** ; `tsc` + `vite build` OK ; **323 passed**
   (backend inchangé) ; captures LIVE et ABSENT à l'appui.
 
+### /polish D-042 tranche 2 — lisibilité du rendu + fiabilité de l'instrument d'essai
+Nettoyage **sans changement de comportement** (essais rejoués : mesures identiques à l'avant-refactor
+— 864 px de murs, géométrie 348 px stable sur 12 bascules) :
+- **Docstring de module réécrit** : il ne décrivait que D-037 alors que le panneau porte désormais le
+  delta et les murs L2. Les arbitrages deviennent des notes durables — pourquoi la bande L2 est
+  toujours réservée (sinon la grille saute au clignotement du carnet), pourquoi le côté est encodé par
+  la position, pourquoi un delta nul ne reçoit aucun glyphe directionnel.
+- **Bloc anonyme `{ … }` supprimé** : la bande L2 était dessinée dans un bloc nu au milieu de `draw`,
+  qui se lit comme une erreur de syntaxe. Extrait en fonction nommée **`drawL2Strip`** au contrat
+  explicite (géométrie, bougie en formation, murs) — la fonction porte aussi le filtrage des niveaux
+  visibles, dupliqué auparavant dans les deux branches.
+- **Formateurs dédupliqués** : `fmt` (volume) et `fmtSignedCompact` (delta) répétaient la même
+  logique k/M ; extraite dans `compact()`. Le signe reste porté par `fmtSignedCompact` seul.
+- **Dernière référence de passe `/devil`** convertie en énoncé de règle.
+- **Instrument d'essai fiabilisé (leçon de session)** : un run avait produit des résultats
+  entièrement trompeurs — le `kill` visait un PID périmé, le SSE live écrasait chaque état forcé, et
+  les mesures ressemblaient à une régression du refactor. Les essais gèlent désormais le flux par
+  `pkill` (exception gérée) **et vérifient que l'état forcé s'est appliqué**, sinon ils échouent
+  bruyamment plutôt que de conclure sur du vide.
+- **Vérif** : **323 passed**, ruff clean ; `tsc` + `vite build` OK ; **deux essais Playwright rejoués
+  en régression** (feature 4/4, devil 4 axes) → **0 erreur JS**, valeurs identiques.
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.
