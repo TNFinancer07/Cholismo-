@@ -1719,6 +1719,49 @@ Nettoyage **sans changement de comportement** (essais rejoués : mesures identiq
 - **Vérif** : **323 passed**, ruff clean ; `tsc` + `vite build` OK ; **deux essais Playwright rejoués
   en régression** (feature 4/4, devil 4 axes) → **0 erreur JS**, valeurs identiques.
 
+## D-044 · Moteur Black-Scholes — pricing, Grecques, inversion d'IV
+**Deux contradictions de spec tranchées avec l'opérateur (AskUserQuestion)** avant d'écrire une
+ligne :
+1. **Le cahier demandait un « module de calcul vectorisé en TypeScript » côté backend** — or `§4`
+   fixe le backend en **FastAPI/Python**, et `§1` veut qu'un panneau lise **un champ du schéma**.
+   Un pricing en TS l'aurait déplacé dans le navigateur : Grecques hors du `ContextSchema`, chaque
+   instance (Sony / Youssef) calculant les siennes (divergence possible entre les deux opérateurs),
+   et non testables en pytest. **Décision : moteur en Python**, comme tous les moteurs déterministes
+   déjà livrés (Phase 0, footprint, walk-forward, Monte Carlo).
+2. **Grille OMON en Canvas** — la grille est déjà une **table HTML** dense/monospace/tabulaire.
+   La réécrire en Canvas ferait perdre la sélection de texte et l'accessibilité pour un gain nul à
+   ~20 lignes ; le 60 FPS compte sur la **courbe de skew**, déjà en Canvas DPR-exact (D-039).
+   **Décision : garder la table et l'enrichir** (Theta/Vega).
+
+**Ce qui manquait vraiment (vérifié avant de coder)** : `options_chain.py` (D-039) ne fait que
+**RELAYER** l'IV et les Grecques de la source `greeks_engine` — **aucun pricing n'existe**, ni
+Black-Scholes, ni inversion d'IV, et **ni Theta ni Vega** (pattes : `iv, delta, gamma, vanna, charm`).
+
+### Tranche 1 (`/feature`) — `backend/app/black_scholes.py`
+Pur, déterministe, hors hot path (§7). Numpy étant absent, « vectorisé » = **batch sur la chaîne
+entière en un appel** (`price_chain`), chaque ligne isolée.
+- **Pricing** BSM européen call/put ; **Grecques** Delta, Gamma, **Theta** (par an), **Vega** (pour
+  σ+1.0), **Vanna** (∂Delta/∂σ) — **conventions figées dans le module** pour que l'affichage ne les
+  réinvente jamais.
+- **IV : Newton-Raphson** (départ Brenner-Subrahmanyam) avec **repli BISSECTION** bornée `[1e-6, 5]`
+  dès que Newton sort des bornes ou que le vega s'effondre — déterministe.
+- **FAIL-CLOSED (§3)** : entrée non-finie, `S/K/T/σ ≤ 0`, type inconnu → `None` ; prix **hors bornes
+  d'arbitrage** (sous l'intrinsèque, ou > `S` pour un call / > `K` pour un put) → `None` ; **IV
+  introuvable → toutes les Grecques `None`** (on ne price jamais sur une vol inventée) ; ligne de
+  chaîne corrompue écartée seule.
+- **Garde d'IDENTIFIABILITÉ (trouvée en cours de test, non demandée)** : sur une option très ITM la
+  valeur temps est **nulle en float64** — le prix est bit-identique pour σ = 0.1 et σ = 0.4. Le
+  moteur renvoyait pourtant une vol (0.528) : c'était **fabriquer une précision absente de la
+  donnée**. Un prix collé à l'intrinsèque (à quelques ULP) renvoie désormais `None`.
+- **Vérif** : **22 tests** (prix call/put vs valeurs manuelles, parité put-call, 5 Grecques vs
+  référence, delta put = delta call − 1, gamma/vega identiques call/put, aller-retour d'IV sur 4
+  vols et 3 strikes, repli bissection, déterminisme, 8 cas fail-closed, batch avec lignes corrompues)
+  → **345 passed**, ruff clean. **Essai réel** : smile complet (7 strikes ES, 30 j) pricé puis
+  inversé — **smile retrouvé à ~1e-14**, gamma maximal à l'ATM, **vanna changeant de signe** de part
+  et d'autre de l'ATM, parité put-call vérifiée sur toutes les lignes.
+- **À venir** : câblage au `ContextSchema` (Theta/Vega dans `OptionLeg`, calcul moteur au lieu du
+  relais source) puis affichage dans la table OMON — tranche 2.
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.
