@@ -1854,6 +1854,32 @@ rafale de mises à jour en direct sur le sélecteur Θ/Vega.
 - **Vérif** : essai Playwright 3 axes, **0 erreur JS** ; **365 passed**, ruff clean ; `tsc` +
   `vite build` OK.
 
+### /polish D-044 tranche 2 — unités d'affichage homogènes, provenance en design note
+- **Défaut de cohérence trouvé & corrigé — deux colonnes voisines à des ÉCHELLES différentes sans
+  le dire.** La tranche 2 convertissait theta et vega en unités d'opérateur (`Θ/j`, `V/pt`) mais
+  laissait **vanna et charm bruts sous un libellé sans unité** (« Vanna », « Charm »). Le moteur les
+  produit pourtant dans les mêmes conventions brutes que leurs voisines — charm **par an** comme
+  theta, vanna **pour σ+1.00** comme vega — donc un opérateur lisant `Θ/j = −1,90` à côté de
+  `Vanna = −1,269` ne pouvait pas savoir que la seconde est *par 100 points de vol*. Corrigé :
+  `G_SCALE` étend la conversion (vanna `/100`, charm `/365`), les libellés deviennent **`Vanna/pt`**
+  et **`Charm/j`**, et les décimales suivent (4 chiffres). **Règle durable** : le libellé de colonne
+  PORTE l'unité — jamais un nombre dont l'échelle est implicite. Delta et gamma, sans dimension
+  temporelle ni vol, passent tels quels.
+- **Provenance hybride promue en design note durable** (docstrings `options_chain.py` **et**
+  `OptionsChainPanel.tsx`) : tableau `INVERTED` / `SOURCE_IV` / `RELAY` — entrée disponible → ce que
+  portent réellement les Grecques ; décision **patte par patte** ; badge frontend qui **agrège les
+  deux pattes** et se dégrade en « (partiel) » dès qu'une chaîne est asymétrique. Le badge résume ce
+  qui est **à l'écran**, pas le cas nominal.
+- **Rien à élaguer côté debug** : ni `console.*`, ni `print`/`logging`, ni TODO/FIXME dans les deux
+  fichiers. Les marqueurs `/devil :` du dépôt sont la **convention durable** (explication de la
+  garde, pas trace temporaire) ; les hooks `window.__set*` restent **`import.meta.env.DEV`** et sont
+  élagués du bundle de production.
+- **Vérif** : essai Playwright OMON **live + régression** — badge live « IV inversée du prix », les
+  **6 grecques** parcourues sans une seule valeur non-finie affichée, entêtes portant l'unité,
+  hybride → tirets exactement sur `RELAY`, asymétrie → « IV inversée (partiel) », 12 mises à jour
+  rapides → 12 jeux distincts / 0 NaN / 13 lignes, **0 erreur JS**. **365 passed**, ruff clean,
+  `tsc` + `vite build` OK.
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.

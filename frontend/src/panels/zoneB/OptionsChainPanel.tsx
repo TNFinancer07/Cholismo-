@@ -1,9 +1,24 @@
-/** Panneau OMON — Moniteur de chaîne d'options (D-039) — lit UN champ : `vol_surface.options_chain`
- *  (CLAUDE §1). Divisé en deux : (haut) SKEW/SMILE en HTML5 Canvas — IV Call vs Put par strike sur
- *  l'échéance sélectionnée, marqueur ATM ; (bas) GRILLE haute densité — par échéance, Call/Put avec
- *  IV + grecque sélectionnable (Δ/Γ/Vanna/Charm), ligne ATM surlignée, moneyness ITM/ATM/OTM (jamais
- *  la couleur seule §3 : position + libellé). INTERACTIF : onglets d'échéance + sélecteur de grecque.
- *  LECTURE SEULE (§2.1). FAIL-CLOSED (§3) : périmé → FIGÉ ; vide → « PAS DE DONNÉES ». */
+/** Panneau OMON — Moniteur de chaîne d'options (D-039, enrichi D-044) — lit UN champ :
+ *  `vol_surface.options_chain` (CLAUDE §1). Divisé en deux : (haut) SKEW/SMILE en HTML5 Canvas — IV
+ *  Call vs Put par strike sur l'échéance sélectionnée, marqueur ATM ; (bas) GRILLE haute densité —
+ *  par échéance, Call/Put avec IV + grecque sélectionnable (Δ/Γ/Θ/V/Vanna/Charm), ligne ATM
+ *  surlignée, moneyness ITM/ATM/OTM (jamais la couleur seule §3 : position + libellé + fond).
+ *  INTERACTIF : onglets d'échéance + sélecteur de grecque. LECTURE SEULE (§2.1).
+ *
+ *  **Unités d'affichage (D-044).** Le moteur (`black_scholes.py`) fixe ses conventions internes —
+ *  theta/charm PAR AN, vega/vanna pour σ+1.00 — et la table les convertit en unités d'opérateur
+ *  (Θ/j, V/pt, Vanna/pt, Charm/j) via `G_SCALE`. Le libellé de colonne PORTE l'unité : jamais un
+ *  nombre dont l'échelle est implicite, et jamais deux colonnes voisines d'échelles différentes
+ *  sans le dire.
+ *
+ *  **Badge de provenance (D-044).** Une Grecque calculée ne doit jamais passer pour une donnée du
+ *  feed, ni l'inverse (§3). Le backend décide `greeks_source` PATTE PAR PATTE (`INVERTED` = IV
+ *  inversée du prix / `SOURCE_IV` = calculée à l'IV du feed / `RELAY` = valeur source relayée) ; le
+ *  badge agrège les DEUX pattes de l'échéance affichée et se dégrade honnêtement — « (partiel) »
+ *  dès qu'une chaîne est ASYMÉTRIQUE. Il résume ce qui est réellement à l'écran, pas le cas nominal.
+ *
+ *  FAIL-CLOSED (§3) : périmé → FIGÉ ; vide → « PAS DE DONNÉES » ; toute valeur non finie ou
+ *  indéfinie → tiret neutre « · » (jamais un faux zéro, jamais un `NaN` affiché). */
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { cn } from '@/lib/utils'
 import { useTerminal } from '@/store/terminal'
@@ -16,9 +31,12 @@ const GOLD = '240, 180, 41'   // ATM / repère
 const R = Math.round
 type Greek = 'delta' | 'gamma' | 'theta' | 'vega' | 'vanna' | 'charm'
 const GREEKS: Greek[] = ['delta', 'gamma', 'theta', 'vega', 'vanna', 'charm']
-// Le moteur fixe ses conventions (theta par AN, vega pour σ+1.0) ; la table affiche les unités
-// que lit un opérateur — theta PAR JOUR, vega PAR POINT de vol — et le libellé le dit (D-044).
-const G_SCALE: Record<Greek, number> = { delta: 1, gamma: 1, theta: 1 / 365, vega: 1 / 100, vanna: 1, charm: 1 }
+// Le moteur fixe ses conventions BRUTES (theta et charm par AN, vega et vanna pour une variation de
+// vol de 1.00) ; la table les convertit en unités d'opérateur — PAR JOUR pour ce qui décroît dans le
+// temps, PAR POINT de vol pour ce qui bouge avec σ — et le libellé PORTE l'unité (D-044). Delta et
+// gamma sont sans dimension temporelle ni vol : ils passent tels quels.
+const G_SCALE: Record<Greek, number> = { delta: 1, gamma: 1, theta: 1 / 365, vega: 1 / 100,
+  vanna: 1 / 100, charm: 1 / 365 }
 const scaled = (v: number | null | undefined, g: Greek): number | null =>
   typeof v === 'number' && Number.isFinite(v) ? v * G_SCALE[g] : null
 
@@ -107,8 +125,8 @@ export function OptionsChainPanel() {
   const fresh = oc?.freshness
   const noData = fresh === 'ABSENT' || exps.length === 0
   const gLabel: Record<Greek, string> = { delta: 'Δ', gamma: 'Γ', theta: 'Θ/j', vega: 'V/pt',
-    vanna: 'Vanna', charm: 'Charm' }
-  const gDigits: Record<Greek, number> = { delta: 2, gamma: 4, theta: 2, vega: 2, vanna: 3, charm: 4 }
+    vanna: 'Vanna/pt', charm: 'Charm/j' }
+  const gDigits: Record<Greek, number> = { delta: 2, gamma: 4, theta: 2, vega: 2, vanna: 4, charm: 4 }
   // PROVENANCE des Grecques de l'échéance affichée (D-044). Une Grecque calculée ne doit jamais
   // passer pour une donnée du feed : l'opérateur voit d'où elle vient (§3).
   const rows = Array.isArray(exp?.rows) ? exp!.rows : []

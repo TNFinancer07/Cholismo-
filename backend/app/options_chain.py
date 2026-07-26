@@ -1,13 +1,27 @@
-"""Chaîne d'options (OMON) + Term Structure de volatilité (D-039).
+"""Chaîne d'options (OMON) + Term Structure de volatilité (D-039, enrichie D-044).
 
-`build_options_chain` agrège la chaîne OBSERVÉE (§2.1) — Calls/Puts par EXPIRATION puis par
-STRIKE — portant IV + Grecques (delta, gamma, vanna, charm), et classe la MONEYNESS de façon
-déterministe vs le sous-jacent. `build_term_structure` ordonne la structure de volatilité
+`build_options_chain` agrège la chaîne OBSERVÉE (§2.1) — Calls/Puts par EXPIRATION puis par STRIKE —
+classe la MONEYNESS de façon déterministe vs le sous-jacent, et **enrichit chaque patte via le
+moteur Black-Scholes** (`black_scholes.py`) : IV inversée du prix de marché, puis les six Grecques
+(delta, gamma, theta, vega, vanna, charm). `build_term_structure` ordonne la structure de volatilité
 (VIX9D/VIX/VIX3M/VIX6M) et en classe l'état (CONTANGO / BACKWARDATION / FLAT).
+
+**Provenance des Grecques — jamais implicite (D-044).** Un calcul ne doit pas passer pour une donnée
+de marché, ni l'inverse (§3). Chaque patte porte donc `greeks_source` :
+| Valeur | Entrée disponible | Ce que portent les Grecques |
+|---|---|---|
+| `INVERTED` | un PRIX de marché | IV inversée (Newton-Raphson) + les six Grecques à cette IV |
+| `SOURCE_IV` | pas de prix exploitable, mais une IV source | Grecques à l'IV source, **IV conservée telle quelle** |
+| `RELAY` | ni prix ni IV utilisables | valeurs source relayées ; ce que la source ne porte pas reste `None` |
+Un prix hors bornes d'arbitrage (négatif, sous l'intrinsèque, non-fini) fait **échouer l'inversion**
+et retomber sur `SOURCE_IV` — jamais sur une vol fabriquée. La provenance se décide **patte par
+patte** : une même ligne peut porter un call `RELAY` et un put `INVERTED`, et l'affichage doit en
+tenir compte pour ne pas mentir.
 
 Purs et déterministes (aucun LLM, aucun état caché). FAIL-CLOSED (§3) : strike non-fini → ligne
 ignorée ; IV/grecque non-finie → None (jamais inventée) ; sous-jacent non-fini → moneyness None ;
-< 2 échéances → état None. Les seuils (bande ATM, eps FLAT) sont **v1 provisional** (config)."""
+DTE absent → aucun calcul possible (relais) ; < 2 échéances → état None. Les seuils (bande ATM,
+eps FLAT) et le taux sans risque sont **v1 provisional** (config)."""
 from __future__ import annotations
 
 import math
