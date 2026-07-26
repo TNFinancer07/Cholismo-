@@ -199,6 +199,10 @@ if (import.meta.env.DEV && typeof window !== 'undefined') {
     const s = useTerminal.getState()
     s.set({ vol_surface: vs as never })
   }
+  // D-045 : lit la vue active — permet aux essais de PROUVER qu'aucune touche ne fuit vers les
+  // raccourcis globaux pendant qu'une alerte TradeManifest est affichée (V ne change pas la vue).
+  ;(window as unknown as { __terminalView?: () => string }).__terminalView = () =>
+    useTerminal.getState().view
   // /devil D-040 : force `macro_calendar` / `macro_risk` pathologiques (events non-finis, régime
   // inconnu, event null, seconds_until NaN) pour vérifier que le panneau/badge ne crashe jamais.
   ;(window as unknown as { __setMacro?: (c: unknown, r: unknown) => void }).__setMacro = (cal, risk) => {

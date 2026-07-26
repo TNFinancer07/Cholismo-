@@ -11,6 +11,7 @@ import { useWorkspaces } from '@/store/workspace'
 import { CommandBar } from '@/components/CommandBar'
 import { PanelSlot } from '@/components/PanelSlot'
 import { WorkspaceBar } from '@/components/WorkspaceBar'
+import { TradeAlertOverlay } from '@/panels/TradeAlertOverlay'
 import { Zone0StatusBar } from '@/panels/Zone0StatusBar'
 import { SelfCheckDialog } from '@/panels/zoneC/SelfCheckDialog'
 import { DecisionBlotter } from '@/panels/zoneD/DecisionBlotter'
@@ -110,6 +111,7 @@ export default function App() {
 
       <FunctionKeyBar />
       <SelfCheckDialog />
+      <TradeAlertOverlay />
     </div>
   )
 }

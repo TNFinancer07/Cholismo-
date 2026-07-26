@@ -2,6 +2,7 @@
  *  par bloc : event name = nom du bloc. `decision_log_dirty` déclenche un refresh des
  *  projections Zone D (le log lui-même reste event-sourced côté serveur). */
 import { api, API_BASE } from './api'
+import { useManifest } from '@/store/manifest'
 import { useTerminal } from '@/store/terminal'
 import type { BlotterRow, Calibration, OrchestratorPayload } from '@/types/schema'
 
@@ -101,6 +102,11 @@ export function connectSSE(): () => void {
       })
     }
     es.addEventListener('decision_log_dirty', () => { void refreshProjections() })
+    // TradeManifest (D-045) — HORS schéma : contrat-pont LSR, canal rapide. Le compte à rebours
+    // TTL démarre ICI, à la réception (store/manifest.ts) — jamais sur l'horloge backend.
+    es.addEventListener('trade_manifest', (e: MessageEvent) => {
+      try { useManifest.getState().push(JSON.parse(e.data)) } catch { /* malformé → ignoré (§3) */ }
+    })
   })
 
   const slow = resilientSource(`${API_BASE}/sse/slow`, (es) => {

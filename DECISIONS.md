@@ -1921,6 +1921,36 @@ sortie APPROUVÉE en un objet stable ; `frontend/src/types/trade_manifest.ts` en
 event-sourced, panneau d'affichage avec compte à rebours TTL, et le branchement du moteur LSR
 lui-même (externe).
 
+### Tranche 2 — Alerte frontend : dérive d'horloge, lock UI, overlay (devil-driven)
+`store/manifest.ts` + `panels/TradeAlertOverlay.tsx` + event SSE `trade_manifest` (canal rapide) +
+hook DEV `__pushManifest`. Trois exigences /devil intégrées dès la conception :
+- **Dérive d'horloge — le frontend ne compare JAMAIS le `timestamp` backend à son `Date.now()`.**
+  Le compte à rebours démarre à la RÉCEPTION de l'événement SSE, sur `performance.now()` (horloge
+  MONOTONE locale, insensible aux sauts NTP). Prouvé dans l'essai : un manifeste daté **epoch 0
+  (1970)** vit exactement ses 3 s à l'écran. Le rAF recalcule depuis le delta réel à chaque frame :
+  un onglet en arrière-plan (rAF suspendu) n'étire pas le TTL — au retour, l'échéance vraie
+  s'applique immédiatement. Le `timestamp` backend reste une donnée d'affichage.
+- **Lock UI — garde STRUCTURELLE, pas seulement clavier.** Espace → transition unique
+  `ARMED → LOCKED` dans le store (`lock()` no-op sinon) : quoi que fasse le clavier, il n'existe
+  qu'une transition (lockCount vérifié = 1 sous rafale Espace/G/V/Échap). Une fois LOCKED, toute
+  touche est ignorée et l'overlay reste figé jusqu'à la fin du TTL.
+- **Clavier MODAL en phase capture** : pendant une alerte, les touches simples ne fuient jamais
+  vers les raccourcis globaux (V ne change pas la vue, G ne poste pas de GO — prouvé) ; les
+  combinaisons Ctrl/Cmd/Alt du navigateur passent. ARMED : Espace valide, Échap refuse.
+- **Overlay** : direction en couleur VIVE mais jamais seule (§3) — flèche + « ACHAT · LONG » /
+  « VENTE · SHORT » massifs ; STOP/OBJECTIF en très gros corps ; barre TTL qui se vide + restant
+  numérique ; « AUCUN ORDRE ENVOYÉ » affiché en permanence (§2.1). Fin de TTL (même LOCKED) ou
+  Échap → **démontage silencieux** (fail-closed : un signal périmé n'est plus actionnable).
+- **Fail-closed à la réception** : la frontière re-vérifie le manifeste (champs, finitude,
+  direction, TTL > 0, géométrie stop/TP) même si le backend garantit déjà — 6 malformés injectés,
+  0 affiché. **Anti-substitution** : un manifeste reçu pendant qu'une alerte est affichée est
+  IGNORÉ — le ticket ne change jamais sous le doigt de l'opérateur entre sa lecture et son Espace.
+- **Vérif** : essai Playwright 6 axes (drift 1970, contenu §3, Échap, lock+rafale, malformés,
+  anti-substitution) → tout vert, **0 erreur JS** ; `tsc` + `vite build` OK ; captures à l'appui.
+- **Hors périmètre restant** : persistance de l'ACK dans l'event store (l'enregistrement est
+  aujourd'hui l'état verrouillé du store frontend + `lastLockedId`), émission backend de l'event
+  SSE `trade_manifest` (le listener est câblé, le moteur LSR est externe).
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.
