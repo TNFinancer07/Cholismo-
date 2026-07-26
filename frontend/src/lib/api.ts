@@ -22,6 +22,11 @@ export const api = {
     request('/decisions', { method: 'POST', body: JSON.stringify({ operator, decision, reason }) }),
   armDecision: (operator: string, instrument: string) =>
     request('/decisions/arm', { method: 'POST', body: JSON.stringify({ operator, instrument }) }),
+  postManifestOutcome: (payload: {
+    manifest_id: string; instrument: string; direction: 'BUY' | 'SELL'
+    outcome: 'ACK' | 'REJECT_USER' | 'TIMEOUT'; reaction_time_ms: number | null
+    time_to_live_ms: number; operator: string
+  }) => request('/manifests/outcome', { method: 'POST', body: JSON.stringify(payload) }),
   postOutcome: (payload: { decision_id: string; outcome: string; error_type?: string | null; r_multiple?: number | null }) =>
     request('/outcomes', { method: 'POST', body: JSON.stringify(payload) }),
   postSelfcheck: (operator: string, answers: Record<string, boolean>) =>

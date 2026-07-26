@@ -46,7 +46,7 @@ CREATE TABLE IF NOT EXISTS journal_entries (
   seq     INTEGER PRIMARY KEY AUTOINCREMENT,
   id      TEXT NOT NULL UNIQUE,
   ts      REAL NOT NULL,
-  kind    TEXT NOT NULL CHECK (kind IN ('trade_locked','session_closed')),
+  kind    TEXT NOT NULL CHECK (kind IN ('trade_locked','session_closed','manifest_outcome')),
   payload TEXT NOT NULL
 );
 CREATE TRIGGER IF NOT EXISTS journal_no_update BEFORE UPDATE ON journal_entries
@@ -90,8 +90,36 @@ class EventStore:
         self._lock = threading.Lock()
         self._conn = sqlite3.connect(self.path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
+        self._migrate_journal_kinds()
         self._conn.executescript(_DDL)
         self._conn.commit()
+
+    def _migrate_journal_kinds(self) -> None:
+        """Élargit la contrainte CHECK de `journal_entries` (kind `manifest_outcome`, D-045) sur
+        une base EXISTANTE. SQLite ne sait pas modifier un CHECK : reconstruction de table à
+        l'identique, événements copiés VERBATIM (seq/id/ts/kind/payload) — l'append-only (§2.5)
+        porte sur les événements, jamais sur le DDL. Les triggers anti UPDATE/DELETE sont
+        recréés immédiatement après par `_DDL`. No-op sur base neuve ou déjà migrée."""
+        row = self._conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='journal_entries'"
+        ).fetchone()
+        if row is None or "manifest_outcome" in (row["sql"] or ""):
+            return
+        self._conn.executescript("""
+        DROP TRIGGER IF EXISTS journal_no_update;
+        DROP TRIGGER IF EXISTS journal_no_delete;
+        ALTER TABLE journal_entries RENAME TO journal_entries_old;
+        CREATE TABLE journal_entries (
+          seq     INTEGER PRIMARY KEY AUTOINCREMENT,
+          id      TEXT NOT NULL UNIQUE,
+          ts      REAL NOT NULL,
+          kind    TEXT NOT NULL CHECK (kind IN ('trade_locked','session_closed','manifest_outcome')),
+          payload TEXT NOT NULL
+        );
+        INSERT INTO journal_entries (seq, id, ts, kind, payload)
+          SELECT seq, id, ts, kind, payload FROM journal_entries_old;
+        DROP TABLE journal_entries_old;
+        """)
 
     # -- writes (INSERT only) --
 
@@ -111,8 +139,10 @@ class EventStore:
     def append_journal(self, kind: str, payload: dict[str, Any],
                        ts: Optional[float] = None) -> dict[str, Any]:
         """Journal de trading (reference/journal, D-022) — locked entries are as
-        immutable as decisions: same append-only guards, same grammar."""
-        if kind not in ("trade_locked", "session_closed"):
+        immutable as decisions: same append-only guards, same grammar.
+        `manifest_outcome` (D-045): issue d'une alerte TradeManifest (ACK / REJECT_USER /
+        TIMEOUT) avec temps de réaction humain — même contrat append-only."""
+        if kind not in ("trade_locked", "session_closed", "manifest_outcome"):
             raise ValueError(f"unknown journal kind: {kind}")
         entry = {"id": str(uuid.uuid4()), "ts": ts if ts is not None else time.time(),
                  "kind": kind, **payload}

@@ -5,12 +5,13 @@ No endpoint places an order — Go/No-Go only APPENDS a DecisionEvent (CLAUDE §
 from __future__ import annotations
 
 import asyncio
+import math
 import time
 import uuid
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, model_validator
 from sse_starlette.sse import EventSourceResponse
 
 from . import config, journal, live_mode, projections, recap, settings
@@ -355,6 +356,46 @@ async def recon_import(file: UploadFile = File(...),
 @router.get("/recon/unmatched")
 async def recon_unmatched() -> dict[str, Any]:
     return {"unmatched_fills": projections.unmatched_fills(get_store())}
+
+
+# ---------- issues de TradeManifest (D-045) ----------
+
+class ManifestOutcomeBody(BaseModel):
+    """Issue d'une alerte TradeManifest — événement APPEND-ONLY (§2.5), jamais un ordre (§2.1).
+    `reaction_time_ms` = affichage → action humaine : OBLIGATOIRE pour ACK/REJECT_USER (mesure
+    vitale de la performance d'exécution), INTERDIT pour TIMEOUT — pas d'action humaine, on
+    n'invente pas une latence (§3)."""
+    manifest_id: str = Field(min_length=1)
+    instrument: str = Field(min_length=1)
+    direction: Literal["BUY", "SELL"]
+    outcome: Literal["ACK", "REJECT_USER", "TIMEOUT"]
+    reaction_time_ms: Optional[float] = None
+    time_to_live_ms: int = Field(gt=0)
+    operator: Operator
+
+    @model_validator(mode="after")
+    def _reaction_time_coherent(self) -> "ManifestOutcomeBody":
+        rt = self.reaction_time_ms
+        if self.outcome == "TIMEOUT":
+            if rt is not None:
+                raise ValueError("TIMEOUT ne porte jamais de reaction_time_ms (aucune action humaine)")
+            return self
+        if rt is None or not math.isfinite(rt) or rt < 0:
+            raise ValueError("reaction_time_ms fini et >= 0 requis pour ACK/REJECT_USER")
+        if rt > self.time_to_live_ms:
+            raise ValueError("reaction_time_ms > TTL : l'action n'a pas pu suivre la mort du ticket")
+        return self
+
+
+@router.post("/manifests/outcome")
+async def post_manifest_outcome(body: ManifestOutcomeBody) -> dict[str, Any]:
+    entry = get_store().append_journal("manifest_outcome", body.model_dump())
+    return {"ok": True, "entry": entry}
+
+
+@router.get("/manifests/outcomes")
+async def get_manifest_outcomes() -> dict[str, Any]:
+    return projections.manifest_outcomes(get_store())
 
 
 # ---------- trading journal (reference/journal, D-022) ----------

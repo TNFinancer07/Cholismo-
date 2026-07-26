@@ -39,7 +39,14 @@ function AlertCard({ alert }: { alert: ManifestAlert }) {
     let raf = 0
     const step = () => {
       const left = m.timeToLiveMs - (performance.now() - receivedAtMs)
-      if (left <= 0) { useManifest.getState().clear(); return }   // démontage silencieux (fail-closed)
+      if (left <= 0) {
+        // Démontage silencieux (fail-closed). ARMED → TIMEOUT journalisé (l'humain n'a pas agi) ;
+        // LOCKED → l'ACK est déjà dans l'event store, simple démontage.
+        const s = useManifest.getState()
+        if (s.alert?.status === 'LOCKED') s.clear()
+        else s.resolve('TIMEOUT')
+        return
+      }
       if (barRef.current) barRef.current.style.width = `${(left / m.timeToLiveMs) * 100}%`
       setLeftDs(Math.ceil(left / 100))
       raf = requestAnimationFrame(step)
@@ -57,8 +64,8 @@ function AlertCard({ alert }: { alert: ManifestAlert }) {
       const s = useManifest.getState()
       if (s.alert === null || s.alert.status === 'LOCKED') return // figé : toute touche ignorée
       if (e.repeat) return                                        // Espace maintenu ≠ rafale
-      if (e.code === 'Space') s.lock()
-      else if (e.key === 'Escape') s.clear()                      // refus — démontage silencieux
+      if (e.code === 'Space') s.lock()                            // re-vérifie l'échéance (gel de thread)
+      else if (e.key === 'Escape') s.resolve('REJECT_USER')       // refus journalisé, démontage silencieux
     }
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)

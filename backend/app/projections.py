@@ -112,6 +112,33 @@ def robustness(store: EventStore) -> dict[str, Any]:
     return {"walk_forward": walk_forward(store), "monte_carlo": monte_carlo(store)}
 
 
+def manifest_outcomes(store: EventStore, limit: int = 200) -> dict[str, Any]:
+    """Projection post-session des issues de TradeManifest (D-045) — analyse la performance
+    d'EXÉCUTION humaine face à la machine : temps de réaction affichage → action.
+    Fail-closed (§3) : médianes calculées UNIQUEMENT sur les latences réellement mesurées
+    (ACK/REJECT_USER portent un temps ; TIMEOUT n'en porte jamais) ; store vide → None,
+    jamais un zéro déguisé en mesure."""
+    events = store.journal_entries("manifest_outcome")
+    from statistics import median
+
+    def _lat(outcome: str) -> list[float]:
+        return [e["reaction_time_ms"] for e in events
+                if e.get("outcome") == outcome
+                and isinstance(e.get("reaction_time_ms"), (int, float))
+                and math.isfinite(e["reaction_time_ms"])]
+
+    ack, rej = _lat("ACK"), _lat("REJECT_USER")
+    stats = {
+        "n": len(events),
+        "ack": sum(1 for e in events if e.get("outcome") == "ACK"),
+        "reject_user": sum(1 for e in events if e.get("outcome") == "REJECT_USER"),
+        "timeout": sum(1 for e in events if e.get("outcome") == "TIMEOUT"),
+        "ack_median_reaction_ms": median(ack) if ack else None,
+        "reject_median_reaction_ms": median(rej) if rej else None,
+    }
+    return {"events": list(reversed(events))[:limit], "stats": stats}
+
+
 def sharpe(store: EventStore) -> dict[str, Any]:
     """Per-trade Sharpe = mean(r)/stdev(r), reconciled outcomes only.
     Result score is displayed ONLY after 20+ trades (CLAUDE §2.7)."""

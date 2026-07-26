@@ -1951,6 +1951,41 @@ hook DEV `__pushManifest`. Trois exigences /devil intégrées dès la conception
   aujourd'hui l'état verrouillé du store frontend + `lastLockedId`), émission backend de l'event
   SSE `trade_manifest` (le listener est câblé, le moteur LSR est externe).
 
+### /devil — rafales, mort-nés, gel de thread + journalisation des issues (tranche 3)
+Quatre attaques, quatre protections — dont un **changement de comportement assumé** :
+- **STRICT DROP sous rafale, verrouillé.** Pas de file LIFO/FIFO : un signal reçu pendant qu'une
+  alerte est affichée est définitivement jeté — après un Échap, RIEN ne ressort d'une file
+  (10 manifestes en rafale, 0 réapparition). En microstructure on ne trade pas le passé :
+  setup raté = on attend le prochain.
+- **MORT-NÉS — le comportement de la tranche 2 est CORRIGÉ.** Avant : un manifeste daté epoch 0
+  vivait ses 3 s (preuve d'indépendance au timestamp backend). Désormais l'admission calcule
+  l'**âge de transit** = `Date.now() + clockOffset·1000 − timestamp` — PAS une comparaison naïve
+  d'horloges : `clockOffset` (server_ts − client_ts) est MESURÉ en continu via `session_identity`
+  (canal rapide), ce qui neutralise la dérive entre machines ; le reste est du transit réseau.
+  Transit ≥ TTL → jeté AVANT tout rendu (**0 frame**), non journalisé (jamais montré à l'humain,
+  ce n'est pas sa performance). Un manifeste admis vit toujours son TTL PLEIN depuis la réception
+  (spec tranche 2) : l'âge résiduel à l'expiration est donc borné à < 2×TTL — assumé, documenté.
+- **GEL DE THREAD — garde dans le STORE, pas dans le rendu.** Un thread principal figé 2,6 s
+  (busy-wait) fait arriver l'Espace en file AVANT la frame rAF suivante : `lock()` re-vérifie
+  l'échéance au moment de l'action et refuse (→ TIMEOUT journalisé, overlay démonté, lockCount 0).
+  Le rAF seul aurait laissé une fenêtre de validation d'un ticket mort.
+- **JOURNALISATION DES ISSUES (event store, append-only §2.5).** Kind `manifest_outcome` :
+  `ACK` / `REJECT_USER` / `TIMEOUT` + **`reaction_time_ms`** (affichage → action humaine, la
+  mesure de la performance d'exécution post-session). Contrat strict : reaction_time OBLIGATOIRE
+  (fini, ≥ 0, ≤ TTL) pour ACK/REJECT_USER, **INTERDIT pour TIMEOUT** — pas d'action humaine, on
+  n'invente pas une latence (§3). `POST /manifests/outcome` + `GET /manifests/outcomes`
+  (projection : événements + comptes + médianes par issue, calculées UNIQUEMENT sur les latences
+  réellement mesurées). Tir sans attente côté frontend (l'UI ne bloque jamais sur le réseau) ;
+  échec réseau → `lastError` visible. Une seule issue par manifeste (transitions du store) :
+  fin de TTL d'une alerte LOCKED = simple démontage, l'ACK est déjà journalisé.
+- **Migration SQLite** : le CHECK de `journal_entries` est figé dans le DDL des bases existantes →
+  reconstruction à l'identique à l'ouverture (événements copiés VERBATIM, seq préservés, triggers
+  anti UPDATE/DELETE recréés aussitôt). L'append-only porte sur les ÉVÉNEMENTS, pas sur le DDL.
+  Couvert par test (base pré-D-045 fabriquée, legacy intact, nouveau kind accepté, UPDATE refusé).
+- **Vérif** : essai Playwright 5 axes (rafale, mort-né, TTL-à-réception, gel, journal ACK 804 ms /
+  REJECT 404 ms / TIMEOUT null) → tout vert, **0 erreur JS** ; **432 passed** (10 tests API +
+  migration), ruff clean, `tsc` + `vite build` OK.
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.
