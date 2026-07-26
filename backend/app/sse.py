@@ -28,9 +28,14 @@ class Broadcaster:
     def unsubscribe(self, channel: str, queue: asyncio.Queue) -> None:
         self._subscribers[channel].discard(queue)
 
-    def publish(self, channel: str, event_name: str, payload: Any) -> None:
+    def publish(self, channel: str, event_name: str, payload: Any, replay: bool = True) -> None:
+        """`replay=False` pour un ÉVÉNEMENT éphémère (ex: `trade_manifest`, D-046) : le cache de
+        replay hydrate les abonnés neufs avec l'ÉTAT des blocs — re-livrer un ticket d'avant la
+        connexion serait un signal zombie (la garde mort-né D-045 le jetterait, mais un ticket
+        encore dans son TTL serait ré-affiché → double ACK possible). Un événement ne se rejoue pas."""
         data = json.dumps(payload, ensure_ascii=False)
-        self._last[channel][event_name] = data
+        if replay:
+            self._last[channel][event_name] = data
         for queue in list(self._subscribers[channel]):
             try:
                 queue.put_nowait({"event": event_name, "data": data})

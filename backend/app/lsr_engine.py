@@ -1,0 +1,194 @@
+"""LSR v1.2 — couche microstructure : évaluation fail-closed → plan de trade (D-046).
+
+Première couche du câblage du moteur **Liquidity Sweep Reversion** dans Cholismo : elle relie le
+détecteur de sweep (D-028) et l'order flow assemblé par l'engine au contrat `TradeManifest`
+(D-045). Périmètre STRICT — microstructure et exécution :
+- entrées : alerte de sweep, prints du tape, absorption, ratio d'agressifs, carnet L2, VPOC ;
+- **ISOLATION (D-046)** : aucune donnée macro, géopolitique, options ou news ici. Les frontières
+  compte (F1/F2/F8), volatilité (F3) et calendrier (F5) du doc LSR vivent dans d'autres couches ;
+  le RiskSizer /5 exige un `AccountState` → taille fixe `LSR_CONTRACTS` en v1 provisional.
+
+`evaluate_lsr` est **PURE et déterministe** : mêmes entrées → même plan, aucune horloge lue
+(`now` injecté, règle commune D-045/LSR), aucun état retenu — un rejet est un `None` SILENCIEUX,
+sans calcul résiduel ni allocation conservée. Ordre d'évaluation fail-fast (hérité du doc LSR) :
+garde non-finie → déclencheur (sweep frais ET orienté) → B1 (absorption) → B2 (bascule des
+agressifs) → F4 (fenêtre de liquidité) → extrême A3 → géométrie A1/A2 → plan.
+
+Mapping des gates (seuils `config.LSR_*`, v1 provisional « 1re passe ») :
+- déclencheur : `BID_SWEEP` (agression vendeuse a balayé le bid) → réversion LONG ;
+  `ASK_SWEEP` → SHORT ; alerte sans direction = INORIENTABLE → rejet ;
+- B1-like : `absorption is True` — défense du niveau à l'extrême ;
+- B2-like : bascule des agressifs côté réversion (LONG : part acheteuse ≥ flip ;
+  SHORT : ≤ 1 − flip) ;
+- F4-like : spread ≤ max ticks ET profondeur top-3 des DEUX côtés ≥ plancher ;
+- A3 : stop = extrême RÉEL du sweep (min/max des prints de la fenêtre) ∓ buffer — jamais une
+  distance fabriquée sans structure ;
+- A1 : entrée LIMIT = extrême ± offset, dans le sens de la réintégration ;
+- A2 : TP borné [min, max] ticks visant VPOC ∓ marge ; VPOC du mauvais côté ou pas de place →
+  rejet (un trade sans chemin vers son objectif n'existe pas).
+
+FAIL-CLOSED (§3) : toute entrée absente, périmée (filtrée en amont par `build_lsr_inputs`,
+FRESH only) ou non finie → rejet silencieux. Prix alignés sur la grille `PRICE_TICK`.
+Aucun ordre passé (§2.1) : la sortie est un PLAN, revérifié par `manifest_from_lsr_plan`.
+"""
+from __future__ import annotations
+
+import math
+from typing import Any, Optional
+
+from pydantic import BaseModel, Field
+
+from . import config
+
+
+def _finite(x: Any) -> bool:
+    return isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x)
+
+
+class LsrInputs(BaseModel):
+    """Photographie STATELESS des entrées microstructure au moment `now` (horloge injectée).
+    Tous les champs sont optionnels : l'absence est un état légitime qui mène au rejet, jamais
+    à une invention (§3)."""
+    now: float
+    sweep_ts: Optional[float] = None
+    sweep_direction: Optional[str] = None            # BID_SWEEP | ASK_SWEEP | None
+    prints: list[dict] = Field(default_factory=list)  # {ts, price, size, side}
+    absorption: Optional[bool] = None
+    aggressor_ratio: Optional[float] = None          # part acheteuse 0..1
+    book: Optional[dict] = None                      # {bids: [[p, s], …], asks: [[p, s], …]}
+    vpoc: Optional[float] = None
+
+
+def build_lsr_inputs(schema, now: float) -> LsrInputs:
+    """Extrait les entrées du ContextSchema assemblé — **FRESH uniquement** : une microstructure
+    périmée est traitée comme absente (§3), jamais comme un signal."""
+    from .meta import Freshness
+
+    def fresh(meta) -> Any:
+        return meta.value if meta is not None and meta.freshness == Freshness.FRESH else None
+
+    s1 = schema.s1_state
+    sw = schema.liquidity_sweep
+    alert = sw.alert if sw.triggered and sw.alert is not None else None
+    tape = fresh(s1.tape)
+    return LsrInputs(
+        now=now,
+        sweep_ts=alert.ts if alert else None,
+        sweep_direction=alert.direction if alert else None,
+        prints=tape if isinstance(tape, list) else [],
+        absorption=fresh(s1.order_flow.absorption),
+        aggressor_ratio=fresh(s1.order_flow.aggressor_ratio),
+        book=fresh(s1.order_book),
+        vpoc=fresh(s1.structure.vpoc),
+    )
+
+
+def _grid(x: float) -> float:
+    """Aligne un prix sur la grille de ticks (un niveau hors grille n'est pas exécutable)."""
+    return round(round(x / config.PRICE_TICK) * config.PRICE_TICK, 10)
+
+
+def _f4_liquidity_ok(book: Any) -> bool:
+    """F4-like — fenêtre de liquidité : spread borné ET profondeur top-3 des deux côtés."""
+    if not isinstance(book, dict):
+        return False
+    bids, asks = book.get("bids"), book.get("asks")
+    if not (isinstance(bids, list) and bids and isinstance(asks, list) and asks):
+        return False
+    try:
+        best_bid, best_ask = float(bids[0][0]), float(asks[0][0])
+        if not (math.isfinite(best_bid) and math.isfinite(best_ask) and best_ask > best_bid):
+            return False
+        if (best_ask - best_bid) / config.PRICE_TICK > config.LSR_F4_MAX_SPREAD_TICKS:
+            return False
+        depth_bid = sum(float(level[1]) for level in bids[:3])
+        depth_ask = sum(float(level[1]) for level in asks[:3])
+    except (TypeError, ValueError, IndexError):
+        return False
+    if not (math.isfinite(depth_bid) and math.isfinite(depth_ask)):
+        return False
+    return min(depth_bid, depth_ask) >= config.LSR_F4_MIN_DEPTH
+
+
+def _sweep_extreme(prints: list, since: float, is_long: bool) -> Optional[float]:
+    """A3 — l'extrême RÉEL touché pendant la fenêtre du sweep (min pour un LONG, max pour un
+    SHORT), dérivé des prints. Print sale (prix/ts non fini) ignoré ; aucun print utilisable →
+    None (pas d'extrême fantôme)."""
+    prices = []
+    for p in prints:
+        if not isinstance(p, dict):
+            continue
+        price, ts = p.get("price"), p.get("ts")
+        if _finite(price) and _finite(ts) and ts >= since:
+            prices.append(float(price))
+    if not prices:
+        return None
+    return min(prices) if is_long else max(prices)
+
+
+def evaluate_lsr(i: LsrInputs) -> Optional[dict]:
+    """Évalue un setup de réversion post-sweep. `None` SILENCIEUX dès qu'un critère manque —
+    sinon un plan au contrat D-045, prêt pour `manifest_from_lsr_plan`."""
+    # -- déclencheur : sweep FRAIS et ORIENTÉ --
+    if not _finite(i.sweep_ts) or not _finite(i.now):
+        return None
+    if i.now - i.sweep_ts > config.LSR_SWEEP_MAX_AGE_S:
+        return None
+    if i.sweep_direction not in ("BID_SWEEP", "ASK_SWEEP"):
+        return None                                   # inorientable → pas de réversion
+    is_long = i.sweep_direction == "BID_SWEEP"        # bid balayé → réversion acheteuse
+
+    # -- B1-like : défense du niveau (absorption) --
+    if i.absorption is not True:
+        return None
+    # -- B2-like : bascule des agressifs côté réversion --
+    if not _finite(i.aggressor_ratio):
+        return None
+    if is_long and i.aggressor_ratio < config.LSR_B2_FLIP:
+        return None
+    if not is_long and i.aggressor_ratio > 1.0 - config.LSR_B2_FLIP:
+        return None
+    # -- F4-like : fenêtre de liquidité --
+    if not _f4_liquidity_ok(i.book):
+        return None
+
+    # -- A3 : extrême réel du sweep --
+    extreme = _sweep_extreme(i.prints, i.sweep_ts - config.LSR_EXTREME_WINDOW_S, is_long)
+    if extreme is None:
+        return None
+
+    # -- A1/A2/A3 : géométrie sur la grille de ticks --
+    if not _finite(i.vpoc):
+        return None
+    tick = config.PRICE_TICK
+    sign = 1.0 if is_long else -1.0
+    entry = _grid(extreme + sign * config.LSR_ENTRY_OFFSET_TICKS * tick)
+    stop = _grid(extreme - sign * config.LSR_SL_BUFFER_TICKS * tick)
+    vpoc = _grid(i.vpoc)
+    if is_long:
+        if vpoc <= entry:
+            return None                               # pas de chemin vers l'objectif
+        tp = min(entry + config.LSR_TP_MAX_TICKS * tick, vpoc - config.LSR_TP_VPOC_MARGIN_TICKS * tick)
+        if tp < entry + config.LSR_TP_MIN_TICKS * tick:
+            return None                               # pas de place avant le VPOC
+        if not (stop < entry < tp):
+            return None
+    else:
+        if vpoc >= entry:
+            return None
+        tp = max(entry - config.LSR_TP_MAX_TICKS * tick, vpoc + config.LSR_TP_VPOC_MARGIN_TICKS * tick)
+        if tp > entry - config.LSR_TP_MIN_TICKS * tick:
+            return None
+        if not (tp < entry < stop):
+            return None
+
+    side = "LONG" if is_long else "SHORT"
+    return {
+        "status": "APPROVED",
+        "instrument": config.LSR_INSTRUMENT,
+        "direction": side,
+        "reason": (f"LSR — {i.sweep_direction} réintégré · absorption · "
+                   f"flip {i.aggressor_ratio:.2f} · VPOC {vpoc}"),
+        "executionPlan": {"entryType": "LIMIT", "entryPrice": entry, "stopLoss": _grid(stop),
+                          "takeProfit": _grid(tp), "contracts": config.LSR_CONTRACTS},
+    }

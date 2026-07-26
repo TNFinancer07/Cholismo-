@@ -2024,6 +2024,52 @@ vers un courtier, l'humain tranche ; §3 fail-closed à chaque frontière (jamai
 jamais une latence inventée) ; contrat camelCase borné au manifeste (né côté TS, hors ContextSchema).
 Restent externes : le moteur LSR lui-même et l'émission backend de l'event SSE (listener câblé).
 
+## D-046 · Câblage de l'émission LSR — microstructure → evaluate_lsr → SSE
+Première couche du moteur **Liquidity Sweep Reversion** DANS le backend (`app/lsr_engine.py`) :
+```
+boucle sweep (1 s, hors hot path §2.8)
+  _assemble_sweep ──→ liquidity_sweep.alert (D-028)
+  _maybe_emit_lsr(now)
+      build_lsr_inputs(schema, now) → LsrInputs     stateless, microstructure SEULE, FRESH only
+      evaluate_lsr(inputs) → plan | None            pur, déterministe, rejet = SILENCE (§3)
+      manifest_from_lsr_plan(plan) → TradeManifest  garde D-045 (le dernier mot)
+      broadcaster.publish("fast", "trade_manifest", …, replay=False)
+```
+- **ISOLATION stricte** : la couche LSR ne lit QUE tape / order flow / carnet / VPOC / alerte de
+  sweep. Le couplage news T1 est une exigence INTERNE du détecteur D-028 (en amont) ; les
+  frontières compte (F1/F2/F8), volatilité (F3) et calendrier (F5) du doc LSR = autres couches.
+  Le RiskSizer /5 exige un `AccountState` → **1 contrat, v1 provisional** (`LSR_CONTRACTS`).
+- **Gates v1 provisional** (`config.LSR_*`, « 1re passe » à figer sur 60 trades) : déclencheur =
+  alerte FRAÎCHE et ORIENTÉE (`BID_SWEEP`→LONG / `ASK_SWEEP`→SHORT ; sans direction =
+  inorientable → rejet) ; B1 absorption ; B2 bascule des agressifs ≥ 0,60 côté réversion ; F4
+  spread ≤ 2 ticks (doc : 1 sur MES réel — 2 = calibration MOCK, env-overridable) + profondeur
+  top-3 ≥ 150 des deux côtés ; A3 stop = **extrême RÉEL du sweep** (min/max des prints, jamais
+  une distance fabriquée) ∓ buffer ; A1 entrée LIMIT = extrême ± offset ; A2 TP borné [3,5] ticks
+  visant VPOC ∓ marge — VPOC du mauvais côté ou pas de place → rejet. Grille `PRICE_TICK`.
+- **`replay=False` sur `trade_manifest`** : le cache de replay SSE hydrate les abonnés neufs avec
+  l'ÉTAT des blocs — un manifeste est un ÉVÉNEMENT ; re-livrer un ticket d'avant la connexion
+  serait un zombie (et un ticket encore dans son TTL serait ré-affiché → double ACK possible).
+- **Dédup à DEUX étages — leçon du /devil LIVE.** La 1re version dédupliquait sur `alert.ts` :
+  or le détecteur régénère `ts` à chaque tick d'une condition persistante → un 2e manifeste
+  émis pour le MÊME sweep (attrapé par l'essai live). Corrigé : identité d'ÉVÉNEMENT
+  `trigger|direction` (même composition que `_sweep_last_key` D-028) + reset quand la condition
+  se lève. Puis 2e leçon live : le mock déclenche des sweeps quasi EN CONTINU en alternant
+  BID/ASK — la clé seule laisserait spammer. Ajout de la **fenêtre anti-FOMO F7-like**
+  (`LSR_REARM_COOLDOWN_S = 90`, doc LSR `f7FomoWindowMs`) : une émission max par fenêtre,
+  quel que soit l'événement.
+- **Démo end-to-end sur le VRAI stack** (aucun code de prod modifié) : source `sierra_chart`
+  coupée (levier TASKS 2.4) → injecteur écrit le setup microstructure dans Redis (rafale
+  vendeuse → `BID_SWEEP` dv=−50, absorption, agressifs 0,72, carnet 70×3 serré, VPOC 5451) →
+  l'engine assemble → D-028 couple la news T1 du mock → LSR émet → **l'overlay s'arme dans le
+  navigateur SANS aucune injection frontend** : LONG MES, entrée 5448,25 / stop 5447,50 /
+  TP 5449,50 (géométrie exactement prédite) → Espace → **ACK journalisé (392 ms)** dans l'event
+  store. Dédup vérifiée : 45 s de condition persistante, UN manifeste.
+- **Vérif** : 17 tests dédiés (géométrie LONG/SHORT, chaque gate en silence, pureté/non-mutation,
+  FRESH-only, pipeline+dédup+F7+replay) — **449 passed**, ruff clean ; essai live 4 axes, 0 erreur
+  JS, capture à l'appui.
+- **Hors périmètre restant** : RiskSizer /5 + modif VIX (couche compte), A1 annulation anti-chasse
+  (runtime d'ordre — n'existe pas, §2.1), calibration des seuils sur trades réels.
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.

@@ -26,6 +26,8 @@ from .cvd_stratified import build_cvd_stratified
 from .footprint import build_footprint
 from .volume_profile import build_volume_profile
 from .graph.liquidity_sweep import SWEEP_GRAPH, build_sweep_inputs
+from .lsr_engine import build_lsr_inputs, evaluate_lsr
+from .trade_manifest import manifest_from_lsr_plan
 from .heatmap import latest_column
 from .macro_risk import build_macro_calendar, compute_macro_risk
 from .macro_score import compute_s2_macro_score
@@ -215,6 +217,11 @@ class Engine:
         # Détecteur Sweep (D-028) : feed court + clé du dernier événement (anti-inondation).
         self._sweep_recent: deque = deque(maxlen=config.SWEEP_RECENT_MAX)
         self._sweep_last_key: Optional[str] = None
+        # Pipeline LSR (D-046) : clé de la dernière alerte AYANT ÉMIS un manifeste (une émission
+        # max par sweep distinct) + horodatage de la dernière émission (fenêtre anti-FOMO F7 :
+        # sous un détecteur qui alterne BID/ASK en continu, la clé seule laisserait spammer).
+        self._lsr_emitted_key: Optional[str] = None
+        self._lsr_last_emit_ts: float = 0.0
         # CVD par niveau (D-029) : accumulateur prix -> [buy, sell], seq déjà traité,
         # clé de l'événement du dernier reset, bornes de la fenêtre courante.
         self._cvd_levels: dict[float, list[float]] = {}
@@ -780,11 +787,49 @@ class Engine:
         broadcaster.publish("fast", "liquidity_sweep",
                             self.schema.liquidity_sweep.model_dump(mode="json"))
 
+    def _maybe_emit_lsr(self, now: float) -> None:
+        """Pipeline LSR (D-046) : sweep → evaluate_lsr → TradeManifest → SSE. Pur, déterministe
+        et borné (sub-ms) — il tourne sur la cadence SWEEP (hors hot path §2.8), jamais dans la
+        boucle fast. Rejet = SILENCE (§3) ; approbation = UNE émission par alerte distincte,
+        revérifiée par la garde D-045, publiée SANS cache de replay (événement éphémère — un
+        abonné neuf ne doit jamais recevoir un ticket d'avant sa connexion). Aucun ordre (§2.1) :
+        le manifeste est une proposition affichée, l'humain tranche."""
+        sw = self.schema.liquidity_sweep
+        alert = sw.alert if sw.triggered else None
+        if not sw.triggered:
+            # Condition levée → le PROCHAIN sweep est un événement NEUF (même sémantique que
+            # `_sweep_last_key`, D-028). Sans ce reset, un trigger|direction identique plus tard
+            # dans la session resterait dédupliqué à tort.
+            self._lsr_emitted_key = None
+            return
+        if alert is None or alert.direction is None:
+            return                                    # inorientable → pas de réversion
+        # Identité de l'ÉVÉNEMENT, pas du tick : `alert.ts` est régénéré à chaque évaluation
+        # d'une condition persistante — même composition de clé que D-028 (trigger|direction).
+        key = f"{alert.trigger}|{alert.direction}"
+        if key == self._lsr_emitted_key:
+            return                                    # condition persistante = UN seul manifeste
+        # F7-like — fenêtre anti-FOMO : sous un détecteur qui bascule BID/ASK en continu (vu au
+        # /devil live sur le mock), la clé change à chaque bascule ; sans cette borne, chaque
+        # alternance ré-émettrait. Une émission max par fenêtre, quel que soit l'événement.
+        if now - self._lsr_last_emit_ts < config.LSR_REARM_COOLDOWN_S:
+            return
+        plan = evaluate_lsr(build_lsr_inputs(self.schema, now))
+        if plan is None:
+            return                                    # gates rouges → silence
+        manifest = manifest_from_lsr_plan(plan, now_ms=int(now * 1000))
+        if manifest is None:
+            return                                    # la frontière D-045 a le dernier mot
+        broadcaster.publish("fast", "trade_manifest", manifest.model_dump(), replay=False)
+        self._lsr_emitted_key = key
+        self._lsr_last_emit_ts = now
+
     async def _sweep_loop(self) -> None:
         while True:
             started = time.time()
             try:
                 await self._assemble_sweep(time.time())
+                self._maybe_emit_lsr(time.time())
             except Exception:
                 log.exception("sweep loop tick failed (fail-closed: no alert emitted)")
             elapsed = time.time() - started

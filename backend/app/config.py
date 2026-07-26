@@ -166,3 +166,26 @@ MC_SEED = int(os.getenv("MC_SEED")) if os.getenv("MC_SEED") else None  # None �
 # Borne CPU n_sims×n_trades → jamais de hang de worker sur entrée énorme (n_sims réduit, reporté via
 # `capped`). 2e6 ≈ < ~3 s Python pur ; garde 10000 sims tant que ≤ 200 trades (cas réel réconcilié).
 MC_MAX_WORK = int(os.getenv("MC_MAX_WORK", "2000000"))
+
+# --- LSR v1.2 — couche microstructure (D-046) ---
+# Seuils v1 provisional (calibration « 1re passe » du doc LSR, à figer sur 60 trades réels).
+# ISOLATION : cette couche ne lit QUE la microstructure — les frontières compte (F1/F2/F8),
+# volatilité (F3) et news (F5) vivent dans d'autres couches/services, jamais ici.
+LSR_INSTRUMENT = os.getenv("LSR_INSTRUMENT", "MES")         # Micro E-mini S&P 500
+LSR_SWEEP_MAX_AGE_S = float(os.getenv("LSR_SWEEP_MAX_AGE_S", "90"))    # fraîcheur du déclencheur
+LSR_EXTREME_WINDOW_S = float(os.getenv("LSR_EXTREME_WINDOW_S", "120"))  # fenêtre de l'extrême (A3)
+LSR_ENTRY_OFFSET_TICKS = int(os.getenv("LSR_ENTRY_OFFSET_TICKS", "1"))  # A1 — sens réintégration
+LSR_SL_BUFFER_TICKS = int(os.getenv("LSR_SL_BUFFER_TICKS", "2"))        # A3 — buffer bruit
+LSR_TP_MIN_TICKS = int(os.getenv("LSR_TP_MIN_TICKS", "3"))              # A2 — TP plancher
+LSR_TP_MAX_TICKS = int(os.getenv("LSR_TP_MAX_TICKS", "5"))              # A2 — TP plafond
+LSR_TP_VPOC_MARGIN_TICKS = int(os.getenv("LSR_TP_VPOC_MARGIN_TICKS", "1"))  # A2 — marge avant VPOC
+LSR_B2_FLIP = float(os.getenv("LSR_B2_FLIP", "0.60"))                   # B2 — bascule agressifs
+# Doc LSR : 1 tick sur MES réel. Le mock émet un half-spread de 0.25 (spread = 2 ticks) en régime
+# normal : 2 = calibration mock v1 provisional, à resserrer à 1 sur feed réel (env-overridable).
+LSR_F4_MAX_SPREAD_TICKS = float(os.getenv("LSR_F4_MAX_SPREAD_TICKS", "2"))
+LSR_F4_MIN_DEPTH = float(os.getenv("LSR_F4_MIN_DEPTH", "150"))          # top-3, chaque côté
+# RiskSizer /5 + modif VIX = couche COMPTE (AccountState), hors D-046 → taille fixe v1.
+LSR_CONTRACTS = int(os.getenv("LSR_CONTRACTS", "1"))
+# F7-like — fenêtre anti-FOMO : après une émission, aucun nouveau manifeste pendant ce délai,
+# quelles que soient les alertes (borne structurelle de fréquence ; doc LSR f7FomoWindowMs).
+LSR_REARM_COOLDOWN_S = float(os.getenv("LSR_REARM_COOLDOWN_S", "90"))
