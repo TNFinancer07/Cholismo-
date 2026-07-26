@@ -8,7 +8,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { cn } from '@/lib/utils'
 import { useTerminal } from '@/store/terminal'
 import { Panel } from '@/components/ui/panel'
-import type { OptionExpiry, OptionsChainValue } from '@/types/schema'
+import type { GreeksSource, OptionExpiry, OptionsChainValue } from '@/types/schema'
 
 const CALL = '56, 189, 248'   // sky — Call IV (ni risque, ni opérateur)
 const PUT = '244, 114, 182'   // rose — Put IV
@@ -112,10 +112,15 @@ export function OptionsChainPanel() {
   // PROVENANCE des Grecques de l'échéance affichée (D-044). Une Grecque calculée ne doit jamais
   // passer pour une donnée du feed : l'opérateur voit d'où elle vient (§3).
   const rows = Array.isArray(exp?.rows) ? exp!.rows : []
-  const provenance = rows.length === 0 ? null
-    : rows.every((r) => r.call?.greeks_source === 'INVERTED') ? { txt: 'IV inversée du prix', cls: 'text-risk-green' }
-      : rows.some((r) => r.call?.greeks_source === 'INVERTED') ? { txt: 'IV inversée (partiel)', cls: 'text-risk-yellow' }
-        : rows.some((r) => r.call?.greeks_source === 'SOURCE_IV') ? { txt: 'Grecques à l\u2019IV source', cls: 'text-term-dim' }
+  // Le badge couvre les DEUX pattes : n'inspecter que les calls le ferait mentir sur une chaîne
+  // ASYMÉTRIQUE (calls relayés, puts inversés) — l'opérateur lirait « relayées » devant des colonnes
+  // put pourtant calculées. Le badge résume ce qui est RÉELLEMENT affiché (§3).
+  const sources = rows.flatMap((r) => [r.call?.greeks_source, r.put?.greeks_source])
+    .filter((s): s is GreeksSource => s != null)
+  const provenance = sources.length === 0 ? null
+    : sources.every((s) => s === 'INVERTED') ? { txt: 'IV inversée du prix', cls: 'text-risk-green' }
+      : sources.some((s) => s === 'INVERTED') ? { txt: 'IV inversée (partiel)', cls: 'text-risk-yellow' }
+        : sources.some((s) => s === 'SOURCE_IV') ? { txt: 'Grecques à l\u2019IV source', cls: 'text-term-dim' }
           : { txt: 'valeurs source relayées', cls: 'text-stale' }
 
   return (

@@ -1834,6 +1834,26 @@ que l'inversion doit retrouver exactement ce smile — vérifiable de bout en bo
   présents partout ; essai Playwright — Θ/j et V/pt affichent 13 valeurs réelles chacun, badge
   « IV inversée du prix », **0 erreur JS** ; capture à l'appui.
 
+### /devil D-044 tranche 2 — données hybrides, prix aberrants, sauts en direct
+Attaques : chaîne mêlant `INVERTED`/`SOURCE_IV`/`RELAY`, prix négatifs ou sous l'intrinsèque,
+rafale de mises à jour en direct sur le sélecteur Θ/Vega.
+- **1 défaut RÉEL trouvé & corrigé — le badge de provenance MENTAIT.** Il n'inspectait que
+  `r.call`. Sur une chaîne **asymétrique** (tous les calls `RELAY`, tous les puts `INVERTED`) il
+  affichait « valeurs source relayées » pendant que la colonne Θ des puts montrait des Grecques
+  **calculées** (−2,19 / −2,20) — exactement l'ambiguïté que la provenance devait supprimer (§3).
+  Corrigé : le badge agrège les **deux pattes** ; la chaîne asymétrique affiche désormais
+  « IV inversée (partiel) ».
+- **Backend : aucun défaut** (7 cas sondés) — prix valide → `INVERTED` ; IV seule → `SOURCE_IV` ;
+  ni l'un ni l'autre → `RELAY` ; **prix négatif**, **prix sous l'intrinsèque** (call ITM à 1,0) et
+  **prix non-fini** → repli propre sur `SOURCE_IV`, jamais une vol fabriquée ; ligne asymétrique
+  étiquetée correctement patte par patte ; **aucune valeur non-finie émise**.
+- **Chemins déjà sûrs confirmés** : chaîne hybride → **tirets neutres exactement là où la patte est
+  `RELAY`**, aucun effet de bord visuel ; **12 mises à jour rapides** → 12 jeux de valeurs distincts,
+  **0 NaN/Infinity**, toujours 13 lignes ; `expIdx` **déjà borné** (`Math.min(expIdx, len−1)`) donc
+  une chaîne qui rétrécit en direct ne sort pas de plage — suspicion levée sans correctif.
+- **Vérif** : essai Playwright 3 axes, **0 erreur JS** ; **365 passed**, ruff clean ; `tsc` +
+  `vite build` OK.
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.
