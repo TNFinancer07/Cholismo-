@@ -712,7 +712,8 @@ class Engine:
         chain = build_options_chain(
             raw_oc.get("expirations") if isinstance(raw_oc.get("expirations"), list) else [],
             raw_oc.get("underlying"), config.OPTIONS_ATM_BAND,
-            config.OPTIONS_MAX_EXPIRATIONS, config.OPTIONS_MAX_STRIKES)
+            config.OPTIONS_MAX_EXPIRATIONS, config.OPTIONS_MAX_STRIKES,
+            r=config.RISK_FREE_RATE)          # D-044 : IV inversée + Grecques calculées
         options_chain = MetaField(value=chain, last_update_ts=oc.last_update_ts,
                                   source=oc.source, freshness=oc.freshness, flags=oc.flags)
         vt = await self._meta("vol_term_structure", raws, now)

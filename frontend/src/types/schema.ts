@@ -290,13 +290,22 @@ export interface BridgeVariables {
 // --- vol_surface → OMON (chaîne d'options) + VTS (term structure) [lent] (D-039) ---
 
 export type Moneyness = 'ITM' | 'ATM' | 'OTM' | null
+/** Provenance des Grecques d'une patte (D-044) — jamais implicite : un calcul ne doit pas passer
+ *  pour une donnée de marché, ni l'inverse (§3).
+ *  `INVERTED` : IV inversée depuis le PRIX de marché (Newton-Raphson), toutes les Grecques calculées ;
+ *  `SOURCE_IV` : Grecques calculées à l'IV fournie par la source (pas de prix exploitable) ;
+ *  `RELAY` : ni prix ni IV utilisables → valeurs source relayées, le reste à `null`. */
+export type GreeksSource = 'INVERTED' | 'SOURCE_IV' | 'RELAY'
 export interface OptionLeg {
   iv: number | null
   delta: number | null
   gamma: number | null
+  theta: number | null            // par AN (afficher /365 pour un « par jour »)
+  vega: number | null             // pour σ + 1.0 (afficher /100 pour « par point de vol »)
   vanna: number | null
   charm: number | null
   moneyness: Moneyness
+  greeks_source: GreeksSource
 }
 export interface OptionRow { strike: number; call: OptionLeg; put: OptionLeg }
 export interface OptionExpiry {

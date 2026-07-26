@@ -273,3 +273,22 @@ def test_devil_exhaustive_iv_sweep_never_raises_nor_emits_absurd_vol():
             [-1000.0, -0.5, 0.0, 0.05, 1e6], [0.0, 1e-9, 50.0, 1e300], ("call", "put")):
         iv = implied_vol(price, s, k, t, r, kind)                # ne doit jamais lever
         assert iv is None or (math.isfinite(iv) and iv > 0)
+
+
+def test_charm_matches_finite_difference_of_delta():
+    """CHARM = ∂Delta/∂T. La formule fermée est facile à écrire avec un signe faux : on la valide
+    contre la dérivation NUMÉRIQUE de delta, méthode indépendante (comme pour les autres Grecques)."""
+    h = 1e-6
+    for k in (5200.0, 5450.0, 5700.0):
+        for t in (7 / 365, 30 / 365, 180 / 365):
+            for kind in ("call", "put"):
+                analytic = bs_greeks(5450.0, k, t, 0.045, 0.22, kind)["charm"]
+                up = bs_greeks(5450.0, k, t + h, 0.045, 0.22, kind)["delta"]
+                dn = bs_greeks(5450.0, k, t - h, 0.045, 0.22, kind)["delta"]
+                numeric = (up - dn) / (2 * h)
+                assert abs(analytic - numeric) / max(1e-9, abs(numeric)) < 1e-4
+
+
+def test_charm_is_none_when_undefined():
+    assert bs_greeks(S, K, 0.0, R, SIG, "call")["charm"] is None
+    assert bs_greeks(S, K, 1e-300, R, 1e-300, "call")["charm"] is None

@@ -8,7 +8,7 @@ donc identiques pour les deux opérateurs et testables.
 Notes de conception :
 - **Conventions de Grecques figées ici** pour que l'affichage ne les réinvente jamais : `theta` par
   AN (diviser par 365 pour un « par jour »), `vega` pour une variation de vol de **1.0** (diviser
-  par 100 pour « par point de % »), `vanna` = ∂Delta/∂σ.
+  par 100 pour « par point de % »), `vanna` = ∂Delta/∂σ, `charm` = ∂Delta/∂T (par an).
 - **IV : Newton-Raphson** (départ Brenner-Subrahmanyam) avec **repli BISSECTION** dès que Newton
   sort des bornes ou stagne — le vega tend vers 0 sur les options très ITM/OTM et Newton y diverge.
   Bissection sur `[1e-6, 5.0]`, donc bornée et **déterministe**.
@@ -42,7 +42,7 @@ _SQRT_2PI = math.sqrt(2.0 * math.pi)
 _IV_LO, _IV_HI = 1e-6, 5.0          # bornes de recherche de la vol (bissection)
 _NEWTON_ITERS, _BISECT_ITERS = 24, 80
 _IV_TOL = 1e-9
-_GREEK_KEYS = ("delta", "gamma", "theta", "vega", "vanna")
+_GREEK_KEYS = ("delta", "gamma", "theta", "vega", "vanna", "charm")
 
 
 def _finite(x: Any) -> bool:
@@ -111,6 +111,7 @@ def bs_greeks(S: float, K: float, T: float, r: float, sigma: float, kind: Any) -
         return dict.fromkeys(_GREEK_KEYS)
     d1, d2, disc = core
     sqrt_t = math.sqrt(T)
+    vol_t = d1 - d2                                      # = σ·√T, déjà validé fini par `_core`
     pdf = _norm_pdf(d1)
 
     def g(fn) -> float | None:
@@ -133,6 +134,9 @@ def bs_greeks(S: float, K: float, T: float, r: float, sigma: float, kind: Any) -
         "theta": theta,                                  # par an
         "vega": g(lambda: S * pdf * sqrt_t),             # pour σ + 1.0
         "vanna": g(lambda: -pdf * d2 / sigma),           # ∂Delta/∂σ
+        # ∂Delta/∂T : dérive du delta quand l'échéance s'éloigne. Signe validé contre la
+        # dérivation numérique de delta (test), pas contre une formule recopiée.
+        "charm": g(lambda: pdf * (2.0 * r * T - d2 * vol_t) / (2.0 * T * vol_t)),
     }
 
 

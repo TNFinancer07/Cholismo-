@@ -139,6 +139,11 @@ LOG_SCRAPER_ENABLED = os.getenv("LOG_SCRAPER_ENABLED", "false").lower() == "true
 NT8_LOG_DIR = os.getenv("NT8_LOG_DIR", "")
 LOG_SCRAPER_POLL_SECONDS = float(os.getenv("LOG_SCRAPER_POLL_SECONDS", "1.0"))  # hors hot path
 
+# --- Pricing d'options (D-044) — taux sans risque servant Black-Scholes ---
+# PLACEHOLDER v1 provisional : à brancher sur une vraie courbe (OIS) le jour où elle est câblée.
+# Sert l'inversion d'IV et les Grecques ; ne modifie aucun verrou (advisory, §2.1).
+RISK_FREE_RATE = float(os.getenv("RISK_FREE_RATE", "0.045"))
+
 # --- Session windows CET (PLACEHOLDER D-006) ---
 LONDON_OBS_CET = (8, 12)      # 08:00–12:00 CET
 OVERLAP_NY_CET = (14.5, 17.5)  # 14:30–17:30 CET

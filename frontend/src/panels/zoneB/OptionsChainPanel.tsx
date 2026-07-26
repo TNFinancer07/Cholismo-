@@ -14,8 +14,13 @@ const CALL = '56, 189, 248'   // sky — Call IV (ni risque, ni opérateur)
 const PUT = '244, 114, 182'   // rose — Put IV
 const GOLD = '240, 180, 41'   // ATM / repère
 const R = Math.round
-type Greek = 'delta' | 'gamma' | 'vanna' | 'charm'
-const GREEKS: Greek[] = ['delta', 'gamma', 'vanna', 'charm']
+type Greek = 'delta' | 'gamma' | 'theta' | 'vega' | 'vanna' | 'charm'
+const GREEKS: Greek[] = ['delta', 'gamma', 'theta', 'vega', 'vanna', 'charm']
+// Le moteur fixe ses conventions (theta par AN, vega pour σ+1.0) ; la table affiche les unités
+// que lit un opérateur — theta PAR JOUR, vega PAR POINT de vol — et le libellé le dit (D-044).
+const G_SCALE: Record<Greek, number> = { delta: 1, gamma: 1, theta: 1 / 365, vega: 1 / 100, vanna: 1, charm: 1 }
+const scaled = (v: number | null | undefined, g: Greek): number | null =>
+  typeof v === 'number' && Number.isFinite(v) ? v * G_SCALE[g] : null
 
 function num(v: number | null | undefined, d = 2): string {
   return typeof v === 'number' && Number.isFinite(v) ? v.toFixed(d) : '·'
@@ -101,13 +106,26 @@ export function OptionsChainPanel() {
 
   const fresh = oc?.freshness
   const noData = fresh === 'ABSENT' || exps.length === 0
-  const gLabel: Record<Greek, string> = { delta: 'Δ', gamma: 'Γ', vanna: 'Vanna', charm: 'Charm' }
-  const gDigits: Record<Greek, number> = { delta: 2, gamma: 4, vanna: 3, charm: 4 }
+  const gLabel: Record<Greek, string> = { delta: 'Δ', gamma: 'Γ', theta: 'Θ/j', vega: 'V/pt',
+    vanna: 'Vanna', charm: 'Charm' }
+  const gDigits: Record<Greek, number> = { delta: 2, gamma: 4, theta: 2, vega: 2, vanna: 3, charm: 4 }
+  // PROVENANCE des Grecques de l'échéance affichée (D-044). Une Grecque calculée ne doit jamais
+  // passer pour une donnée du feed : l'opérateur voit d'où elle vient (§3).
+  const rows = Array.isArray(exp?.rows) ? exp!.rows : []
+  const provenance = rows.length === 0 ? null
+    : rows.every((r) => r.call?.greeks_source === 'INVERTED') ? { txt: 'IV inversée du prix', cls: 'text-risk-green' }
+      : rows.some((r) => r.call?.greeks_source === 'INVERTED') ? { txt: 'IV inversée (partiel)', cls: 'text-risk-yellow' }
+        : rows.some((r) => r.call?.greeks_source === 'SOURCE_IV') ? { txt: 'Grecques à l\u2019IV source', cls: 'text-term-dim' }
+          : { txt: 'valeurs source relayées', cls: 'text-stale' }
 
   return (
     <Panel code="OMON" title="Chaîne d'options · skew" block="vol_surface.options_chain" accent="sony"
-      right={<span className="tabular-nums text-xxs text-term-faint">
-        U {num(val?.underlying)} · ATM {num(val?.atm_strike, 0)}</span>}>
+      right={<span className="flex items-center gap-2 text-xxs">
+        {provenance && <span className={cn('font-semibold', provenance.cls)}
+          title="Origine des Grecques affichées : calculées par le moteur Black-Scholes après inversion de l'IV depuis le prix de marché, calculées à l'IV du feed, ou simplement relayées.">
+          {provenance.txt}</span>}
+        <span className="tabular-nums text-term-faint">U {num(val?.underlying)} · ATM {num(val?.atm_strike, 0)}</span>
+      </span>}>
       <div className={cn('flex h-full min-h-0 flex-col gap-0.5', fresh === 'STALE' && 'opacity-60')}>
         {/* onglets d'échéance + sélecteur de grecque (interactif) */}
         <div className="flex shrink-0 flex-wrap items-center gap-1">
@@ -161,20 +179,20 @@ export function OptionsChainPanel() {
               </tr>
             </thead>
             <tbody>
-              {(Array.isArray(exp?.rows) ? exp!.rows : []).map((r) => {
+              {rows.map((r) => {
                 const atm = r.call?.moneyness === 'ATM'
                 const cItm = r.call?.moneyness === 'ITM', pItm = r.put?.moneyness === 'ITM'
                 return (
                   <tr key={r.strike} className={cn('border-t border-term-border/40', atm && 'bg-router/10')}>
                     {/* fond ITM discret (mur de la monnaie lu d'un coup d'œil) — redondant avec
                         la clarté du texte + la position (jamais la couleur seule §3) */}
-                    <td className={cn('px-1 text-left', cItm ? 'bg-[rgba(56,189,248,0.07)] text-term-text' : 'text-term-dim')}>{num(r.call?.[greek], gDigits[greek])}</td>
+                    <td className={cn('px-1 text-left', cItm ? 'bg-[rgba(56,189,248,0.07)] text-term-text' : 'text-term-dim')}>{num(scaled(r.call?.[greek], greek), gDigits[greek])}</td>
                     <td className={cn('px-1 text-[rgb(56,189,248)]', cItm && 'bg-[rgba(56,189,248,0.07)]')}>{pct(r.call?.iv)}</td>
                     <td className={cn('px-1 text-center', atm ? 'font-bold text-router' : 'text-term-text')}>
                       {num(r.strike, 0)}{atm && <span className="text-xxs"> ◄</span>}
                     </td>
                     <td className={cn('px-1 text-[rgb(244,114,182)]', pItm && 'bg-[rgba(244,114,182,0.07)]')}>{pct(r.put?.iv)}</td>
-                    <td className={cn('px-1 text-left', pItm ? 'bg-[rgba(244,114,182,0.07)] text-term-text' : 'text-term-dim')}>{num(r.put?.[greek], gDigits[greek])}</td>
+                    <td className={cn('px-1 text-left', pItm ? 'bg-[rgba(244,114,182,0.07)] text-term-text' : 'text-term-dim')}>{num(scaled(r.put?.[greek], greek), gDigits[greek])}</td>
                   </tr>
                 )
               })}

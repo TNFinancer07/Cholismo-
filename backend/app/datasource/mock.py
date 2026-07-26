@@ -16,6 +16,8 @@ import random
 import time
 from collections import deque
 
+from .. import config
+from ..black_scholes import bs_price
 from ..redis_state import RedisState
 from . import scenarios
 from .base import MarketDataSource
@@ -290,10 +292,18 @@ class MockDataSource(MarketDataSource):
                 gamma = math.exp(-((strike - underlying) / (underlying * 0.02)) ** 2) * 0.02
                 vanna = -1.5 * m * gamma * 100.0
                 charm = -0.3 * cdelta * (1.0 - cdelta) / max(1.0, dte)
+                # PRIX de marché (D-044) : un vrai feed d'options les porte, et c'est d'eux que
+                # le moteur INVERSE l'IV. Générés par le modèle à l'IV du smile → l'inversion doit
+                # retrouver exactement ce smile (vérifiable de bout en bout).
+                t_years = dte / 365.0
+                cp = bs_price(underlying, strike, t_years, config.RISK_FREE_RATE, iv, "call")
+                pp = bs_price(underlying, strike, t_years, config.RISK_FREE_RATE, iv + 0.006, "put")
                 call = {"iv": round(iv, 4), "delta": round(cdelta, 3), "gamma": round(gamma, 5),
-                        "vanna": round(vanna, 4), "charm": round(charm, 5)}
+                        "vanna": round(vanna, 4), "charm": round(charm, 5),
+                        "price": round(cp, 4) if cp is not None else None}
                 put = {"iv": round(iv + 0.006, 4), "delta": round(cdelta - 1.0, 3),
-                       "gamma": round(gamma, 5), "vanna": round(-vanna, 4), "charm": round(charm, 5)}
+                       "gamma": round(gamma, 5), "vanna": round(-vanna, 4), "charm": round(charm, 5),
+                       "price": round(pp, 4) if pp is not None else None}
                 # pathologie : IV/grecque NaN rare, ou patte call absente
                 if rng.random() < patho.get("nan_p", 0.0) + 0.01:
                     rng.choice([call, put])[rng.choice(("iv", "gamma", "vanna"))] = math.nan

@@ -1805,6 +1805,35 @@ Nettoyage **sans changement de comportement** (34 tests verts et smile à 1,5e-1
   (`_finite(x: Any)`, `_is_kind(k: Any) -> bool`, `Sequence[Any] | None`, retours `float | None`) ;
   **357 passed**, ruff clean.
 
+### Tranche 2 (`/feature`) — câblage du moteur dans OMON + affichage
+**Hypothèse tranchée sans blocage** (§12) : la source ne fournissait **que** des IV et des Grecques,
+**aucun prix** — Newton-Raphson n'aurait rien eu à inverser. Un vrai feed d'options porte des prix,
+donc le `MockDataSource` en **émet désormais** (générés par le modèle à l'IV de son smile, si bien
+que l'inversion doit retrouver exactement ce smile — vérifiable de bout en bout).
+- **`charm` ajouté au moteur** pour que la provenance d'une ligne soit **uniforme** (sinon 5 Grecques
+  calculées + 1 relayée dans la même patte). Formule fermée facile à écrire avec un signe faux :
+  **validée contre la dérivation numérique de delta** — et le validateur a effectivement attrapé une
+  **inversion de signe** dans ma première écriture.
+- **Enrichissement ADDITIF avec PROVENANCE explicite** (`greeks_source`), pour qu'un calcul ne passe
+  jamais pour une donnée de marché ni l'inverse (§3) : `INVERTED` (prix présent → IV inversée puis
+  les six Grecques), `SOURCE_IV` (pas de prix exploitable → Grecques calculées à l'IV source, l'IV
+  source étant conservée telle quelle), `RELAY` (ni prix ni IV → valeurs source relayées, le reste
+  `None`). Prix aberrant → **repli sur `SOURCE_IV`**, jamais une vol fabriquée.
+- **Changement de contrat assumé** : les Grecques ne sont plus RELAYÉES mais CALCULÉES — c'est l'objet
+  du livrable (valeurs identiques pour les deux opérateurs). Le test historique qui vérifiait le
+  relais a été **réécrit** pour énoncer le nouveau contrat plutôt que contourné.
+- **Frontend** : `OptionLeg` porte `theta`, `vega`, `greeks_source` ; le sélecteur de Grecque de la
+  table OMON gagne **Θ/j** et **V/pt** — le moteur fixe ses conventions (theta/an, vega pour σ+1.0)
+  et **l'affichage convertit vers les unités d'un opérateur** (par jour, par point de vol), le
+  libellé le disant. Badge de **provenance** dans l'en-tête du panneau. Le fail-closed d'affichage
+  était **déjà en place** (`num()` rend `·` sur non-fini) — vérifié à l'essai, pas réimplémenté.
+- **Taux sans risque** : `config.RISK_FREE_RATE` (0.045, `v1 provisional` — à brancher sur une vraie
+  courbe OIS le jour venu), passé par l'engine.
+- **Vérif** : +6 tests de chaîne + 2 de charm → **365 passed**, ruff clean ; `tsc` + `vite build` OK ;
+  **essai réel bout en bout** : **52/52 pattes call avec IV INVERSÉE** depuis le prix, Theta/Vega
+  présents partout ; essai Playwright — Θ/j et V/pt affichent 13 valeurs réelles chacun, badge
+  « IV inversée du prix », **0 erreur JS** ; capture à l'appui.
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.

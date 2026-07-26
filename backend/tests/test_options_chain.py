@@ -51,11 +51,18 @@ def test_atm_strike_is_closest_to_underlying():
     assert _chain(raw, underlying=5012)["expirations"][0]["atm_strike"] == 5000   # |12| < |13|
 
 
-def test_carries_iv_and_greeks():
+def test_greeks_are_computed_not_relayed_when_iv_is_usable():
+    """CHANGEMENT DE CONTRAT (D-044) : les Grecques ne sont plus RELAYÉES depuis la source mais
+    CALCULÉES par le moteur — c'est tout l'objet du livrable, et c'est ce qui les rend identiques
+    pour les deux opérateurs. L'IV source, elle, est conservée telle quelle. La provenance est
+    explicite pour que l'écart avec les valeurs du feed ne soit jamais une surprise (§3)."""
     raw = [_exp("E1", 30, [_row(5000, c=_leg(0.19, 0.55, 0.012, 0.3, -0.1))])]
     call = _rows(_chain(raw))[5000]["call"]
-    assert call["iv"] == 0.19 and call["delta"] == 0.55 and call["gamma"] == 0.012
-    assert call["vanna"] == 0.3 and call["charm"] == -0.1
+    assert call["iv"] == 0.19                       # IV source conservée
+    assert call["greeks_source"] == "SOURCE_IV"
+    assert call["delta"] != 0.55                    # recalculé, pas relayé
+    assert 0.0 < call["delta"] < 1.0 and call["gamma"] > 0.0
+    assert call["theta"] is not None and call["vega"] is not None   # absents de la source
 
 
 def test_rows_sorted_by_strike_ascending():
@@ -204,3 +211,74 @@ def test_many_expirations_capped_keeps_nearest_dte():
     raw = [_exp(f"E{i}", i * 3, [_row(5000)]) for i in range(50)]  # 50 échéances (DTE 0..147)
     out = _chain(raw, max_exp=4)["expirations"]
     assert [e["dte"] for e in out] == [0, 3, 6, 9]                 # 4 plus proches, triées
+
+
+# ---------- D-044 tranche 2 : enrichissement par le moteur Black-Scholes ----------
+# La source ne porte pas Theta/Vega et son IV n'est pas inversée. L'enrichissement est ADDITIF et
+# sa PROVENANCE est explicite, pour ne jamais présenter un calcul comme une donnée de marché (§3) :
+#   INVERTED  — prix de marché présent → IV inversée (Newton-Raphson) puis TOUTES les Grecques ;
+#   SOURCE_IV — pas de prix mais une IV source → Grecques calculées à cette IV ;
+#   RELAY     — ni prix ni IV exploitables → valeurs source relayées telles quelles.
+
+from app.black_scholes import bs_price          # noqa: E402
+
+_U, _R = 5000.0, 0.045
+
+
+def _enriched(strikes, dte=30):
+    """Chaîne d'UNE échéance passée au moteur (taux `_R`), pour éprouver l'enrichissement."""
+    return build_options_chain([{"expiry": "W1", "dte": dte, "strikes": strikes}],
+                               _U, 6.0, 4, 20, r=_R)
+
+
+def test_enrich_inverts_iv_from_market_price():
+    t = 30 / 365
+    k = 5000.0
+    row = {"strike": k,
+           "call": {"price": bs_price(_U, k, t, _R, 0.23, "call")},
+           "put": {"price": bs_price(_U, k, t, _R, 0.23, "put")}}
+    call = _enriched([row])["expirations"][0]["rows"][0]["call"]
+    assert call["greeks_source"] == "INVERTED"
+    assert abs(call["iv"] - 0.23) < 1e-6
+    for g in ("delta", "gamma", "theta", "vega", "vanna", "charm"):
+        assert call[g] is not None
+
+
+def test_enrich_computes_greeks_from_source_iv_when_no_price():
+    row = {"strike": 5000.0, "call": {"iv": 0.19}, "put": {"iv": 0.20}}
+    call = _enriched([row])["expirations"][0]["rows"][0]["call"]
+    assert call["greeks_source"] == "SOURCE_IV"
+    assert call["iv"] == 0.19                       # l'IV source est conservée telle quelle
+    assert call["theta"] is not None and call["vega"] is not None
+
+
+def test_enrich_relays_when_neither_price_nor_iv():
+    row = {"strike": 5000.0, "call": {"delta": 0.55, "gamma": 0.012}, "put": {}}
+    call = _enriched([row])["expirations"][0]["rows"][0]["call"]
+    assert call["greeks_source"] == "RELAY"
+    assert call["delta"] == 0.55 and call["gamma"] == 0.012
+    assert call["theta"] is None and call["vega"] is None      # jamais un faux zéro (§3)
+
+
+def test_enrich_aberrant_price_falls_back_not_fabricates():
+    # prix sous l'intrinsèque : l'inversion échoue → on ne fabrique pas de vol
+    row = {"strike": 4000.0, "call": {"price": 1.0, "iv": 0.21}, "put": {}}
+    call = _enriched([row])["expirations"][0]["rows"][0]["call"]
+    assert call["greeks_source"] == "SOURCE_IV"      # repli sur l'IV source, inversion abandonnée
+    assert call["iv"] == 0.21
+
+
+def test_enrich_needs_dte_to_compute():
+    # sans DTE, aucune échéance → aucun calcul possible, mais pas de crash : relais
+    row = {"strike": 5000.0, "call": {"price": 300.0}, "put": {}}
+    call = _enriched([row], dte=None)["expirations"][0]["rows"][0]["call"]
+    assert call["greeks_source"] == "RELAY" and call["theta"] is None
+
+
+def test_enrich_all_legs_carry_the_six_greek_keys():
+    row = {"strike": 5000.0, "call": {"iv": 0.2}, "put": {}}
+    for leg in ("call", "put"):
+        out = _enriched([row])["expirations"][0]["rows"][0][leg]
+        for key in ("iv", "delta", "gamma", "theta", "vega", "vanna", "charm",
+                    "moneyness", "greeks_source"):
+            assert key in out
