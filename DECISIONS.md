@@ -1880,6 +1880,47 @@ rafale de mises à jour en direct sur le sélecteur Θ/Vega.
   rapides → 12 jeux distincts / 0 NaN / 13 lignes, **0 erreur JS**. **365 passed**, ruff clean,
   `tsc` + `vite build` OK.
 
+## D-045 · TradeManifest — contrat-pont LSR v1.2 → Cholismo (émetteur semi-automatique)
+Le moteur **Liquidity Sweep Reversion v1.2** est un moteur TypeScript AUTONOME, externe à ce dépôt
+(88 tests, `strict` + `noUncheckedIndexedAccess`). `backend/app/trade_manifest.py` sérialise sa
+sortie APPROUVÉE en un objet stable ; `frontend/src/types/trade_manifest.ts` en est le miroir.
+
+**Décisions de conception :**
+- **§2.1 — divergence assumée d'avec le doc d'intégration LSR.** Son driver d'exemple fait
+  `broker.submit(plan.executionPlan)` ; Cholismo, en tant que driver, **ne le fait pas et ne peut
+  pas le faire**. Le manifeste est une **PROPOSITION enregistrée et affichée** — « semi-automatique »
+  = automatique jusqu'au ticket, manuel au déclenchement (Go/No-Go humain). Aucune fonction du
+  module n'ouvre de socket ni n'appelle un courtier.
+- **camelCase — exception délibérée et bornée (§5).** Le ContextSchema est 100 % snake_case
+  (81 champs) ; ce manifeste n'en fait PAS partie : il naît côté TypeScript (moteur LSR) et arrive
+  tel quel au frontend. Le garder camelCase de bout en bout supprime toute couche de traduction sur
+  le seul contrat qui traverse les trois mondes (moteur → Python → UI). Identifiants en anglais (§5).
+- **Horloge INJECTÉE, jamais lue** — même règle que le moteur (« `now` et `state` sont injectés »).
+  Péremption déterministe et rejouable : borne d'échéance **INCLUSE** (à l'instant pile = périmé,
+  fail-closed), `remaining_ms` borné à 0, horloge **non finie ou non entière → périmé / refus**
+  (un doute sur l'heure ne rend jamais un ticket actionnable, §3). Epoch **ms entier**, comme
+  `Date.now()`.
+- **Fail-closed intégral (§3)** : statut ≠ `APPROVED` → rien ; prix non fini / mal typé (`bool`
+  exclu explicitement — `True` n'est pas un prix ni « 1 contrat ») → rien ; contrats non entiers
+  strictement positifs → rien ; **géométrie revérifiée à la frontière** (LONG : stop < entrée < TP ;
+  SHORT symétrique ; niveau collé à l'entrée = incohérent) même si le moteur la teste déjà — on ne
+  fait pas confiance à l'amont ; TTL invalide → rien. Jamais un ticket dégradé.
+- **`id` = SHA-1 tronqué du contenu** : rejouer le même plan à la même ms redonne le même id
+  (idempotence face à un journal append-only, clé React stable) ; contenu ou instant différent → id
+  différent.
+- **`v1 provisional`** : la forme du plan lue (`status`, `direction` LONG/SHORT→BUY/SELL,
+  `executionPlan.{entryType,entryPrice,stopLoss,takeProfit,contracts}`) est reconstituée du doc
+  d'intégration v1.2, le `types.ts` du moteur n'étant pas dans le dépôt. Point de couture unique :
+  `_execution_fields()`. `DEFAULT_TTL_MS = 3000` (spec).
+- **Vérif** : 57 tests dédiés (contrat de fil, péremption, 30+ chemins fail-closed paramétrés,
+  idempotence) — **422 passed** au total, ruff clean, `tsc` + `vite build` OK ; essai manuel réel :
+  plan MNQ SHORT → JSON émis par Python **collé tel quel** dans un fichier TS et validé
+  `tsc --strict --noUncheckedIndexedAccess` (sémantique de péremption identique des deux côtés).
+
+**Hors périmètre de cette tranche** (à câbler ensuite) : persistance du manifeste dans le journal
+event-sourced, panneau d'affichage avec compte à rebours TTL, et le branchement du moteur LSR
+lui-même (externe).
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.
