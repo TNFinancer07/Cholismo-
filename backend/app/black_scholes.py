@@ -14,9 +14,23 @@ Notes de conception :
   Bissection sur `[1e-6, 5.0]`, donc bornée et **déterministe**.
 - **Pur** (aucun état caché, aucun LLM), hors hot path (§7).
 
+**Bornes de magnitude — le contrat central.** La FINITUDE des entrées ne suffit pas : en float64,
+ce sont les MAGNITUDES qui cassent, et chaque rupture lève une exception plutôt que de produire un
+`inf` inoffensif. Les quatre points de rupture connus :
+| Expression | Rupture | Seuil |
+|---|---|---|
+| `K·e^{−rT}` | `OverflowError` | `r·T ≲ −710` |
+| `σ·√T` | annulation par underflow → division par zéro | produit `< ~1e-308` |
+| `ln(S/K)` | `ValueError` (domaine) | `S/K` sous-déborde à `0` |
+| `pdf/(S·σ·√T)` (gamma) | dénominateur sous-débordé → division par zéro | produit `< ~1e-308` |
+Chacune retombe sur `None`, **par Grecque** : une Grecque indéfinie ne vaut jamais `0.0` (qui se
+lirait comme une mesure réelle) ni `inf`. Le prix est lui aussi validé fini avant d'être renvoyé.
+Deux balayages exhaustifs (18 230 combinaisons de magnitudes) verrouillent ce contrat en test.
+
 FAIL-CLOSED (§3) : entrée non-finie, `S ≤ 0`, `K ≤ 0`, `T ≤ 0`, `σ ≤ 0`, type d'option inconnu →
 `None`. Prix de marché hors bornes d'arbitrage (sous la valeur intrinsèque, ou au-dessus de `S`
 pour un call / `K` pour un put) → `None` : une donnée aberrante ne produit JAMAIS une vol inventée.
+Prix collé à l'intrinsèque → `None` aussi : sans valeur temps, la vol n'est pas identifiable.
 """
 from __future__ import annotations
 
@@ -43,17 +57,16 @@ def _norm_cdf(x: float) -> float:
     return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))
 
 
-def _kind(k: Any) -> str | None:
-    return k if k in ("call", "put") else None
+def _is_kind(k: Any) -> bool:
+    """Type d'option reconnu. Un `kind` inconnu est une donnée invalide, pas un défaut par défaut."""
+    return k in ("call", "put")
 
 
 def _core(S: float, K: float, T: float, r: float, sigma: float) -> tuple[float, float, float] | None:
     """`(d1, d2, K·e^{−rT})` ou `None` si le modèle est numériquement indéfini.
 
-    La finitude des ENTRÉES ne suffit pas : ce sont les MAGNITUDES qui cassent. Trois chemins
-    lèvent en float64 et doivent retomber sur `None` (§3) plutôt que sur une exception —
-    `math.exp` déborde (`OverflowError`) pour `r·T ≲ −710` ; `σ·√T` s'annule par underflow →
-    division par zéro ; `S/K` sous-déborde à 0 → `math.log(0)` (`ValueError`)."""
+    Applique les trois premières bornes de magnitude du tableau en tête de module (`e^{−rT}`,
+    `σ·√T`, `ln(S/K)`) : chacune retombe sur `None` (§3) au lieu de lever."""
     try:
         vol_t = sigma * math.sqrt(T)
         if not (math.isfinite(vol_t) and vol_t > 0):
@@ -77,7 +90,7 @@ def _valid(S: Any, K: Any, T: Any, r: Any, sigma: Any) -> bool:
 
 def bs_price(S: float, K: float, T: float, r: float, sigma: float, kind: Any) -> float | None:
     """Prix Black-Scholes européen, ou `None` si un paramètre rend le modèle indéfini (§3)."""
-    if not _valid(S, K, T, r, sigma) or _kind(kind) is None:
+    if not _valid(S, K, T, r, sigma) or not _is_kind(kind):
         return None
     core = _core(S, K, T, r, sigma)
     if core is None:
@@ -91,7 +104,7 @@ def bs_price(S: float, K: float, T: float, r: float, sigma: float, kind: Any) ->
 def bs_greeks(S: float, K: float, T: float, r: float, sigma: float, kind: Any) -> dict:
     """Grecques (conventions en tête de module). Chaque valeur vaut `None` si indéfinie — on ne
     renvoie jamais 0.0 pour « inconnu », qui se lirait comme une mesure réelle (§3)."""
-    if not _valid(S, K, T, r, sigma) or _kind(kind) is None:
+    if not _valid(S, K, T, r, sigma) or not _is_kind(kind):
         return dict.fromkeys(_GREEK_KEYS)
     core = _core(S, K, T, r, sigma)
     if core is None:
@@ -101,10 +114,10 @@ def bs_greeks(S: float, K: float, T: float, r: float, sigma: float, kind: Any) -
     pdf = _norm_pdf(d1)
 
     def g(fn) -> float | None:
-        """Une Grecque, ou `None` si son calcul est numériquement indéfini. Chaque formule a son
-        propre dénominateur : `gamma` divise par `S·σ·√T`, qui sous-déborde à 0 sur des magnitudes
-        extrêmes (division par zéro) ; un débordement donnerait un `inf` qui s'afficherait comme une
-        mesure réelle. Grecque par Grecque : indéfinie → `None`, jamais 0.0 ni inf (§3)."""
+        """Une Grecque, ou `None` si son calcul est numériquement indéfini. L'évaluation est
+        ISOLÉE par Grecque : chaque formule a son propre dénominateur (cf. `gamma` dans le tableau
+        des bornes en tête de module), donc l'une peut être indéfinie pendant que les autres
+        restent exactes. Indéfinie → `None`, jamais `0.0` ni `inf` (§3)."""
         try:
             v = fn()
         except (OverflowError, ValueError, ZeroDivisionError):
@@ -127,7 +140,7 @@ def implied_vol(price: Any, S: float, K: float, T: float, r: float, kind: Any) -
     """Volatilité implicite par Newton-Raphson, repli bissection. `None` si la donnée de marché est
     aberrante (hors bornes d'arbitrage) ou si aucune racine n'est trouvée dans `[1e-6, 5.0]`."""
     if not (_finite(price) and _finite(S) and _finite(K) and _finite(T) and _finite(r)
-            and S > 0 and K > 0 and T > 0 and price >= 0) or _kind(kind) is None:
+            and S > 0 and K > 0 and T > 0 and price >= 0) or not _is_kind(kind):
         return None
     try:
         disc = K * math.exp(-r * T)

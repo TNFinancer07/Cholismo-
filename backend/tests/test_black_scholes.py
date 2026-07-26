@@ -16,6 +16,7 @@ Valeurs de référence (manuel) : S=100, K=100, T=1, r=0.05, σ=0.20 →
 call 10.4506 · put 5.5735 · delta_call 0.63683 · gamma 0.018762 · vega 37.524 · theta_call −6.414 ·
 vanna −0.28143.
 """
+import itertools
 import math
 
 from app.black_scholes import bs_greeks, bs_price, implied_vol, price_chain
@@ -171,9 +172,10 @@ def test_price_chain_empty_and_non_list():
                        underlying=0.0, r=R) == []        # sous-jacent invalide → rien
 
 
-# ---------- /devil (D-044) : pathologies de marché extrêmes ----------
-# Le module promet `None` sur donnée invalide (§3) : il ne doit JAMAIS lever. Or il ne validait que
-# la FINITUDE, pas la MAGNITUDE — trois chemins levaient une exception non maîtrisée.
+# ---------- Pathologies de marché extrêmes : bornes de magnitude ----------
+# RÈGLE : le module promet `None` sur donnée invalide (§3) — il ne doit JAMAIS lever. La finitude
+# des entrées n'y suffit pas : ce sont les MAGNITUDES qui cassent (cf. le tableau des bornes en tête
+# de `black_scholes.py`). Ces tests verrouillent chaque point de rupture connu.
 
 
 def test_devil_extreme_rate_does_not_raise():
@@ -252,11 +254,9 @@ def test_devil_price_chain_extreme_rate_does_not_raise():
 
 
 def test_devil_exhaustive_magnitude_sweep_never_raises_nor_emits_non_finite():
-    """BALAYAGE EXHAUSTIF des magnitudes : le contrat du module (« jamais lever, jamais émettre
-    inf/NaN ») doit tenir sur TOUTE combinaison, pas seulement sur les cas qu'on a imaginés.
-    C'est ce balayage qui a montré qu'une première correction ne couvrait que `_core` et laissait
-    `gamma` diviser par un dénominateur sous-débordé."""
-    import itertools
+    """BALAYAGE EXHAUSTIF des magnitudes : le contrat (« jamais lever, jamais émettre inf/NaN »)
+    doit tenir sur TOUTE combinaison, pas seulement sur les cas qu'on a su imaginer — un garde posé
+    sur le noyau ne protège pas les formules de Grecques, qui ont chacune leur dénominateur."""
     vals = [1e-300, 1e-8, 0.01, 1.0, 100.0, 1e8, 1e300]
     rates = [-1000.0, -0.5, 0.0, 0.05, 1e6]
     sigs = [1e-300, 1e-8, 0.2, 1000.0, 1e300]
@@ -268,7 +268,6 @@ def test_devil_exhaustive_magnitude_sweep_never_raises_nor_emits_non_finite():
 
 
 def test_devil_exhaustive_iv_sweep_never_raises_nor_emits_absurd_vol():
-    import itertools
     for s, k, t, r, price, kind in itertools.product(
             [1e-8, 100.0, 1e300], [1e-8, 100.0, 1e300], [1e-300, 1.0, 1e300],
             [-1000.0, -0.5, 0.0, 0.05, 1e6], [0.0, 1e-9, 50.0, 1e300], ("call", "put")):

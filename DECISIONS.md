@@ -1786,6 +1786,25 @@ put-call ou l'intrinsèque.
   combinaisons : **0 crash, 0 valeur non-finie, 0 vol aberrante**) → **357 passed**, ruff clean ;
   smile réel toujours retrouvé à **1,5e-13**.
 
+### /polish D-044 — bornes de magnitude promues en contrat documenté
+Nettoyage **sans changement de comportement** (34 tests verts et smile à 1,5e-13 avant comme après) :
+- **Les bornes de magnitude deviennent le contrat central du module**, sous forme d'un **tableau en
+  tête de fichier** : pour chaque expression (`K·e^{−rT}`, `σ·√T`, `ln(S/K)`, `pdf/(S·σ·√T)`), la
+  rupture (`OverflowError`, underflow → division par zéro, domaine) et son seuil. Elles n'étaient
+  documentées que dans `_core`, alors qu'elles conditionnent tout le module — et c'est précisément
+  cette dispersion qui avait laissé `gamma` sans garde. Les docstrings de `_core` et de `g()`
+  renvoient au tableau au lieu de le répéter.
+- **`_kind` → `_is_kind`** : la fonction renvoyait `str | None` mais n'était jamais utilisée que
+  pour sa None-ité (`_kind(kind) is None`) ; elle est désormais un prédicat booléen lisible.
+- **Tests** : `import itertools` hissé en tête de fichier (il était local à deux fonctions) ; les
+  récits de passe convertis en **règles** — le commentaire de section énonce le contrat (« la
+  finitude ne suffit pas, ce sont les magnitudes qui cassent ») et la docstring du balayage explique
+  **pourquoi il est conservé** : un garde posé sur le noyau ne protège pas les formules de Grecques,
+  qui ont chacune leur dénominateur.
+- **Vérif** : aucun code mort, aucun log de debug, aucun tag process restant ; typage strict
+  (`_finite(x: Any)`, `_is_kind(k: Any) -> bool`, `Sequence[Any] | None`, retours `float | None`) ;
+  **357 passed**, ruff clean.
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.
