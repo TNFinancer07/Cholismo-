@@ -1986,6 +1986,44 @@ Quatre attaques, quatre protections — dont un **changement de comportement ass
   REJECT 404 ms / TIMEOUT null) → tout vert, **0 erreur JS** ; **432 passed** (10 tests API +
   migration), ruff clean, `tsc` + `vite build` OK.
 
+### /polish — robustesse réseau du POST d'ACK + jauge compositor-only (clôture)
+- **Un POST d'ACK qui échoue ne laisse JAMAIS l'UI verrouillée sur une promesse morte.** Deux
+  bornes : échec rapide (backend injoignable → le proxy répond 5xx) et **AbortSignal.timeout
+  (2,5 s)** pour la requête qui PEND sans répondre — le trou réel : `request()` n'avait aucun
+  timeout. Chemin d'échec : bannière **« ⚠ ÉCHEC RÉSEAU — ACK NON JOURNALISÉ »** sur l'overlay
+  (icône + texte, §3), `lastError` en Zone 0 (persiste après démontage), démontage auto ~1,8 s.
+  **Adaptation §2.1 du message demandé** (« ORDRE NON ENVOYÉ ») : ce terminal n'envoie jamais
+  d'ordre — ce qui a échoué est la JOURNALISATION de l'ACK, et le message dit exactement ça.
+  Un échec sur REJECT_USER/TIMEOUT (overlay déjà démonté) reste visible via `lastError`.
+- **Jauge parfaitement fluide — CSS `transform: scaleX`, compositor-only.** UNE écriture de style
+  (FLIP : ancrage du point de départ par reflow, puis `transition: transform <left>ms linear` vers
+  `scaleX(0)`) : zéro layout par frame, zéro travail JS pour la barre — rien ne perturbe l'œil
+  pendant la lecture du L2. Bonus : le compositeur continue d'animer même si rAF est suspendu
+  (onglet en arrière-plan). rAF ne pilote plus que l'échéance et le texte (re-render ~10/s, React
+  saute les setState identiques). Mesuré : scaleX échantillonné strictement décroissant au rythme
+  exact du TTL (0,075/300 ms sur un TTL de 4 s), largeur constante.
+
+### Résumé d'architecture D-045 (clôture)
+```
+Moteur LSR v1.2 (TS, externe)          Cholismo backend (Python)              Cholismo frontend (TS)
+  evaluateLsr() → plan APPROVED  ──→  trade_manifest.py                     types/trade_manifest.ts
+                                       manifest_from_lsr_plan()               (miroir strict + helpers)
+                                       · statut APPROVED seul relayé   SSE  store/manifest.ts
+                                       · géométrie revérifiée         ────→  · admission : validité +
+                                       · id SHA-1 idempotent          `trade_manifest`  géométrie + MORT-NÉ
+                                       · fail-closed intégral          (canal rapide)   (transit ≥ TTL → 0 frame)
+                                                                              · STRICT DROP (pas de file)
+  event store (SQLite append-only)                                            · ARMED → LOCKED (unique)
+   journal `manifest_outcome`    ←──  POST /manifests/outcome  ←── fetch ──  · ARMED → REJECT_USER/TIMEOUT
+   ACK / REJECT_USER / TIMEOUT        GET  /manifests/outcomes                · LOCKED → FAILED (POST KO)
+   + reaction_time_ms                  (projection : médianes/issue)         panels/TradeAlertOverlay.tsx
+```
+Règles transverses : horloge INJECTÉE partout (backend : `now_ms` paramètre ; frontend : TTL depuis
+la réception sur `performance.now()`, transit corrigé du `clockOffset` mesuré) ; §2.1 aucun chemin
+vers un courtier, l'humain tranche ; §3 fail-closed à chaque frontière (jamais un ticket dégradé,
+jamais une latence inventée) ; contrat camelCase borné au manifeste (né côté TS, hors ContextSchema).
+Restent externes : le moteur LSR lui-même et l'émission backend de l'event SSE (listener câblé).
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.

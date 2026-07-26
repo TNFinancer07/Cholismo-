@@ -28,7 +28,7 @@ import { api } from '@/lib/api'
 import { useTerminal } from '@/store/terminal'
 import type { TradeManifest } from '@/types/trade_manifest'
 
-export type AlertStatus = 'ARMED' | 'LOCKED'
+export type AlertStatus = 'ARMED' | 'LOCKED' | 'FAILED'
 
 export interface ManifestAlert {
   manifest: TradeManifest
@@ -65,18 +65,23 @@ export function isValidManifest(raw: unknown): raw is TradeManifest {
 
 export type ManifestOutcome = 'ACK' | 'REJECT_USER' | 'TIMEOUT'
 
-/** Journalise l'issue dans l'event store (append-only, D-045) — tir SANS attente : l'UI ne bloque
- *  jamais sur le réseau. `reaction_time_ms` (affichage → action humaine) est la mesure VITALE de
- *  la performance d'exécution post-session ; TIMEOUT n'en porte jamais (aucune action humaine,
- *  on n'invente pas une latence §3). Échec réseau → `lastError` (visible), jamais silencieux. */
-function journalize(m: TradeManifest, outcome: ManifestOutcome, reactionMs: number | null): void {
-  api.postManifestOutcome({
+/** Délai d'abandon du POST d'issue : une promesse HTTP MORTE (backend qui pend sans répondre)
+ *  ne doit jamais retenir l'UI — au-delà, AbortSignal tranche et le chemin d'échec s'applique. */
+const JOURNAL_TIMEOUT_MS = 2_500
+/** Durée d'affichage de la bannière d'échec réseau avant démontage. */
+const FAIL_BANNER_MS = 1_800
+
+/** Journalise l'issue dans l'event store (append-only, D-045). `reaction_time_ms` (affichage →
+ *  action humaine) est la mesure VITALE de la performance d'exécution post-session ; TIMEOUT n'en
+ *  porte jamais (aucune action humaine, on n'invente pas une latence §3). Borné par AbortSignal —
+ *  jamais d'attente sur une requête qui pend. L'appelant décide du traitement de l'échec. */
+function journalize(m: TradeManifest, outcome: ManifestOutcome,
+                    reactionMs: number | null): Promise<unknown> {
+  return api.postManifestOutcome({
     manifest_id: m.id, instrument: m.instrument, direction: m.direction,
     outcome, reaction_time_ms: reactionMs, time_to_live_ms: m.timeToLiveMs,
     operator: useTerminal.getState().operator,
-  }).catch((err: Error) => {
-    useTerminal.getState().set({ lastError: `journal manifeste : ${err.message}` })
-  })
+  }, AbortSignal.timeout(JOURNAL_TIMEOUT_MS))
 }
 
 interface ManifestStore {
@@ -121,17 +126,34 @@ export const useManifest = create<ManifestStore>((set, get) => ({
     // GEL DE THREAD : si le thread principal a figé au-delà du TTL, la touche en file d'attente
     // arrive AVANT la frame rAF suivante — le store re-vérifie l'échéance et refuse le lock.
     if (expired(s.alert)) { s.resolve('TIMEOUT'); return }
+    const m = s.alert.manifest
     const reactionMs = Math.round(performance.now() - s.alert.receivedAtMs)
-    journalize(s.alert.manifest, 'ACK', reactionMs)
     set({ alert: { ...s.alert, status: 'LOCKED' },
-      lastLockedId: s.alert.manifest.id, lockCount: s.lockCount + 1, lastOutcome: 'ACK' })
+      lastLockedId: m.id, lockCount: s.lockCount + 1, lastOutcome: 'ACK' })
+    // ROBUSTESSE RÉSEAU : le POST est borné (AbortSignal). S'il échoue, l'UI ne reste JAMAIS
+    // verrouillée sur une promesse morte — bannière d'échec, `lastError` en Zone 0, démontage.
+    journalize(m, 'ACK', reactionMs).catch((err: Error) => {
+      const msg = err.name === 'TimeoutError' ? 'délai réseau dépassé' : err.message
+      useTerminal.getState().set({ lastError: `ÉCHEC RÉSEAU — ACK non journalisé : ${msg}` })
+      const cur = get().alert
+      if (cur === null || cur.manifest.id !== m.id) return       // déjà démonté (TTL) → lastError suffit
+      set({ alert: { ...cur, status: 'FAILED' } })
+      window.setTimeout(() => {
+        const a = get().alert
+        if (a !== null && a.manifest.id === m.id && a.status === 'FAILED') set({ alert: null })
+      }, FAIL_BANNER_MS)
+    })
   },
   resolve: (outcome) => {
     const s = get()
     if (s.alert === null || s.alert.status !== 'ARMED') return   // LOCKED a déjà journalisé son ACK
     const reactionMs = outcome === 'REJECT_USER'
       ? Math.round(performance.now() - s.alert.receivedAtMs) : null
-    journalize(s.alert.manifest, outcome, reactionMs)
+    // L'overlay est déjà démonté (ci-dessous) : un échec ici n'a pas de bannière à porter,
+    // il reste visible via `lastError` (Zone 0) — jamais silencieux.
+    journalize(s.alert.manifest, outcome, reactionMs).catch((err: Error) => {
+      useTerminal.getState().set({ lastError: `journal manifeste (${outcome}) : ${err.message}` })
+    })
     set({ alert: null, lastOutcome: outcome })
   },
   clear: () => set({ alert: null }),          // démontage pur (fin de TTL d'une alerte déjà LOCKED)

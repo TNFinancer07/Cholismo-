@@ -34,20 +34,35 @@ function AlertCard({ alert }: { alert: ManifestAlert }) {
   const barRef = useRef<HTMLDivElement>(null)
   const [leftDs, setLeftDs] = useState(Math.ceil(m.timeToLiveMs / 100))   // dixièmes affichés
 
-  // Compte à rebours — delta monotone depuis la réception, jamais l'horloge backend.
+  // JAUGE — fluidité parfaite via CSS transform (scaleX, compositor-only, aucun layout par
+  // frame) : UNE écriture de style, le compositeur interpole linéairement jusqu'à 0 pendant le
+  // TTL restant. Continue même si rAF est suspendu (onglet en arrière-plan) — la jauge reste vraie.
+  useEffect(() => {
+    const el = barRef.current
+    if (!el) return
+    const left0 = Math.max(0, m.timeToLiveMs - (performance.now() - receivedAtMs))
+    el.style.transition = 'none'
+    el.style.transform = `scaleX(${left0 / m.timeToLiveMs})`
+    void el.offsetWidth                                  // reflow : ancre le point de départ
+    el.style.transition = `transform ${left0}ms linear`
+    el.style.transform = 'scaleX(0)'
+  }, [m.timeToLiveMs, receivedAtMs])
+
+  // LOGIQUE du compte à rebours — delta monotone depuis la réception, jamais l'horloge backend.
+  // rAF ne pilote plus que l'échéance et le texte (setState identique → React ne re-rend pas).
   useEffect(() => {
     let raf = 0
     const step = () => {
       const left = m.timeToLiveMs - (performance.now() - receivedAtMs)
       if (left <= 0) {
         // Démontage silencieux (fail-closed). ARMED → TIMEOUT journalisé (l'humain n'a pas agi) ;
-        // LOCKED → l'ACK est déjà dans l'event store, simple démontage.
+        // LOCKED → l'ACK est déjà dans l'event store, simple démontage ;
+        // FAILED → la bannière d'échec tient l'affichage, son timer démontera.
         const s = useManifest.getState()
         if (s.alert?.status === 'LOCKED') s.clear()
-        else s.resolve('TIMEOUT')
+        else if (s.alert?.status === 'ARMED') s.resolve('TIMEOUT')
         return
       }
-      if (barRef.current) barRef.current.style.width = `${(left / m.timeToLiveMs) * 100}%`
       setLeftDs(Math.ceil(left / 100))
       raf = requestAnimationFrame(step)
     }
@@ -62,7 +77,7 @@ function AlertCard({ alert }: { alert: ManifestAlert }) {
       e.preventDefault()
       e.stopImmediatePropagation()
       const s = useManifest.getState()
-      if (s.alert === null || s.alert.status === 'LOCKED') return // figé : toute touche ignorée
+      if (s.alert === null || s.alert.status !== 'ARMED') return  // LOCKED/FAILED : toute touche ignorée
       if (e.repeat) return                                        // Espace maintenu ≠ rafale
       if (e.code === 'Space') s.lock()                            // re-vérifie l'échéance (gel de thread)
       else if (e.key === 'Escape') s.resolve('REJECT_USER')       // refus journalisé, démontage silencieux
@@ -109,15 +124,19 @@ function AlertCard({ alert }: { alert: ManifestAlert }) {
         </div>
         <div className="truncate px-3 pb-1.5 text-xxs text-term-faint" title={m.reason}>{m.reason}</div>
 
-        {/* barre TTL qui se vide + restant numérique */}
+        {/* barre TTL qui se vide (scaleX compositor-only, origine gauche) + restant numérique */}
         <div className="h-1.5 w-full bg-term-panel2">
-          <div ref={barRef} data-ttl-bar className="h-full"
-            style={{ width: '100%', background: dir.hex }} />
+          <div ref={barRef} data-ttl-bar className="h-full w-full"
+            style={{ background: dir.hex, transformOrigin: '0 50%' }} />
         </div>
 
         {/* pied : état + affordances clavier + §2.1 en toutes lettres */}
         <div className="flex items-center justify-between px-3 py-1.5 text-xxs">
-          {status === 'LOCKED' ? (
+          {status === 'FAILED' ? (
+            /* §2.1 : ce terminal n'envoie JAMAIS d'ordre — ce qui a échoué est la
+               JOURNALISATION de l'ACK, et le message dit exactement ça (icône + texte, §3). */
+            <span className="font-bold text-risk-red">⚠ ÉCHEC RÉSEAU — ACK NON JOURNALISÉ</span>
+          ) : status === 'LOCKED' ? (
             <span className="font-bold text-router">✓ VALIDÉ — VERROUILLÉ</span>
           ) : (
             <span className="text-term-dim">
