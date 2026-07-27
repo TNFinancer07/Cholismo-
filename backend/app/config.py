@@ -189,3 +189,7 @@ LSR_CONTRACTS = int(os.getenv("LSR_CONTRACTS", "1"))
 # F7-like — fenêtre anti-FOMO : après une émission, aucun nouveau manifeste pendant ce délai,
 # quelles que soient les alertes (borne structurelle de fréquence ; doc LSR f7FomoWindowMs).
 LSR_REARM_COOLDOWN_S = float(os.getenv("LSR_REARM_COOLDOWN_S", "90"))
+
+# --- Couche Compte & RiskSizer (D-047) ---
+# Règle stricte du 1/5e (doc LSR v1.1, `bufferDivisor`) : risque du prochain trade = buffer/5.
+RISK_BUFFER_DIVISOR = int(os.getenv("RISK_BUFFER_DIVISOR", "5"))

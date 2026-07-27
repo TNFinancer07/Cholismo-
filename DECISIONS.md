@@ -2133,6 +2133,46 @@ revérifier le contrat ; overlay = AFFICHER, l'humain tranche ; event store = SE
 couches compte (F1/F2/F8, RiskSizer /5), volatilité (F3) et news (F5) restent externes — services
 séparés. Aucun ordre nulle part (§2.1).
 
+## D-047 · Couche Compte & RiskSizer — frontières de risque prop-firm EOD
+`backend/app/risk_sizer.py` + miroir `frontend/src/types/account.ts` (snake_case : l'état naît
+côté Python — chaque contrat garde la convention de son lieu de naissance, cf. D-045).
+
+**Tranche 1 — la couche PURE (State & RiskSizer), spec mathématique du doc LSR v1.2 :**
+- **`AccountState` stateless** : `current_equity`, `day_start_equity`, `drawdown_floor`
+  (STATIQUE en intraday — le recalcul EOD Trail à la clôture est le travail du driver, hors
+  couche), `daily_loss_limit`. **F1 STRUCTUREL** : `account_type` n'admet que
+  `EOD_TRAILING | EOD_STATIC` — le modèle Apex « Intraday Trail » est NON-REPRÉSENTABLE par
+  construction (pas une garde à l'exécution : le type refuse).
+- **Buffer = distance vers la mort** : `min(equity − floor, equity − (day_start − DLL))`. Sur
+  Apex 50K EOD à l'ouverture : `min(2500, 1000) = 1000` → **le DLL est la frontière
+  contraignante** (l'exemple exact du doc — sizing mécaniquement plus serré que sans DLL).
+- **Règle stricte du 1/5e** : risque alloué = `buffer / RISK_BUFFER_DIVISOR` (5, config).
+  Contrats = `floor(risque / (ticks_de_stop × valeur_tick))` — floor, jamais d'arrondi haut.
+  `INSTRUMENT_SPECS` : constantes contractuelles CME (MES 1,25 $/tick ; MNQ 0,50 $/tick).
+- **F8 fail-closed, ZÉRO exception** : la fonction rend TOUJOURS un `SizerResult` — taille < 1
+  ou buffer ≤ 0 → `REJECTED / INSUFFICIENT_BUFFER` ; entrée corrompue (non-finie, ticks ≤ 0,
+  valeur de tick ≤ 0, diviseur invalide) → `REJECTED / INVALID_INPUT`. `contracts` n'existe QUE
+  sur APPROVED — jamais un 0 déguisé en taille (§3).
+- **Preuve demandée, exécutée** (essai réel, assertion de monotonie) — Apex 50K, pertes
+  successives intra-journée, stop 8 ticks MES : **20 → 15 → 10 → 5 → 2 → 1 → F8** (buffer 20 $
+  < 1 contrat) → REJECTED, puis buffer 0 et négatif → REJECTED. Second scénario : lendemain
+  difficile (day_start 48 200) → le FLOOR devient contraignant, blocage à 40 $ du plancher —
+  le coupe-circuit mord AVANT la mort du compte.
+- **Piège documenté (trouvé par l'essai)** : `apex_eod_account(preset, current_equity=X)` SANS
+  `day_start_equity` = sémantique « jour neuf » (`dayStart ?? equity`, héritée du doc) — le DLL
+  y est toujours plein. Pour simuler des pertes intra-journée, fixer `day_start_equity`.
+  Mon premier script d'essai est tombé dedans : table fausse (buffer 1000 constant), corrigée.
+- **Montants Apex = ordres de grandeur publics À VÉRIFIER le jour de l'achat** (doc ; plus de
+  reset depuis mars 2026 — un breach impose le rachat : F8 a une valeur monétaire directe).
+- **Hors périmètre de cette tranche** (documenté, pas oublié) : câblage dans `_maybe_emit_lsr`
+  — il exige une SOURCE de compte réelle (équité live) qui n'existe pas ; la brancher
+  aujourd'hui en obligatoire tuerait toute émission, et un compte inventé violerait la §3. Le
+  pipeline live garde `LSR_CONTRACTS = 1` jusqu'à la tranche « source de compte ». Modif VIX
+  du sizing (F3) = couche volatilité, également hors périmètre.
+- **Vérif** : 14 tests TDD (preset, F1 structurel, deux frontières du buffer, 1/5e, floor
+  strict, frontière exacte 1 contrat, dégradation monotone jusqu'à F8, corruption sans
+  exception, pureté) — **470 passed**, ruff clean, `tsc` + `vite build` OK.
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.
