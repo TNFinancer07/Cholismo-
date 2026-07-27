@@ -2070,6 +2070,34 @@ boucle sweep (1 s, hors hot path §2.8)
 - **Hors périmètre restant** : RiskSizer /5 + modif VIX (couche compte), A1 annulation anti-chasse
   (runtime d'ordre — n'existe pas, §2.1), calibration des seuils sur trades réels.
 
+### /devil — pathologies de microstructure (carnet croisé, flux contradictoires, F7 vs inversion)
+Attaques sur `evaluate_lsr` : **4 trous réels trouvés et corrigés**, 2 comportements confirmés.
+- **Carnet croisé/verrouillé — DÉJÀ sûr, désormais prouvé.** `bid ≥ ask` échoue F4 (`best_ask >
+  best_bid` exigé) → géométrie jamais construite, silence. Note de conception : `CROSSED_BOOK` est
+  un SIGNAL du détecteur D-028 (la dislocation s'observe) mais jamais un terrain d'exécution —
+  signaler ≠ trader.
+- **CORRIGÉ — `aggressor_ratio` hors [0,1].** Une part acheteuse est une fraction : un **1.7**
+  corrompu passait la gate LONG (`≥ 0.60`) comme un flip « ultra-fort ». Borné strict ; 1.0 et 0.0
+  restent légitimes (100 %/0 % acheteurs, testés).
+- **CORRIGÉ — prints datés du FUTUR ancraient l'extrême A3.** La fenêtre n'était bornée qu'à
+  gauche (`ts ≥ since`) : un print à `now+30` (désync d'horloge source) définissait le stop.
+  Fenêtre `since ≤ ts ≤ now` — même leçon que D-028 sur les rafales.
+- **CORRIGÉ — prix ≤ 0 traversaient la géométrie.** La garde D-045 vérifie l'ORDRE des niveaux,
+  pas leur positivité : un extrême à −5000 aurait produit un ticket négatif COHÉRENT (stop <
+  entrée < TP) donc accepté. Prints à prix ≤ 0 écartés de l'extrême ; VPOC ≤ 0 → rejet.
+- **CORRIGÉ — profondeur de carnet NÉGATIVE.** `sum(top-3)` laissait un carnet corrompu passer F4
+  par compensation (200 + (−30) ≥ 150). Chaque niveau doit être fini et ≥ 0, sinon carnet invalide.
+- **Contradiction « volume d'absorption > delta cumulé » : NON REPRÉSENTABLE** avec les entrées
+  actuelles — `absorption` est un BOOLÉEN dans le ContextSchema (pas de volume à croiser avec le
+  CVD). Tracé hors-scope honnêtement ; à revisiter si la source réelle expose un volume d'absorption.
+- **F7 vs sweep INVERSE — blocage AVEUGLE, par conception (testé).** `BID_SWEEP` valide → LONG
+  émis ; `ASK_SWEEP` tout aussi valide 10 s après → **silence**. Deux sweeps opposés en 10 s =
+  régime de chop/whipsaw — le piège exact que LSR refuse de trader (le B4 du doc est le
+  discriminant anti-continuation ; F7 est l'anti-FOMO) ; et une proposition vient peut-être d'être
+  ACKée — une position existe peut-être, invisible depuis cette couche (§2.1) → jamais le ticket
+  contraire dans la fenêtre. Après la fenêtre, l'inverse redevient proposable (testé : SELL émis).
+- **Vérif** : 6 tests /devil ajoutés (23 tests LSR) — **455 passed**, ruff clean.
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.

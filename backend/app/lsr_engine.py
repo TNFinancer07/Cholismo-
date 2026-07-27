@@ -97,29 +97,43 @@ def _f4_liquidity_ok(book: Any) -> bool:
         return False
     try:
         best_bid, best_ask = float(bids[0][0]), float(asks[0][0])
+        # Marché CROISÉ (bid > ask) ou VERROUILLÉ (bid == ask) : pas de spread tradable — la
+        # géométrie ne se construit jamais dessus, même si le détecteur amont a signalé la
+        # dislocation (CROSSED_BOOK est un signal D-028, pas un terrain d'exécution).
         if not (math.isfinite(best_bid) and math.isfinite(best_ask) and best_ask > best_bid):
             return False
         if (best_ask - best_bid) / config.PRICE_TICK > config.LSR_F4_MAX_SPREAD_TICKS:
             return False
-        depth_bid = sum(float(level[1]) for level in bids[:3])
-        depth_ask = sum(float(level[1]) for level in asks[:3])
+        # Une profondeur NÉGATIVE est impossible : un carnet qui en porte est corrompu et ne
+        # doit pas passer F4 par compensation arithmétique (200 + (−30) ≥ plancher…).
+        depth_bid = depth_ask = 0.0
+        for level in bids[:3]:
+            sz = float(level[1])
+            if not (math.isfinite(sz) and sz >= 0):
+                return False
+            depth_bid += sz
+        for level in asks[:3]:
+            sz = float(level[1])
+            if not (math.isfinite(sz) and sz >= 0):
+                return False
+            depth_ask += sz
     except (TypeError, ValueError, IndexError):
-        return False
-    if not (math.isfinite(depth_bid) and math.isfinite(depth_ask)):
         return False
     return min(depth_bid, depth_ask) >= config.LSR_F4_MIN_DEPTH
 
 
-def _sweep_extreme(prints: list, since: float, is_long: bool) -> Optional[float]:
+def _sweep_extreme(prints: list, since: float, now: float, is_long: bool) -> Optional[float]:
     """A3 — l'extrême RÉEL touché pendant la fenêtre du sweep (min pour un LONG, max pour un
-    SHORT), dérivé des prints. Print sale (prix/ts non fini) ignoré ; aucun print utilisable →
-    None (pas d'extrême fantôme)."""
+    SHORT), dérivé des prints. Print sale ignoré : prix non fini OU **≤ 0** (un ES à prix négatif
+    est de la corruption, pas une structure), ts non fini OU **daté du futur** (désync d'horloge
+    source — même leçon que D-028 : l'heure d'arrivée réelle est inconnue, il ne doit pas ancrer
+    la géométrie). Aucun print utilisable → None (pas d'extrême fantôme)."""
     prices = []
     for p in prints:
         if not isinstance(p, dict):
             continue
         price, ts = p.get("price"), p.get("ts")
-        if _finite(price) and _finite(ts) and ts >= since:
+        if _finite(price) and price > 0 and _finite(ts) and since <= ts <= now:
             prices.append(float(price))
     if not prices:
         return None
@@ -142,7 +156,10 @@ def evaluate_lsr(i: LsrInputs) -> Optional[dict]:
     if i.absorption is not True:
         return None
     # -- B2-like : bascule des agressifs côté réversion --
-    if not _finite(i.aggressor_ratio):
+    # Une part acheteuse est une FRACTION : hors [0,1] = erreur de flux source. Sans cette borne,
+    # un 1.7 corrompu passerait la gate LONG comme un flip « ultra-fort » (§3 : la corruption ne
+    # devient jamais un signal).
+    if not _finite(i.aggressor_ratio) or not (0.0 <= i.aggressor_ratio <= 1.0):
         return None
     if is_long and i.aggressor_ratio < config.LSR_B2_FLIP:
         return None
@@ -153,12 +170,14 @@ def evaluate_lsr(i: LsrInputs) -> Optional[dict]:
         return None
 
     # -- A3 : extrême réel du sweep --
-    extreme = _sweep_extreme(i.prints, i.sweep_ts - config.LSR_EXTREME_WINDOW_S, is_long)
+    extreme = _sweep_extreme(i.prints, i.sweep_ts - config.LSR_EXTREME_WINDOW_S, i.now, is_long)
     if extreme is None:
         return None
 
     # -- A1/A2/A3 : géométrie sur la grille de ticks --
-    if not _finite(i.vpoc):
+    # VPOC ≤ 0 = corruption (un indice ne cote jamais 0/négatif) : la garde D-045 vérifie
+    # l'ORDRE des niveaux, pas leur positivité — elle laisserait passer un ticket négatif cohérent.
+    if not _finite(i.vpoc) or i.vpoc <= 0:
         return None
     tick = config.PRICE_TICK
     sign = 1.0 if is_long else -1.0

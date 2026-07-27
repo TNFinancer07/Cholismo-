@@ -284,3 +284,115 @@ def test_pipeline_gates_rouges_aucune_emission():
         assert all(e["event"] != "trade_manifest" for e in events)       # silence total
         broadcaster.unsubscribe("fast", q)
     asyncio.run(scenario())
+
+
+# --- /devil D-046 : pathologies de microstructure --------------------------------------------
+
+def test_devil_carnet_croise_ou_verrouille_silence():
+    """Un marché croisé (bid ≥ ask) n'a pas de spread tradable — la géométrie ne doit JAMAIS
+    se construire dessus, même si le détecteur amont a signalé la dislocation (CROSSED_BOOK)."""
+    crossed = {"bids": [[5001.0, 70.0], [5000.75, 70.0], [5000.5, 70.0]],
+               "asks": [[5000.0, 70.0], [5000.25, 70.0], [5000.5, 70.0]]}   # bid > ask
+    assert evaluate_lsr(_inputs(book=crossed)) is None
+    locked = {"bids": [[5000.0, 70.0], [4999.75, 70.0], [4999.5, 70.0]],
+              "asks": [[5000.0, 70.0], [5000.25, 70.0], [5000.5, 70.0]]}    # bid == ask
+    assert evaluate_lsr(_inputs(book=locked)) is None
+
+
+def test_devil_ratio_agressivite_hors_bornes_corruption_de_flux():
+    """Une part acheteuse est une FRACTION : hors [0,1] = erreur de flux source. Un 1.7 corrompu
+    passerait la gate LONG (≥ 0.60) comme un flip ultra-fort — il doit être rejeté."""
+    for bad in (1.7, 1.0000001, -0.2, 2.0):
+        assert evaluate_lsr(_inputs(aggressor_ratio=bad)) is None, bad
+    # bornes exactes : 1.0 et 0.0 sont des valeurs LÉGITIMES (100 % / 0 % acheteurs)
+    assert evaluate_lsr(_inputs(aggressor_ratio=1.0)) is not None
+    assert evaluate_lsr(_inputs(sweep_direction="ASK_SWEEP",
+                                prints=_prints(time.time(), high=5002.0),
+                                aggressor_ratio=0.0)) is not None
+
+
+def test_devil_prints_du_futur_n_ancrent_jamais_l_extreme():
+    """Désync d'horloge source : un print daté APRÈS now (même leçon que D-028) ne doit pas
+    définir la structure — sans lui, plus d'extrême sous 4999 → géométrie différente ou rejet."""
+    now = time.time()
+    prints = _prints(now)                                   # extrême naturel = 5000.0
+    prints.append({"ts": now + 30, "price": 4990.0, "size": 3.0, "side": "SELL", "seq": 99})
+    plan = evaluate_lsr(_inputs(now=now, prints=prints))
+    if plan is not None:                                    # si la géométrie tient encore…
+        assert plan["executionPlan"]["stopLoss"] > 4990.0   # …jamais ancrée sur le print fantôme
+
+
+def test_devil_prix_non_positifs_jamais_dans_la_geometrie():
+    """Un prix ≤ 0 sur ES est de la corruption — il ne doit ni ancrer l'extrême ni produire un
+    manifeste à niveaux négatifs (la garde D-045 vérifie l'ordre, pas la positivité)."""
+    now = time.time()
+    prints = _prints(now)
+    prints[3] = {**prints[3], "price": -5000.0}             # print corrompu négatif
+    plan = evaluate_lsr(_inputs(now=now, prints=prints))
+    if plan is not None:
+        assert plan["executionPlan"]["stopLoss"] > 0
+    prints_zero = _prints(now)
+    prints_zero[3] = {**prints_zero[3], "price": 0.0}
+    plan0 = evaluate_lsr(_inputs(now=now, prints=prints_zero))
+    if plan0 is not None:
+        assert plan0["executionPlan"]["stopLoss"] > 0
+    assert evaluate_lsr(_inputs(vpoc=-5000.0)) is None      # VPOC négatif = corruption
+    assert evaluate_lsr(_inputs(vpoc=0.0)) is None
+
+
+def test_devil_tailles_de_carnet_negatives_corruption():
+    """Une profondeur NÉGATIVE est impossible — un carnet qui en porte est corrompu et ne doit
+    pas passer F4 par compensation arithmétique (200 + (−30) ≥ 150…)."""
+    book = {"bids": [[4999.75, 200.0], [4999.5, -30.0], [4999.25, 70.0]],
+            "asks": [[5000.25, 70.0], [5000.5, 70.0], [5000.75, 70.0]]}
+    assert evaluate_lsr(_inputs(book=book)) is None
+
+
+def test_devil_cooldown_bloque_aussi_le_sweep_inverse():
+    """F7 vs inversion de biais : un BID_SWEEP valide (→ LONG émis) suivi à 10 s d'un ASK_SWEEP
+    tout aussi valide → la fenêtre F7 bloque AVEUGLÉMENT, par conception. Deux sweeps opposés en
+    10 s = régime de chop/whipsaw, le piège exact que LSR refuse de trader ; et une proposition
+    vient peut-être d'être ACKée (position possible — invisible d'ici, §2.1) → jamais le ticket
+    contraire dans la fenêtre. Après la fenêtre, l'inverse redevient proposable."""
+    async def scenario():
+        now = time.time()
+        eng = Engine(MockDataSource(), RedisState())
+        _wire_setup(eng, now)                               # rafale vendeuse → BID_SWEEP → LONG
+        q = broadcaster.subscribe("fast")
+        while not q.empty():
+            q.get_nowait()
+        await eng._assemble_sweep(now)
+        eng._maybe_emit_lsr(now)
+        first = [e for e in _drain(q) if e["event"] == "trade_manifest"]
+        assert len(first) == 1
+
+        def wire_ask(t):                                    # rafale ACHETEUSE → ASK_SWEEP → SHORT
+            s1 = eng.schema.s1_state
+            s1.tape = _fresh([{"ts": t - 1.0 + 0.1 * k, "price": 5002.0 - 0.25 * (k % 4),
+                               "size": 5.0, "side": "BUY", "seq": 100 + k} for k in range(10)], t)
+            s1.order_flow.aggressor_ratio = _fresh(0.25, t)
+            s1.structure.vpoc = _fresh(4999.0, t)           # sous l'entrée → chemin SHORT valide
+
+        wire_ask(now + 10)                                  # inversion 10 s plus tard
+        await eng._assemble_sweep(now + 10)
+        assert eng.schema.liquidity_sweep.alert.direction == "ASK_SWEEP"
+        eng._maybe_emit_lsr(now + 10)
+        assert [e for e in _drain(q) if e["event"] == "trade_manifest"] == []   # F7 : silence
+
+        t2 = now + config.LSR_REARM_COOLDOWN_S + 5          # fenêtre écoulée
+        wire_ask(t2)
+        await eng._assemble_sweep(t2)
+        eng._maybe_emit_lsr(t2)
+        import json
+        after = [e for e in _drain(q) if e["event"] == "trade_manifest"]
+        assert len(after) == 1
+        assert json.loads(after[0]["data"])["direction"] == "SELL"
+        broadcaster.unsubscribe("fast", q)
+    asyncio.run(scenario())
+
+
+def _drain(q):
+    out = []
+    while not q.empty():
+        out.append(q.get_nowait())
+    return out
