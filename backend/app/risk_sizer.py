@@ -13,10 +13,16 @@ dépôt). Trois idées, toutes FAIL-CLOSED :
    `bufferDivisor`). Contrats = `floor(risque / (ticks_de_stop × valeur_tick))` — floor, jamais
    d'arrondi vers le haut : on ne s'endette pas d'un demi-contrat d'optimisme.
 
-3. **F8 coupe-circuit** : taille < 1 OU buffer ≤ 0 → `REJECTED / INSUFFICIENT_BUFFER`. Entrée
-   corrompue (non-finie, ticks ≤ 0, valeur de tick ≤ 0) → `REJECTED / INVALID_INPUT`.
-   **ZÉRO exception** : la fonction rend toujours un `SizerResult`, jamais elle ne lève — le
-   chemin d'échec est une donnée, pas un crash.
+3. **F8 coupe-circuit — trois raisons de rejet, ZÉRO exception** (la fonction rend toujours un
+   `SizerResult`, jamais elle ne lève — le chemin d'échec est une donnée, pas un crash) :
+   - `INSUFFICIENT_BUFFER` : taille < 1 OU buffer ≤ 0 — jamais un « ordre de 0 contrat » ;
+   - `INVALID_INPUT` : entrée corrompue — non-finie, ticks ≤ 0, valeur de tick ≤ 0, grandeurs de
+     compte nulles/négatives (un floor NÉGATIF élargirait le buffer : la corruption deviendrait
+     du levier, trouvé au /devil) ;
+   - `SIZE_SANITY_CAP` : taille > `RISK_MAX_CONTRACTS` (plafond de plausibilité v1 provisional —
+     une équité corrompue mais finie produit un `floor()` astronomique parfaitement cohérent
+     pour la garde D-045, qui vérifie l'ordre des niveaux, pas la vraisemblance d'une taille).
+   `contracts` n'existe QUE sur APPROVED (invariant balayé en test : APPROVED ⟺ contrats ≥ 1).
 
 **F1 STRUCTUREL** : le modèle Apex « Intraday Trail » (seuil qui suit le pic d'équité en temps
 réel, non-réalisé inclus) est INCOMPATIBLE avec LSR — ici il est non-représentable par
