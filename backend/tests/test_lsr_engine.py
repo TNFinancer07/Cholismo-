@@ -21,7 +21,9 @@ from app.datasource.mock import MockDataSource
 from app.engine import Engine
 from app.lsr_engine import LsrInputs, build_lsr_inputs, evaluate_lsr
 from app.meta import Freshness, MetaField
+from app.account_provider import MockAccountProvider
 from app.redis_state import RedisState
+from app.risk_sizer import APEX_EOD_50K, apex_eod_account
 from app.sse import broadcaster
 from app.trade_manifest import manifest_from_lsr_plan
 
@@ -180,6 +182,12 @@ def test_build_inputs_ignore_le_perime():
 
 # --- Pipeline engine : émission SSE dédupliquée, sans replay -------------------------------
 
+
+
+def _acct() -> MockAccountProvider:
+    """Compte Apex 50K sain, toujours frais (D-047) — sans lui, AUCUNE émission (à l'aveugle)."""
+    return MockAccountProvider(state=apex_eod_account(APEX_EOD_50K), always_fresh=True)
+
 def _wire_setup(eng, now):
     """Câble un setup complet : rafale vendeuse (→ BID_SWEEP), gates au vert, VPOC au-dessus.
     Le calendrier T1 imminent est une exigence du DÉTECTEUR (D-028 : anomalie couplée à une
@@ -198,7 +206,7 @@ def _wire_setup(eng, now):
 def test_pipeline_sweep_vers_manifeste_emis_et_deduplique():
     async def scenario():
         now = time.time()
-        eng = Engine(MockDataSource(), RedisState())
+        eng = Engine(MockDataSource(), RedisState(), account_provider=_acct())
         _wire_setup(eng, now)
         q = broadcaster.subscribe("fast")
         while not q.empty():
@@ -270,7 +278,7 @@ def test_pipeline_sweep_vers_manifeste_emis_et_deduplique():
 def test_pipeline_gates_rouges_aucune_emission():
     async def scenario():
         now = time.time()
-        eng = Engine(MockDataSource(), RedisState())
+        eng = Engine(MockDataSource(), RedisState(), account_provider=_acct())
         _wire_setup(eng, now)
         eng.schema.s1_state.order_flow.absorption = _fresh(False, now)   # B1 rouge
         q = broadcaster.subscribe("fast")
@@ -356,7 +364,7 @@ def test_devil_cooldown_bloque_aussi_le_sweep_inverse():
     contraire dans la fenêtre. Après la fenêtre, l'inverse redevient proposable."""
     async def scenario():
         now = time.time()
-        eng = Engine(MockDataSource(), RedisState())
+        eng = Engine(MockDataSource(), RedisState(), account_provider=_acct())
         _wire_setup(eng, now)                               # rafale vendeuse → BID_SWEEP → LONG
         q = broadcaster.subscribe("fast")
         while not q.empty():
@@ -408,7 +416,7 @@ def test_polish_rejet_naturel_zero_log_emission_un_seul_info(caplog):
 
     async def scenario():
         now = time.time()
-        eng = Engine(MockDataSource(), RedisState())
+        eng = Engine(MockDataSource(), RedisState(), account_provider=_acct())
         _wire_setup(eng, now)
         eng.schema.s1_state.order_flow.absorption = _fresh(False, now)     # gate B1 rouge
         await eng._assemble_sweep(now)

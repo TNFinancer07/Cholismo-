@@ -26,7 +26,9 @@ from .cvd_stratified import build_cvd_stratified
 from .footprint import build_footprint
 from .volume_profile import build_volume_profile
 from .graph.liquidity_sweep import SWEEP_GRAPH, build_sweep_inputs
+from .account_provider import AccountDataProvider
 from .lsr_engine import build_lsr_inputs, evaluate_lsr
+from .risk_sizer import size_plan
 from .trade_manifest import manifest_from_lsr_plan
 from .heatmap import latest_column
 from .macro_risk import build_macro_calendar, compute_macro_risk
@@ -208,9 +210,13 @@ def _validate_econ_calendar(meta: MetaField, now: float) -> None:
 
 
 class Engine:
-    def __init__(self, datasource: MarketDataSource, state: RedisState):
+    def __init__(self, datasource: MarketDataSource, state: RedisState,
+                 account_provider: Optional["AccountDataProvider"] = None):
         self.ds = datasource
         self.state = state
+        # Source de compte (D-047) : None = pas de source → AUCUNE émission de manifeste
+        # (« on ne trade jamais à l'aveugle », fail-closed §3).
+        self.account_provider = account_provider
         self.schema = ContextSchema()
         self._tasks: list[asyncio.Task] = []
         self._extras: dict[str, Any] = {"rms": None, "streak": 0, "scenario": None}
@@ -817,6 +823,16 @@ class Engine:
         plan = evaluate_lsr(build_lsr_inputs(self.schema, now))
         if plan is None:
             return                                    # gates rouges → silence
+        # COUCHE COMPTE (D-047) : on ne trade JAMAIS à l'aveugle. Pas de source, source
+        # déconnectée/périmée, ou RiskSizer en rejet (F8, corruption, plafond) → silence.
+        if self.account_provider is None:
+            return
+        account = self.account_provider.current(now)
+        if account is None:
+            return                                    # équité fossile/absente ≠ équité (§3)
+        plan = size_plan(plan, account)
+        if plan is None:
+            return                                    # F8 : le buffer ne porte pas 1 contrat
         manifest = manifest_from_lsr_plan(plan, now_ms=int(now * 1000))
         if manifest is None:
             return                                    # la frontière D-045 a le dernier mot

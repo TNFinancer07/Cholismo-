@@ -110,6 +110,29 @@ def compute_buffer(account: AccountState) -> float:
     return min(to_floor, to_dll)
 
 
+def size_plan(plan: Any, account: AccountState) -> Optional[dict]:
+    """Dimensionne un plan LSR APPROVED (contrat D-045/046) via la règle du 1/5e — le stop en
+    ticks est dérivé de la GÉOMÉTRIE du plan (`|entrée − stop| / tick_size`), jamais fourni à
+    part (une seule source de vérité). Rend un NOUVEAU plan aux contrats remplacés (l'entrée
+    n'est jamais mutée), ou None : sizer en rejet (F8/corruption), instrument hors
+    `INSTRUMENT_SPECS`, plan malformé — silence, jamais un ticket dégradé (§3)."""
+    if not isinstance(plan, dict):
+        return None
+    spec = INSTRUMENT_SPECS.get(plan.get("instrument"))  # type: ignore[arg-type]
+    ex = plan.get("executionPlan")
+    if spec is None or not isinstance(ex, dict):
+        return None
+    entry, stop = ex.get("entryPrice"), ex.get("stopLoss")
+    if not (_finite(entry) and _finite(stop)):
+        return None
+    stop_ticks = abs(entry - stop) / spec["tick_size"]
+    result = size_position(account, stop_distance_ticks=stop_ticks,
+                           tick_value=spec["tick_value"])
+    if result.status != "APPROVED":
+        return None
+    return {**plan, "executionPlan": {**ex, "contracts": result.contracts}}
+
+
 def size_position(account: AccountState, stop_distance_ticks: Any, tick_value: Any,
                   buffer_divisor: int = config.RISK_BUFFER_DIVISOR) -> SizerResult:
     """Dimensionne le prochain trade — règle du 1/5e sur le buffer, floor strict, F8 fail-closed.

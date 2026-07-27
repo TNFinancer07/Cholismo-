@@ -196,3 +196,6 @@ RISK_BUFFER_DIVISOR = int(os.getenv("RISK_BUFFER_DIVISOR", "5"))
 # Plafond de plausibilité de taille (v1 provisional — compte cible : Apex 50K en micros ; une
 # équité corrompue produirait sinon un floor() astronomique parfaitement « cohérent »).
 RISK_MAX_CONTRACTS = int(os.getenv("RISK_MAX_CONTRACTS", "100"))
+# Fraîcheur maximale d'une photo de compte (v1 provisional) : au-delà, l'équité est FOSSILE et
+# le provider répond None — on ne dimensionne jamais sur un compte qu'on ne voit plus (§3).
+ACCOUNT_MAX_AGE_S = float(os.getenv("ACCOUNT_MAX_AGE_S", "15"))

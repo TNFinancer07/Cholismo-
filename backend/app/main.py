@@ -10,9 +10,11 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from . import config
+from .account_provider import MockAccountProvider
 from .ai.tasks import AITasks
 from .api import router
 from .datasource.mock import MockDataSource
+from .risk_sizer import APEX_EOD_50K, apex_eod_account
 from .engine import Engine
 from .event_store import get_store
 from .log_scraper import LogTailer, nt8_daily_log_path, startup_report
@@ -29,7 +31,12 @@ async def lifespan(app: FastAPI):
     get_store()  # create DB + append-only triggers up front
     # MarketDataSource is the single swappable seam (CLAUDE §4): replace MockDataSource
     # with a real feed implementation without touching the engine.
-    app.state.engine = Engine(MockDataSource(), app.state.redis)
+    # Source de compte (D-047) : MockAccountProvider `always_fresh` = broker SIMULÉ du stack
+    # démo (Apex 50K EOD, jour neuf). Un provider réel (NinjaTrader/Rithmic) prend ce siège
+    # avec de vraies photos datées — sans lui, AUCUN manifeste ne sort (à l'aveugle = non, §3).
+    app.state.engine = Engine(MockDataSource(), app.state.redis,
+                              account_provider=MockAccountProvider(
+                                  state=apex_eod_account(APEX_EOD_50K), always_fresh=True))
     await app.state.engine.start()
     # AI: async only, out of the hot path (CLAUDE §2.8); no keys -> explicit UNAVAILABLE.
     app.state.ai = AITasks(app.state.engine)

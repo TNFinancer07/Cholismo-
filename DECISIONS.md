@@ -2200,6 +2200,38 @@ d'arithmétique flottante.
   toute la grille.
 - **Vérif** : 8 tests /devil (22 sizer) — **478 passed**, ruff clean, `tsc` OK.
 
+### /polish tranche 1 — contrat écrit à jour
+Le docstring du module était en retard d'une passe /devil (2 raisons de rejet citées sur 3) :
+les trois chemins (`INSUFFICIENT_BUFFER`, `INVALID_INPUT` avec le piège du floor négatif,
+`SIZE_SANITY_CAP`) et l'invariant `APPROVED ⟺ contrats ≥ 1` sont désormais le contrat écrit.
+Aucun débris de debug. Tranche 1 scellée (DONE).
+
+### Tranche 2 — Source de Compte & Câblage : la boucle compte → sizer → manifeste est fermée
+`app/account_provider.py` (port + mock strict) + `size_plan` (risk_sizer) + injection engine.
+- **Port `AccountDataProvider`** : `current(now) -> AccountState | None` — horloge INJECTÉE
+  (règle commune D-045/046/047), le provider est seul juge de la fraîcheur de sa photo. `None`
+  couvre TROIS réalités traitées pareil : jamais connecté, déconnecté, photo périmée
+  (> `ACCOUNT_MAX_AGE_S` = 15 s, v1 provisional) — **une équité fossile n'est pas une équité**.
+- **`MockAccountProvider` strict** : simule le flux NinjaTrader/broker — `push(state, ts)`
+  (mise à jour d'équité datée), `disconnect()`, périmé → None. Le mode `always_fresh` est la
+  couture du stack DÉMO uniquement (broker simulé qui répond toujours, câblé dans `main.py`
+  avec l'Apex 50K jour neuf) ; un provider réel prend le même siège sans toucher l'engine.
+- **`size_plan(plan, account)`** : le stop en ticks est dérivé de la GÉOMÉTRIE du plan
+  (`|entrée − stop| / tick_size`) — une seule source de vérité, jamais un paramètre à part.
+  Nouveau plan aux contrats remplacés (entrée jamais mutée) ; sizer en rejet, instrument hors
+  specs, plan malformé → None.
+- **Câblage `_maybe_emit_lsr` — « on ne trade jamais à l'aveugle »** : pas de provider, provider
+  None, ou sizing rejeté → AUCUNE émission, silence (cohérent avec l'hygiène des logs D-046 :
+  un rejet naturel ne logge rien). L'ancien `LSR_CONTRACTS = 1` ne sert plus au live : la taille
+  vient du compte.
+- **Prouvé en live (essai end-to-end rejoué)** : overlay armé par le backend avec
+  **« MES 53 contrats »** — buffer 1 000 (DLL contraignant, jour neuf) → risque 200 $ → stop
+  3 ticks × 1,25 = 3,75 $/contrat → floor(53,33) = 53 ; ACK journalisé (140 ms) ; dédup tenue ;
+  la ligne INFO d'émission porte la taille dimensionnée.
+- **Vérif** : 16 tests T2 (fraîcheur/déconnexion du provider, size_plan, 5 chemins de
+  non-émission engine) + tests D-046 mis à niveau (un compte sain est désormais une PRÉCONDITION
+  d'émission) — **494 passed**, ruff clean.
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.
