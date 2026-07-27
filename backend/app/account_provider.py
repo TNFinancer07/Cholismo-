@@ -16,6 +16,7 @@ une équité fossile n'est pas une équité.
 """
 from __future__ import annotations
 
+import math
 from typing import Optional, Protocol
 
 from . import config
@@ -53,6 +54,12 @@ class MockAccountProvider:
             return None
         if self._always_fresh:
             return self._state
-        if self._ts is None or now - self._ts > self._max_age_s:
-            return None                                   # photo périmée → on ne sait rien (§3)
+        # Fraîcheur STRICTE (/devil) : ts absent, NON FINI (NaN passerait « nan > max_age » qui
+        # est FAUX), ou daté du FUTUR (désync d'horloge broker — `now − ts` négatif resterait
+        # « frais » indéfiniment ; son heure réelle est inconnue, même leçon que D-046) → None.
+        ts = self._ts
+        if not isinstance(ts, (int, float)) or not math.isfinite(ts):
+            return None
+        if ts > now or now - ts > self._max_age_s:
+            return None                                   # photo périmée/fantôme → on ne sait rien (§3)
         return self._state

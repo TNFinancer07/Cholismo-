@@ -28,7 +28,7 @@ from .volume_profile import build_volume_profile
 from .graph.liquidity_sweep import SWEEP_GRAPH, build_sweep_inputs
 from .account_provider import AccountDataProvider
 from .lsr_engine import build_lsr_inputs, evaluate_lsr
-from .risk_sizer import size_plan
+from .risk_sizer import AccountState, size_plan
 from .trade_manifest import manifest_from_lsr_plan
 from .heatmap import latest_column
 from .macro_risk import build_macro_calendar, compute_macro_risk
@@ -827,9 +827,15 @@ class Engine:
         # déconnectée/périmée, ou RiskSizer en rejet (F8, corruption, plafond) → silence.
         if self.account_provider is None:
             return
-        account = self.account_provider.current(now)
-        if account is None:
-            return                                    # équité fossile/absente ≠ équité (§3)
+        # Le PORT dit « rendre None » — mais un provider réel cassé peut LEVER (socket morte en
+        # pleine lecture) ou rendre un mauvais type : coupure = rejet naturel = SILENCE, jamais
+        # un log.exception par tick de flapping (hygiène D-046), jamais un AttributeError.
+        try:
+            account = self.account_provider.current(now)
+        except Exception:
+            account = None
+        if not isinstance(account, AccountState):
+            return                                    # équité fossile/absente/corrompue ≠ équité (§3)
         plan = size_plan(plan, account)
         if plan is None:
             return                                    # F8 : le buffer ne porte pas 1 contrat

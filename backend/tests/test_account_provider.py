@@ -184,3 +184,146 @@ def test_buffer_mort_aucune_emission():
     dead = apex_eod_account(APEX_EOD_50K, current_equity=48_900.0, day_start_equity=50_000.0)
     p = MockAccountProvider(state=dead, always_fresh=True)
     assert _run(p) == []                                    # F8 en bout de chaîne → silence
+
+
+# --- /devil D-047 T2 : flapping, antidaté, chute en vol -------------------------------------
+
+def test_devil_push_antidate_mort_ne():
+    """Un push dont la photo a DÉJÀ plus de ACCOUNT_MAX_AGE_S à l'arrivée : mort-né — None."""
+    now = time.time()
+    p = MockAccountProvider()
+    p.push(apex_eod_account(APEX_EOD_50K), ts=now - config.ACCOUNT_MAX_AGE_S - 1)
+    assert p.current(now) is None
+
+
+def test_devil_ts_du_futur_desync_d_horloge_mort_ne():
+    """Désync d'horloge broker : une photo datée du FUTUR resterait « fraîche » indéfiniment
+    (now − ts négatif) — son heure réelle est inconnue, elle ne vaut rien (même leçon que les
+    prints D-046)."""
+    now = time.time()
+    p = MockAccountProvider()
+    p.push(apex_eod_account(APEX_EOD_50K), ts=now + 3600)
+    assert p.current(now) is None
+
+
+def test_devil_ts_non_fini_mort_ne():
+    """ts NaN : `now − nan > max_age` est FAUX → la photo passerait la garde de fraîcheur."""
+    import math as _math
+    now = time.time()
+    p = MockAccountProvider()
+    for bad in (_math.nan, _math.inf, None):
+        p2 = MockAccountProvider(state=apex_eod_account(APEX_EOD_50K), ts=bad)
+        assert p2.current(now) is None, bad
+    p.push(apex_eod_account(APEX_EOD_50K), ts=_math.nan)
+    assert p.current(now) is None
+
+
+class _FlappingProvider:
+    """Alterne connecté/déconnecté à CHAQUE lecture (flapping ms)."""
+    def __init__(self, state):
+        self._state, self._n = state, 0
+
+    def current(self, now):
+        self._n += 1
+        return self._state if self._n % 2 == 0 else None
+
+
+class _RaisingProvider:
+    """Provider réel cassé : lève au milieu de la lecture (socket morte) au lieu de rendre None."""
+    def current(self, now):
+        raise ConnectionError("socket broker morte en pleine lecture")
+
+
+def test_devil_flapping_jamais_de_crash_emissions_bornees():
+    """Connexion instable : le pipeline ne crashe jamais ; l'émission n'arrive que si la lecture
+    UNIQUE du compte tombe sur un instant connecté — sinon silence."""
+    async def scenario():
+        now = time.time()
+        flapping = _FlappingProvider(apex_eod_account(APEX_EOD_50K))
+        eng = Engine(MockDataSource(), RedisState(), account_provider=flapping)
+        _wire_setup(eng, now)
+        q = broadcaster.subscribe("fast")
+        while not q.empty():
+            q.get_nowait()
+        await eng._assemble_sweep(now)
+        for k in range(6):                                  # 1re lecture déconnectée, 2e connectée…
+            eng._maybe_emit_lsr(now + k * 0.001)
+        manifests = _drain_manifests(q)
+        broadcaster.unsubscribe("fast", q)
+        assert len(manifests) == 1                          # dédup/F7 bornent à UNE émission
+    asyncio.run(scenario())
+
+
+def test_devil_provider_qui_leve_silence_sans_spam_de_log(caplog):
+    """Un provider réel qui LÈVE (au lieu de rendre None) ne doit ni crasher le pipeline ni
+    spammer log.exception à chaque tick — coupure = rejet naturel = silence (hygiène D-046)."""
+    import logging
+
+    async def scenario():
+        now = time.time()
+        eng = Engine(MockDataSource(), RedisState(), account_provider=_RaisingProvider())
+        _wire_setup(eng, now)
+        q = broadcaster.subscribe("fast")
+        while not q.empty():
+            q.get_nowait()
+        await eng._assemble_sweep(now)
+        with caplog.at_level(logging.DEBUG):
+            caplog.clear()
+            for k in range(5):
+                eng._maybe_emit_lsr(now + k)                # ne lève JAMAIS
+            assert caplog.records == []                     # et ne logge RIEN
+        assert _drain_manifests(q) == []
+        broadcaster.unsubscribe("fast", q)
+    asyncio.run(scenario())
+
+
+class _CrashOnReadProvider:
+    """Chute d'équité EN VOL : au moment précis de la lecture (après evaluate_lsr, avant
+    size_plan), le broker annonce le passage sous le DLL."""
+    def __init__(self):
+        self.reads = 0
+
+    def current(self, now):
+        self.reads += 1
+        return apex_eod_account(APEX_EOD_50K, current_equity=48_900.0,   # perte 1100 > DLL
+                                day_start_equity=50_000.0)
+
+
+def test_devil_chute_d_equite_en_vol_rejet_in_extremis():
+    """La lecture du compte est APRÈS l'approbation d'evaluate_lsr : la photo la plus fraîche
+    possible au moment de décider. Une chute sous le DLL survenue pendant l'évaluation est
+    attrapée par size_plan (buffer mort) → aucun manifeste, silence."""
+    async def scenario():
+        now = time.time()
+        crash = _CrashOnReadProvider()
+        eng = Engine(MockDataSource(), RedisState(), account_provider=crash)
+        _wire_setup(eng, now)
+        q = broadcaster.subscribe("fast")
+        while not q.empty():
+            q.get_nowait()
+        await eng._assemble_sweep(now)
+        eng._maybe_emit_lsr(now)
+        assert crash.reads == 1                             # UNE lecture, après l'évaluation
+        assert _drain_manifests(q) == []                    # F8 in extremis → silence
+        broadcaster.unsubscribe("fast", q)
+    asyncio.run(scenario())
+
+
+def test_devil_provider_au_mauvais_type_silence():
+    """Un provider bâclé qui rend un dict au lieu d'un AccountState : jamais un AttributeError
+    dans la boucle sweep — rejet silencieux."""
+    class _WrongType:
+        def current(self, now):
+            return {"current_equity": 50_000.0}
+    async def scenario():
+        now = time.time()
+        eng = Engine(MockDataSource(), RedisState(), account_provider=_WrongType())
+        _wire_setup(eng, now)
+        q = broadcaster.subscribe("fast")
+        while not q.empty():
+            q.get_nowait()
+        await eng._assemble_sweep(now)
+        eng._maybe_emit_lsr(now)                            # ne lève pas
+        assert _drain_manifests(q) == []
+        broadcaster.unsubscribe("fast", q)
+    asyncio.run(scenario())

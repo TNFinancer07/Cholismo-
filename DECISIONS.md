@@ -2232,6 +2232,29 @@ Aucun débris de debug. Tranche 1 scellée (DONE).
   non-émission engine) + tests D-046 mis à niveau (un compte sain est désormais une PRÉCONDITION
   d'émission) — **494 passed**, ruff clean.
 
+### /devil T2 — flapping, antidaté, chute en vol : 4 trous corrigés, 3 comportements confirmés
+- **CORRIGÉ — ts daté du FUTUR** (désync d'horloge broker) : `now − ts` négatif → la photo
+  restait « fraîche » indéfiniment. Son heure réelle est inconnue → None (même leçon que les
+  prints D-046/le tape D-028).
+- **CORRIGÉ — ts NON FINI** : `now − nan > max_age` est FAUX → une photo au ts NaN passait la
+  garde de fraîcheur. Fraîcheur stricte : ts absent, non-fini, futur, ou trop vieux → None.
+- **CORRIGÉ — provider qui LÈVE** (socket morte en pleine lecture) : le port dit « rendre None »
+  mais un provider réel cassé peut lever — sans garde, `log.exception` à CHAQUE tick de flapping
+  (violation de l'hygiène D-046) . Coupure = rejet naturel = silence (try/except → None,
+  vérifié par caplog : 5 lectures levées → 0 record).
+- **CORRIGÉ — mauvais type** (dict au lieu d'AccountState, provider bâclé) : AttributeError
+  dans la boucle sweep → garde `isinstance` → silence.
+- **Confirmés par test** : flapping ms (alternance connecté/déconnecté à chaque lecture) → zéro
+  crash, émissions bornées à UNE par la dédup/F7 ; push antidaté (> ACCOUNT_MAX_AGE_S à
+  l'arrivée) → mort-né, émission bloquée ; **chute d'équité EN VOL** (passage sous le DLL pile
+  entre l'approbation d'evaluate_lsr et le sizing) → attrapée : la lecture du compte est APRÈS
+  l'évaluation (une seule lecture, vérifiée — la photo la plus fraîche possible au moment de
+  décider) → buffer mort → F8 in extremis, silence.
+- **Risque résiduel assumé (tracé)** : une chute survenant APRÈS la lecture mais AVANT l'affichage
+  (fenêtre de quelques ms) est indétectable par construction — les lignes suivantes sont le
+  Go/No-Go humain et le DLL côté broker.
+- **Vérif** : 7 tests /devil (23 provider/câblage) — **501 passed**, ruff clean.
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.
