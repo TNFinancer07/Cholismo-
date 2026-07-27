@@ -2173,6 +2173,33 @@ côté Python — chaque contrat garde la convention de son lieu de naissance, c
   strict, frontière exacte 1 contrat, dégradation monotone jusqu'à F8, corruption sans
   exception, pureté) — **470 passed**, ruff clean, `tsc` + `vite build` OK.
 
+### /devil — gaps fatals, corruption d'état, plafond de plausibilité
+Attaques sur `size_position` : **2 trous réels corrigés**, 2 comportements confirmés, 1 leçon
+d'arithmétique flottante.
+- **Gap d'ouverture fatal — DÉJÀ sûr, prouvé** : équité qui ouvre sous le plancher (jour neuf à
+  47 000) ou déjà au-delà du DLL (gap à 48 800 sur day_start 50 000) → buffer ≤ 0 → F8
+  instantané, aucun calcul de taille. Équité EXACTEMENT au plancher (buffer 0) → rejet aussi.
+- **CORRIGÉ — grandeurs de compte nulles/négatives.** Équité/ouverture ≤ 0, DLL ≤ 0 passaient en
+  `INSUFFICIENT_BUFFER` (issue sûre, raison mensongère) et surtout : **un `drawdown_floor`
+  NÉGATIF (corrompu) ÉLARGISSAIT le buffer** — `to_floor = equity − (−500) = 50 500` → APPROVED
+  sur un état corrompu, la corruption devenait du LEVIER. Désormais : toute grandeur de compte
+  nulle/négative (floor < 0) → `INVALID_INPUT`.
+- **CORRIGÉ — plafond de plausibilité `SIZE_SANITY_CAP`** (`RISK_MAX_CONTRACTS = 100`,
+  v1 provisional, compte cible Apex 50K en micros). Une équité corrompue mais finie (10M) produit
+  un buffer fini, un risque fini et un `floor()` de **400 000 contrats** — ticket parfaitement
+  COHÉRENT pour la garde D-045 (elle vérifie l'ordre des niveaux, pas la vraisemblance d'une
+  taille). Au-delà du plafond, la taille n'est pas un signal (§3).
+- **Tick immense vs micro-buffer — DÉJÀ sûr, prouvé** : valeur de tick à 5 000 $ (erreur de
+  config) → `floor()` = 0 → `INSUFFICIENT_BUFFER`, `contracts=None` — jamais un « ordre de
+  0 contrat » qu'un courtier pourrait avaler.
+- **Leçon flottante (documentée par test)** : à `1e308`, l'ABSORPTION fait s'effondrer la branche
+  DLL (`1e308 − 1e9 == 1e308` → buffer 0) → le rejet arrive par `INSUFFICIENT_BUFFER` AVANT le
+  plafond. Deux chemins, un même verdict fail-closed.
+- **Invariant global balayé** (9 équités × 7 stops × 7 valeurs de tick, valides et corrompus) :
+  `APPROVED ⟺ contracts entier ≥ 1` ; `REJECTED ⟺ contracts est None` ; **zéro exception** sur
+  toute la grille.
+- **Vérif** : 8 tests /devil (22 sizer) — **478 passed**, ruff clean, `tsc` OK.
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.

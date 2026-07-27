@@ -148,3 +148,105 @@ def test_purete_meme_entree_meme_resultat():
     b = size_position(acc, stop_distance_ticks=8, tick_value=MES_TICK_VALUE)
     assert a == b
     assert acc.current_equity == 49_300.0                   # jamais muté
+
+
+# --- /devil D-047 : pathologies d'état de compte et de configuration ------------------------
+
+def test_devil_gap_d_ouverture_fatal_sous_le_plancher():
+    """Gap overnight À TRAVERS le plancher : jour neuf, l'équité ouvre déjà morte —
+    F8 bloque instantanément, aucun calcul de taille."""
+    acc = apex_eod_account(APEX_EOD_50K, current_equity=47_000.0, day_start_equity=47_000.0)
+    r = size_position(acc, stop_distance_ticks=8, tick_value=MES_TICK_VALUE)
+    assert r.status == "REJECTED" and r.reason == "INSUFFICIENT_BUFFER"
+    assert r.contracts is None and r.buffer is not None and r.buffer < 0
+
+
+def test_devil_gap_d_ouverture_deja_sous_le_dll():
+    """Gap d'ouverture : la perte du jour dépasse déjà le DLL avant le premier trade."""
+    acc = apex_eod_account(APEX_EOD_50K, current_equity=48_800.0, day_start_equity=50_000.0)
+    r = size_position(acc, stop_distance_ticks=8, tick_value=MES_TICK_VALUE)
+    assert r.status == "REJECTED" and r.reason == "INSUFFICIENT_BUFFER"
+
+
+def test_devil_equite_exactement_au_plancher():
+    acc = apex_eod_account(APEX_EOD_50K, current_equity=47_500.0, day_start_equity=47_500.0)
+    r = size_position(acc, stop_distance_ticks=8, tick_value=MES_TICK_VALUE)
+    assert r.status == "REJECTED"                          # buffer == 0 n'est PAS tradable
+
+
+def test_devil_grandeurs_de_compte_nulles_ou_negatives_invalid_input():
+    """Équité/ouverture ≤ 0, DLL ≤ 0, plancher < 0 : aucun compte prop réel ne porte ça —
+    c'est de la corruption de flux, pas une frontière de risque."""
+    def acc(**over):
+        base = dict(account_type="EOD_TRAILING", current_equity=50_000.0,
+                    day_start_equity=50_000.0, drawdown_floor=47_500.0,
+                    daily_loss_limit=1_000.0)
+        base.update(over)
+        return AccountState(**base)
+    for bad in (
+        acc(current_equity=0.0), acc(current_equity=-5_000.0),
+        acc(day_start_equity=0.0), acc(day_start_equity=-1.0),
+        acc(daily_loss_limit=0.0), acc(daily_loss_limit=-100.0),
+        acc(drawdown_floor=-500.0),
+    ):
+        r = size_position(bad, stop_distance_ticks=8, tick_value=MES_TICK_VALUE)
+        assert r.status == "REJECTED" and r.reason == "INVALID_INPUT", bad
+
+
+def test_devil_plancher_negatif_n_elargit_jamais_le_buffer():
+    """Le piège précis : floor = −500 (corrompu) donnait to_floor = 50 500 → buffer 1000 →
+    APPROVED sur un état corrompu. Doit être INVALID_INPUT."""
+    acc = AccountState(account_type="EOD_TRAILING", current_equity=50_000.0,
+                       day_start_equity=50_000.0, drawdown_floor=-500.0,
+                       daily_loss_limit=1_000.0)
+    r = size_position(acc, stop_distance_ticks=8, tick_value=MES_TICK_VALUE)
+    assert r.status == "REJECTED" and r.reason == "INVALID_INPUT"
+
+
+def test_devil_tick_immense_face_a_un_micro_buffer_jamais_zero_contrat_valide():
+    """Valeur de tick de 5000 $ (erreur de config) face au buffer : floor() → 0 — un « ordre de
+    0 contrat » qu'un courtier pourrait avaler. DOIT être INSUFFICIENT_BUFFER, contracts=None."""
+    r = size_position(_apex(), stop_distance_ticks=8, tick_value=5_000.0)
+    assert r.status == "REJECTED" and r.reason == "INSUFFICIENT_BUFFER"
+    assert r.contracts is None
+
+
+def test_devil_equite_absurde_ne_produit_jamais_une_taille_astronomique():
+    """Deux chemins, un même verdict fail-closed :
+    - équité 1e308 : l'ABSORPTION flottante fait s'effondrer la branche DLL
+      (1e308 − 1e9 == 1e308 → buffer 0) → INSUFFICIENT_BUFFER avant même le plafond ;
+    - équité 10M (plausible mais hors cible) : buffer fini → floor() = 400 000 contrats,
+      ticket parfaitement « cohérent » pour la garde D-045 → SIZE_SANITY_CAP tranche."""
+    r = size_position(AccountState(account_type="EOD_TRAILING", current_equity=1e308,
+                                   day_start_equity=1e308, drawdown_floor=47_500.0,
+                                   daily_loss_limit=1e9),
+                      stop_distance_ticks=1, tick_value=0.5)
+    assert r.status == "REJECTED" and r.contracts is None   # absorption → buffer 0 → F8
+    r2 = size_position(AccountState(account_type="EOD_TRAILING", current_equity=10_000_000.0,
+                                    day_start_equity=10_000_000.0, drawdown_floor=47_500.0,
+                                    daily_loss_limit=1_000_000.0),
+                       stop_distance_ticks=1, tick_value=0.5)
+    assert r2.status == "REJECTED" and r2.reason == "SIZE_SANITY_CAP"
+    assert r2.contracts is None
+
+
+def test_devil_invariant_global_jamais_approuve_sans_au_moins_un_contrat():
+    """Balayage : sur une grille d'états valides et corrompus, l'invariant tient TOUJOURS —
+    APPROVED ⟺ contracts entier ≥ 1 ; REJECTED ⟺ contracts est None ; zéro exception."""
+    equities = [0.0, -1.0, 47_000.0, 47_500.0, 49_000.0, 49_500.0, 50_000.0, 1e7, math.nan]
+    ticks = [-1, 0, 1, 8, 100, math.nan, None]
+    tvs = [-1.25, 0.0, 0.5, 1.25, 5_000.0, math.inf, None]
+    n_approved = 0
+    for eq in equities:
+        acc = AccountState(account_type="EOD_TRAILING", current_equity=eq,
+                           day_start_equity=50_000.0, drawdown_floor=47_500.0,
+                           daily_loss_limit=1_000.0)
+        for st in ticks:
+            for tv in tvs:
+                r = size_position(acc, stop_distance_ticks=st, tick_value=tv)  # ne lève JAMAIS
+                if r.status == "APPROVED":
+                    n_approved += 1
+                    assert isinstance(r.contracts, int) and r.contracts >= 1
+                else:
+                    assert r.contracts is None
+    assert n_approved > 0                                   # le balayage exerce aussi le chemin vert

@@ -112,6 +112,13 @@ def size_position(account: AccountState, stop_distance_ticks: Any, tick_value: A
     if not all(_finite(v) for v in (account.current_equity, account.day_start_equity,
                                     account.drawdown_floor, account.daily_loss_limit)):
         return SizerResult(status="REJECTED", reason="INVALID_INPUT")
+    # Grandeurs de compte NULLES/NÉGATIVES = corruption de flux, pas une frontière de risque :
+    # aucun compte prop réel ne porte ça. Piège précis : un floor NÉGATIF (corrompu) ÉLARGIRAIT
+    # le buffer (to_floor = equity − (−500) = 50 500…) — la corruption deviendrait du levier.
+    if account.current_equity <= 0 or account.day_start_equity <= 0:
+        return SizerResult(status="REJECTED", reason="INVALID_INPUT")
+    if account.daily_loss_limit <= 0 or account.drawdown_floor < 0:
+        return SizerResult(status="REJECTED", reason="INVALID_INPUT")
     if not _finite(stop_distance_ticks) or stop_distance_ticks <= 0:
         return SizerResult(status="REJECTED", reason="INVALID_INPUT")
     if not _finite(tick_value) or tick_value <= 0:
@@ -128,6 +135,13 @@ def size_position(account: AccountState, stop_distance_ticks: Any, tick_value: A
     contracts = math.floor(risk_allowed / risk_per_contract)
     if contracts < 1:
         return SizerResult(status="REJECTED", reason="INSUFFICIENT_BUFFER",
+                           buffer=buffer, risk_allowed=risk_allowed)
+    # Plafond de PLAUSIBILITÉ (v1 provisional) : une équité corrompue (1e308…) produit un buffer
+    # fini, un risque fini, et un floor() astronomique — un ticket à 10^306 contrats serait
+    # parfaitement COHÉRENT pour la garde D-045 (elle vérifie l'ordre des niveaux, pas la
+    # vraisemblance d'une taille). Au-delà du plafond, la taille n'est pas un signal (§3).
+    if contracts > config.RISK_MAX_CONTRACTS:
+        return SizerResult(status="REJECTED", reason="SIZE_SANITY_CAP",
                            buffer=buffer, risk_allowed=risk_allowed)
     return SizerResult(status="APPROVED", contracts=contracts,
                        buffer=buffer, risk_allowed=risk_allowed)

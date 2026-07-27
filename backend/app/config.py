@@ -193,3 +193,6 @@ LSR_REARM_COOLDOWN_S = float(os.getenv("LSR_REARM_COOLDOWN_S", "90"))
 # --- Couche Compte & RiskSizer (D-047) ---
 # Règle stricte du 1/5e (doc LSR v1.1, `bufferDivisor`) : risque du prochain trade = buffer/5.
 RISK_BUFFER_DIVISOR = int(os.getenv("RISK_BUFFER_DIVISOR", "5"))
+# Plafond de plausibilité de taille (v1 provisional — compte cible : Apex 50K en micros ; une
+# équité corrompue produirait sinon un floor() astronomique parfaitement « cohérent »).
+RISK_MAX_CONTRACTS = int(os.getenv("RISK_MAX_CONTRACTS", "100"))

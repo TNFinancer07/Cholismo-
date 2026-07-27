@@ -24,7 +24,9 @@ export interface AccountState {
 
 export interface SizerResult {
   status: 'APPROVED' | 'REJECTED'
-  /** 'INSUFFICIENT_BUFFER' (F8) ou 'INVALID_INPUT' (corruption d'entrée). */
+  /** 'INSUFFICIENT_BUFFER' (F8), 'INVALID_INPUT' (corruption d'entrée — non-fini, grandeurs de
+   *  compte nulles/négatives, floor négatif) ou 'SIZE_SANITY_CAP' (taille au-delà du plafond de
+   *  plausibilité — une équité corrompue produirait sinon un floor() astronomique cohérent). */
   reason: string
   contracts: number | null
   buffer: number | null
