@@ -2098,6 +2098,41 @@ Attaques sur `evaluate_lsr` : **4 trous réels trouvés et corrigés**, 2 compor
   contraire dans la fenêtre. Après la fenêtre, l'inverse redevient proposable (testé : SELL émis).
 - **Vérif** : 6 tests /devil ajoutés (23 tests LSR) — **455 passed**, ruff clean.
 
+### /polish — hygiène des logs (clôture D-046)
+- **Le silence des rejets est STRUCTUREL, pas discipliné** : `evaluate_lsr` est une fonction pure
+  qui ne contient AUCUN logger — un rejet naturel (gate rouge, carnet invalide, corruption de
+  flux) ne peut pas spammer, par construction. Mesuré en réel : **45 s de churn organique**
+  (le mock déclenche des sweeps en continu, gates majoritairement rouges) → **0 ligne** émise,
+  5 lignes de log au total (démarrage uvicorn seul).
+- **Seule l'ÉMISSION logge — une ligne INFO, actionnable** : direction, instrument, entrée/stop/TP,
+  contrats, id du manifeste (corrélable au journal `manifest_outcome`). Mesuré : une émission
+  forcée → exactement 1 ligne. La dédup et le cooldown F7 ne loggent pas non plus (un non-événement
+  n'est pas un événement). Verrouillé par test `caplog` : 5 rejets consécutifs → 0 record ;
+  émission → 1 record INFO et rien d'autre ; ré-évaluation dédupliquée → toujours 1.
+- Les `log.exception` des boucles (fast/slow/sweep) restent : une EXCEPTION n'est pas un rejet
+  naturel, c'est une panne — elle doit se voir.
+
+### Résumé d'architecture D-046 (clôture)
+```
+    flux microstructure (mock/réel)          engine (asyncio)                       frontend
+tape · carnet L2 · absorption ·        ┌─ fast loop (250 ms) : assemble s1_state
+agressifs · VPOC   ──── Redis raws ──→ │   (hot path < 200 ms, JAMAIS de LSR ici)
+                                       ├─ sweep loop (1 s, hors hot path §2.8) :
+econ_calendar (news T1) ─────────────→ │   D-028 : anomalie ⊕ news → alert         SSE fast
+                                       │   D-046 : build_lsr_inputs (FRESH only,   ────────→ overlay
+                                       │           microstructure SEULE)                     D-045
+                                       │           evaluate_lsr (pur, silencieux)            (TTL,
+                                       │           dédup événement + fenêtre F7              lock,
+                                       │           manifest_from_lsr_plan (garde)            ACK)
+                                       │           publish trade_manifest                      │
+                                       └─ event store append-only  ←── POST /manifests/outcome ┘
+```
+Frontières de responsabilité : détecteur D-028 = OBSERVER la dislocation (news couplée en interne) ;
+couche LSR D-046 = ÉVALUER la réversion sur microstructure seule et PROPOSER ; garde D-045 =
+revérifier le contrat ; overlay = AFFICHER, l'humain tranche ; event store = SE SOUVENIR. Les
+couches compte (F1/F2/F8, RiskSizer /5), volatilité (F3) et news (F5) restent externes — services
+séparés. Aucun ordre nulle part (§2.1).
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.

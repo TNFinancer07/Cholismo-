@@ -396,3 +396,35 @@ def _drain(q):
     while not q.empty():
         out.append(q.get_nowait())
     return out
+
+
+# --- /polish D-046 : hygiène des logs ---------------------------------------------------------
+
+def test_polish_rejet_naturel_zero_log_emission_un_seul_info(caplog):
+    """Le moteur évalue en continu : un rejet naturel (gate rouge, carnet invalide, corruption)
+    ne produit AUCUNE ligne de log ; seule l'émission d'un manifeste écrit — une seule fois,
+    au niveau INFO."""
+    import logging
+
+    async def scenario():
+        now = time.time()
+        eng = Engine(MockDataSource(), RedisState())
+        _wire_setup(eng, now)
+        eng.schema.s1_state.order_flow.absorption = _fresh(False, now)     # gate B1 rouge
+        await eng._assemble_sweep(now)
+
+        with caplog.at_level(logging.DEBUG):
+            caplog.clear()
+            for k in range(5):                                            # 5 rejets consécutifs
+                eng._maybe_emit_lsr(now + k * 0.1)
+            assert caplog.records == []                                   # silence TOTAL
+
+            eng.schema.s1_state.order_flow.absorption = _fresh(True, now)  # gates au vert
+            eng._maybe_emit_lsr(now + 1)
+            lsr = [r for r in caplog.records if "LSR" in r.getMessage()]
+            assert len(lsr) == 1 and lsr[0].levelno == logging.INFO       # UNE ligne INFO
+            assert caplog.records == lsr                                  # et rien d'autre
+
+            eng._maybe_emit_lsr(now + 2)                                  # dédup → silence aussi
+            assert len([r for r in caplog.records if "LSR" in r.getMessage()]) == 1
+    asyncio.run(scenario())

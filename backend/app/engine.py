@@ -823,6 +823,13 @@ class Engine:
         broadcaster.publish("fast", "trade_manifest", manifest.model_dump(), replay=False)
         self._lsr_emitted_key = key
         self._lsr_last_emit_ts = now
+        # HYGIÈNE DES LOGS (D-046 /polish) : le moteur évalue en continu — un rejet naturel ne
+        # logge RIEN (silence structurel : evaluate_lsr est pur, aucun logger dedans). Seule
+        # l'ÉMISSION, événement rare et significatif, mérite son unique ligne INFO.
+        log.info("LSR manifest émis : %s %s — entrée %s · stop %s · TP %s · %s contrat(s) [%s]",
+                 manifest.direction, manifest.instrument, manifest.entry.price,
+                 manifest.risk.stopLoss, manifest.risk.takeProfit,
+                 manifest.risk.positionSize, manifest.id)
 
     async def _sweep_loop(self) -> None:
         while True:
