@@ -199,3 +199,8 @@ RISK_MAX_CONTRACTS = int(os.getenv("RISK_MAX_CONTRACTS", "100"))
 # Fraîcheur maximale d'une photo de compte (v1 provisional) : au-delà, l'équité est FOSSILE et
 # le provider répond None — on ne dimensionne jamais sur un compte qu'on ne voit plus (§3).
 ACCOUNT_MAX_AGE_S = float(os.getenv("ACCOUNT_MAX_AGE_S", "15"))
+# --- NT8FileAccountProvider (D-048) : export de compte NinjaTrader ---
+# Désactivé par défaut ("" = stack démo → MockAccountProvider). Activer avec le chemin du
+# fichier exporté en continu par NT8 (lignes `epoch;equity[;day_start]`, un fichier/jour).
+NT8_ACCOUNT_FILE = os.getenv("NT8_ACCOUNT_FILE", "")
+NT8_ACCOUNT_POLL_SECONDS = float(os.getenv("NT8_ACCOUNT_POLL_SECONDS", "1.0"))

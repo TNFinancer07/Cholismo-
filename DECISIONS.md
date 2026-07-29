@@ -2283,6 +2283,42 @@ event store. Prouvée en live : « MES 53 contrats » dimensionné depuis le buf
 ACK 140 ms. Un seul mode dégradé subsiste, VOULU : sans source de compte, le terminal
 n'émet AUCUNE proposition — on ne trade jamais à l'aveugle.
 
+## D-048 · NT8FileAccountProvider — la source de compte RÉELLE (exports NinjaTrader)
+`app/account_provider.py` (+ `NT8_ACCOUNT_FILE`/`NT8_ACCOUNT_POLL_SECONDS` en config, câblage
+`main.py` avec start/stop propre au lifespan).
+
+**Décisions de conception :**
+- **Deux étages pour tenir deux contrats à la fois** : le port D-047 exige un `current(now)`
+  SYNCHRONE (boucle sweep) et l'I/O ne doit JAMAIS geler l'event loop → une boucle de poll async
+  exécute la lecture BLOQUANTE dans un thread (`asyncio.to_thread`) et alimente un cache
+  `(AccountState, mtime)` ; `current(now)` applique la règle de fraîcheur D-047 sur ce cache.
+  PROUVÉ par test : lecture bloquée 300 ms (façon antivirus/verrou Windows) → un ticker
+  concurrent sur le même event loop continue de tourner (≥ 15 ticks pendant le blocage).
+- **Horodatage = mtime du fichier**, pas le ts interne des lignes : même horloge que `now`
+  (le FS du backend) → zéro dérive inter-machines, et si NT8 cesse d'écrire, le mtime fige et
+  `ACCOUNT_MAX_AGE_S` périme le compte NATURELLEMENT. Un refresh raté ne ressuscite ni ne
+  re-timbre le cache — il vieillit par son mtime d'origine (testé : rotation du fichier →
+  cache mort à l'échéance, jamais ranimé).
+- **Format v1 provisional** (convention côté exporteur NT8, un fichier/jour de session) :
+  lignes `epoch;equity[;day_start]` appendées. Dernière ligne VALIDE gagne ; `day_start`
+  explicite (3e champ) sinon déduit de la PREMIÈRE ligne valide ; floor/DLL du preset Apex
+  (NT8 ne les connaît pas — le recalcul EOD reste au driver de fin de session).
+- **TAIL-SAFETY — leçon du RED** : une écriture déchirée en plein vol (`49600.0` tronqué en
+  `4`) parse comme une équité VALIDE de 4,0 $ — un float tronqué reste un float. Règle : seule
+  une ligne TERMINÉE par `\n` compte ; la dernière ligne sans newline est l'écriture en cours,
+  ignorée. Parsing tolérant ligne à ligne : garbage, `;;;`, nan/inf, équité ≤ 0 → ligne écartée.
+- **FAIL-CLOSED I/O, silence ABSOLU (vérifié caplog)** : introuvable, verrouillé (répertoire à
+  la place du fichier = même famille OSError qu'un verrou exclusif), vide, aucune ligne valide →
+  None, **zéro ligne de log** — un échec d'I/O attendu est un rejet naturel (hygiène D-046).
+  La boucle de poll ne logge que l'exception INATTENDUE (une panne doit se voir).
+- **Prouvé en réel, chaîne complète** : scribe simulant NT8 (append `epoch;equity` chaque
+  seconde), backend démarré avec `NT8_ACCOUNT_FILE` → overlay armé avec **« MES 26 contrats »**
+  — dimensionné par l'équité DU FICHIER (49 500, day_start 50 000 déduit → buffer 500 →
+  100 $ → floor(26,67) = 26), ACK journalisé 226 ms, dédup tenue, 0 erreur JS.
+- **Vérif** : 12 tests (parsing nominal/déchiré/corrompu, day_start explicite et déduit, mtime
+  périmé/vieillissant/jamais ressuscité, silence I/O caplog ×3, event loop jamais gelé,
+  conformité au port via l'engine complet) — **513 passed**, ruff clean.
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.
