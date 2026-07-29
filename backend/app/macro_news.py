@@ -62,16 +62,27 @@ class MacroEvent(BaseModel):
     event_time: datetime                                    # UTC (aware)
 
 
+# Un calendrier hebdo Forex Factory réel porte < 200 entrées. Au-delà de cette borne, ce n'est
+# plus un calendrier, c'est une attaque (/devil) — et le TRONQUER serait pire que le rejeter :
+# si l'événement imminent est au-delà de la coupe, la porte s'ouvrirait à tort. Flux obèse =
+# flux EMPOISONNÉ → rejeté entier, l'appelant garde son ancien cache.
+_MAX_FEED_ENTRIES = 5_000
+# Borne de LECTURE du fetch (RAM) : une réponse plus grosse ne peut pas être un calendrier.
+_MAX_FEED_BYTES = 2_000_000
+
+
 def parse_ff_json(text: str) -> Optional[list[MacroEvent]]:
-    """Flux Forex-Factory JSON → événements USD × HIGH. `None` = flux ILLISIBLE (fail-closed,
-    l'appelant garde son ancien cache) ; `[]` = flux lisible et VIDE (état connu). Entrée
-    corrompue ignorée ligne à ligne — un calendrier ne meurt pas d'une entrée pourrie."""
+    """Flux Forex-Factory JSON → événements USD × HIGH. `None` = flux ILLISIBLE ou EMPOISONNÉ
+    (fail-closed, l'appelant garde son ancien cache) ; `[]` = flux lisible et VIDE (état connu).
+    Entrée corrompue ignorée ligne à ligne — un calendrier ne meurt pas d'une entrée pourrie."""
+    if not isinstance(text, str) or len(text) > _MAX_FEED_BYTES:
+        return None
     try:
         raw = json.loads(text)
     except (json.JSONDecodeError, TypeError):
         return None
-    if not isinstance(raw, list):
-        return None
+    if not isinstance(raw, list) or len(raw) > _MAX_FEED_ENTRIES:
+        return None                                         # flux obèse = empoisonné, pas tronqué
     events: list[MacroEvent] = []
     for entry in raw:
         if not isinstance(entry, dict):
@@ -152,7 +163,9 @@ class MacroNewsProvider:
 
     def _fetch_url(self) -> str:
         with urllib.request.urlopen(self._url, timeout=10) as resp:   # dans un thread (to_thread)
-            return resp.read().decode("utf-8", errors="replace")
+            # Lecture BORNÉE (+1 : détecter le dépassement) — une réponse plus grosse que la
+            # borne ne peut pas être un calendrier, et elle ne doit pas manger la RAM du worker.
+            return resp.read(_MAX_FEED_BYTES + 1).decode("utf-8", errors="replace")
 
     # -- étage sync : évaluation d'état PURE (zéro I/O, horloge injectée) --
 

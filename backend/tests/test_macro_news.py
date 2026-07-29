@@ -238,3 +238,98 @@ def test_engine_hard_lock_aucune_emission():
     assert locked == []                                      # F0 : silence
     normal = asyncio.run(scenario([_event(now + 3600)]))     # événement à T+60m → NORMAL
     assert len(normal) == 1                                  # la porte laisse passer
+
+
+# --- /devil D-050 : fuseaux, cascades, payloads empoisonnés, frontières à la seconde --------
+
+def test_devil_offset_exotique_0530_conversion_utc_a_la_seconde():
+    """Événement en heure indienne (+05:30) : la fenêtre de verrou doit se placer à la SECONDE
+    exacte de l'équivalent UTC — pas à l'heure murale du feed."""
+    from datetime import datetime, timezone
+    events = parse_ff_json(json.dumps([_ff_entry(date="2026-11-01T18:00:00+05:30")]))
+    assert events is not None and len(events) == 1
+    t0 = events[0].event_time.timestamp()
+    assert t0 == datetime(2026, 11, 1, 12, 30, tzinfo=timezone.utc).timestamp()
+    p = _provider(events=events, fetched_ts=t0 - 3600)
+    assert p.get_state(t0 - 120.0) == NewsState.HARD_LOCK   # T−2:00 pile, en UTC
+    assert p.get_state(t0 - 121.0) == NewsState.WARNING     # une seconde avant
+
+
+def test_devil_bascule_dst_les_deux_offsets_convertis_exactement():
+    """DST américain : le MÊME 08:30 mural est -04:00 en été et -05:00 en hiver — deux instants
+    UTC différents d'une heure. Chaque offset doit tomber sur SON instant, jamais l'autre."""
+    from datetime import datetime, timezone
+    summer = parse_ff_json(json.dumps([_ff_entry(date="2026-10-30T08:30:00-04:00")]))
+    winter = parse_ff_json(json.dumps([_ff_entry(date="2026-11-06T08:30:00-05:00")]))
+    assert summer[0].event_time.timestamp() == datetime(2026, 10, 30, 12, 30,
+                                                        tzinfo=timezone.utc).timestamp()
+    assert winter[0].event_time.timestamp() == datetime(2026, 11, 6, 13, 30,
+                                                        tzinfo=timezone.utc).timestamp()
+    assert (winter[0].event_time.timestamp() - summer[0].event_time.timestamp()
+            ) == 7 * 86400 + 3600                           # le décalage DST est bien LÀ
+
+
+def test_devil_suffixe_z_utc_accepte():
+    events = parse_ff_json(json.dumps([_ff_entry(date="2026-07-29T12:30:00Z")]))
+    assert events is not None and len(events) == 1
+
+
+def test_devil_cascade_5_evenements_verrou_continu_sans_trou_d_air():
+    """5 événements High espacés de 2 min : les fenêtres [Ti−2, Ti+2] se touchent bord à bord
+    (bornes incluses) → HARD_LOCK CONTINU de T0−2:00 à T4+2:00, balayé à la seconde."""
+    events = [_event(T0 + k * 120.0) for k in range(5)]     # T0, +2m, +4m, +6m, +8m
+    p = _provider(events=events)
+    for s in range(-120, 601):                              # union des fenêtres : [T0−2:00, T4+2:00]
+        assert p.get_state(T0 + s) == NewsState.HARD_LOCK, f"trou d'air à T0+{s}s"
+    assert p.get_state(T0 - 121) == NewsState.WARNING       # juste avant l'entrée de cascade
+    assert p.get_state(T0 + 601) == NewsState.NORMAL        # juste après la sortie (T4+2:01)
+
+
+def test_devil_html_derriere_un_200_cache_preserve():
+    """Cloudflare/404 déguisé : HTTP 200 avec du HTML au lieu du JSON — rejeté, cache intact."""
+    now = time.time()
+    pages = ["<!DOCTYPE html><html><head><title>Attention Required! | Cloudflare</title>"
+             "</head><body>Checking your browser…</body></html>",
+             "<html><body><h1>404 Not Found</h1></body></html>",
+             "Bad Gateway"]
+    calls = {"n": 0}
+
+    def degrading():
+        calls["n"] += 1
+        return (json.dumps([_ff_entry(date=_iso(now + MIN))]) if calls["n"] == 1
+                else pages[(calls["n"] - 2) % len(pages)])
+    p = MacroNewsProvider(url="http://test.invalid/feed", fetcher=degrading)
+    asyncio.run(p.refresh())
+    for _ in range(4):
+        asyncio.run(p.refresh())                            # 4 pages HTML → toutes rejetées
+    assert p.get_state(now + 1) == NewsState.HARD_LOCK      # le cache initial tient toujours
+
+
+def test_devil_tableau_50000_elements_empoisonne_rejete_et_borne_cpu():
+    """Un tableau de 50 000 entrées n'est pas un calendrier, c'est une attaque : le TRONQUER
+    serait pire que le rejeter (si l'événement imminent est le n° 50 001, la porte s'ouvre à
+    tort). Flux obèse → rejeté ENTIER, cache préservé, en temps borné."""
+    now = time.time()
+    calls = {"n": 0}
+    flood = json.dumps([_ff_entry(title=f"E{k}") for k in range(50_000)])
+
+    def degrading():
+        calls["n"] += 1
+        return json.dumps([_ff_entry(date=_iso(now + MIN))]) if calls["n"] == 1 else flood
+    p = MacroNewsProvider(url="http://test.invalid/feed", fetcher=degrading)
+    asyncio.run(p.refresh())
+    t0 = time.perf_counter()
+    asyncio.run(p.refresh())                                # flood → rejeté
+    elapsed = time.perf_counter() - t0
+    assert elapsed < 0.5                                    # borné (pas 50 000 parses d'entrée)
+    assert p.get_state(now + 1) == NewsState.HARD_LOCK      # l'ancien cache tient
+    # et get_state reste O(petit) : jamais 50 000 événements en cache
+    assert len(p._cache[0]) < 100
+
+
+def test_devil_frontiere_de_deverrouillage_a_la_milliseconde():
+    p = _provider(events=[_event()])
+    assert p.get_state(T0 + 120.0) == NewsState.HARD_LOCK   # T+2:00.000 : verrou (borne incluse)
+    assert p.get_state(T0 + 120.001) == NewsState.NORMAL    # T+2:00.001 : libre
+    assert p.get_state(T0 - 120.0) == NewsState.HARD_LOCK   # symétrique à l'entrée
+    assert p.get_state(T0 - 120.001) == NewsState.WARNING

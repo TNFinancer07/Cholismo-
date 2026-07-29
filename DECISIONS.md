@@ -2405,6 +2405,32 @@ en tête d'`evaluate_lsr`, câblage engine/main avec start/stop au lifespan).
   fossile, worker ×3, F0 ×3 dont priorité absolue sur la microstructure, intégration engine
   lock/normal) — **539 passed**, ruff clean.
 
+### /devil — fuseaux/DST, cascades, payloads empoisonnés, frontières à la seconde
+**2 trous réels corrigés, 3 familles confirmées, 1 erreur d'arithmétique de harnais.**
+- **CORRIGÉ — flux obèse = flux EMPOISONNÉ, jamais tronqué.** Un tableau de 50 000 entrées
+  n'est pas un calendrier (le réel hebdo FF < 200) — et le TRONQUER serait PIRE que le rejeter :
+  si l'événement imminent est au-delà de la coupe, la porte s'ouvrirait à tort. Au-delà de
+  `_MAX_FEED_ENTRIES` (5 000) → rejet ENTIER, cache préservé, en temps borné (mesuré < 0,5 s,
+  la longueur est testée AVANT d'itérer). `get_state` reste O(petit) : jamais 50 000 événements
+  en cache.
+- **CORRIGÉ — lecture du fetch BORNÉE** (`_MAX_FEED_BYTES` = 2 Mo, +1 pour détecter le
+  dépassement) : une réponse de 500 Mo derrière un 200 ne mange plus la RAM du worker — elle
+  décode tronquée, échoue au parse, cache conservé.
+- **Fuseaux/DST — conversion UTC exacte À LA SECONDE, prouvée** : offset exotique +05:30
+  (18:00 IST → 12:30 UTC, verrou à T−2:00 pile en UTC, WARNING une seconde avant) ; bascule
+  DST américaine (le même 08:30 mural en −04:00 été et −05:00 hiver = deux instants UTC séparés
+  d'exactement 1 h de plus que les 7 jours) ; suffixe `Z` accepté (py3.11).
+- **Cascade 5 événements espacés de 2 min** : les fenêtres [Ti−2, Ti+2] se touchent bord à bord
+  (bornes incluses) → **HARD_LOCK continu balayé À LA SECONDE** de T0−2:00 à T4+2:00, WARNING
+  juste avant l'entrée, NORMAL juste après la sortie — zéro trou d'air. (Mon harnais s'était
+  trompé de borne de sortie — T4+4 min au lieu de T4+2 min : le verrou était continu, le test
+  avait tort.)
+- **HTML derrière un 200** (page Cloudflare, 404 déguisé, « Bad Gateway ») : 4 pages rejetées
+  d'affilée, le cache initial tient.
+- **Frontière de déverrouillage à la MILLISECONDE** : T+2:00.000 verrou (borne incluse),
+  T+2:00.001 libre ; symétrique à l'entrée.
+- **Vérif** : 7 tests /devil (24 macro_news) — **546 passed**, ruff clean.
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.
