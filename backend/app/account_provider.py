@@ -146,35 +146,61 @@ class NT8FileAccountProvider:
         if snap is not None:
             self._snapshot = snap                            # un échec ne touche PAS au cache
 
-    # -- étage bloquant (thread) : lecture + parsing tolérant --
+    # -- étage bloquant (thread) : lecture FENÊTRÉE + parsing tolérant --
+
+    # Fenêtres de lecture (/devil) : jamais un readlines() du fichier ENTIER — un flood de 10 Mo
+    # (ou 1 Go) mangerait la RAM et le CPU du worker à CHAQUE poll. Tête bornée (le day_start
+    # vit dans les premières lignes) + queue bornée (la dernière ligne valide vit à la fin) :
+    # O(72 Ko) par lecture quel que soit le fichier.
+    _HEAD_BYTES = 8_192
+    _TAIL_BYTES = 65_536
 
     def _read_file(self) -> Optional[tuple[AccountState, float]]:
         try:
-            mtime = os.stat(self._path).st_mtime
-            with open(self._path, encoding="utf-8", errors="replace") as f:
-                lines = f.readlines()
+            st = os.stat(self._path)
+            mtime, size = st.st_mtime, st.st_size
+            with open(self._path, "rb") as f:
+                if size <= self._HEAD_BYTES + self._TAIL_BYTES:
+                    head_raw = tail_raw = f.read()
+                    tail_offset = False                      # un seul buffer, lignes complètes sûres
+                else:
+                    head_raw = f.read(self._HEAD_BYTES)
+                    f.seek(size - self._TAIL_BYTES)
+                    tail_raw = f.read(self._TAIL_BYTES)
+                    tail_offset = True                       # la fenêtre peut couper une ligne au début
         except OSError:
             return None                                      # introuvable/verrouillé → silence
 
-        first: Optional[tuple[float, Optional[float]]] = None   # (equity, day_start_explicite)
+        # TAIL-SAFETY : seuls les éléments AVANT le dernier `\n` sont des lignes TERMINÉES — une
+        # écriture en vol n'a pas son newline, et un float tronqué reste un float (« 49600.0 »
+        # déchiré en « 4 » parserait comme 4,0 $). Le fragment final est toujours écarté ; en
+        # fenêtre décalée, le fragment INITIAL aussi (potentiellement coupé en plein milieu).
+        head_lines = head_raw.decode("utf-8", errors="replace").split("\n")[:-1]
+        tail_lines = tail_raw.decode("utf-8", errors="replace").split("\n")[:-1]
+        if tail_offset:
+            tail_lines = tail_lines[1:]
+
+        # dernière ligne VALIDE de la queue — balayée à REBOURS (la plus récente d'abord)
         last: Optional[tuple[float, Optional[float]]] = None
-        for line in lines:
-            # TAIL-SAFETY : une écriture EN VOL n'a pas encore son \n final — or un float tronqué
-            # reste un float (« 49600.0 » déchiré en « 4 » parserait comme équité 4,0 !). Seule
-            # une ligne TERMINÉE compte ; l'exporteur écrit toujours `ligne\n` (convention v1).
-            if not line.endswith("\n"):
-                continue
-            parsed = self._parse_line(line)
-            if parsed is None:
-                continue                                     # corrompue → ligne suivante
-            if first is None:
-                first = parsed
-            last = parsed
+        for line in reversed(tail_lines):
+            last = self._parse_line(line)
+            if last is not None:
+                break
         if last is None:
-            return None                                      # aucune ligne valide → pas de compte
+            return None                # l'état RÉCENT est illisible → à l'aveugle → pas de compte
 
         equity, explicit_day_start = last
-        day_start = explicit_day_start if explicit_day_start is not None else first[0]
+        if explicit_day_start is not None:
+            day_start = explicit_day_start
+        else:
+            # day_start DÉDUIT de la première ligne valide de la tête. Introuvable → None :
+            # un day_start inventé (= équité courante) simulerait un JOUR NEUF, le DLL
+            # repartirait plein — la corruption deviendrait du levier (leçon D-047).
+            first = next((p for line in head_lines
+                          if (p := self._parse_line(line)) is not None), None)
+            if first is None:
+                return None
+            day_start = first[0]
         state = AccountState(account_type="EOD_TRAILING", current_equity=equity,
                              day_start_equity=day_start, drawdown_floor=self._floor,
                              daily_loss_limit=self._preset.daily_loss_limit)
@@ -183,8 +209,9 @@ class NT8FileAccountProvider:
     @staticmethod
     def _parse_line(line: str) -> Optional[tuple[float, Optional[float]]]:
         """`epoch;equity[;day_start]` → (equity, day_start | None). Tout écart → None :
-        champs manquants, non-numériques, non finis, équité ou day_start ≤ 0."""
-        parts = line.strip().split(";")
+        champs manquants, non-numériques, non finis, équité ou day_start ≤ 0. Le BOM UTF-8
+        est ignoré (sans ça, la PREMIÈRE ligne — celle du day_start déduit — serait avalée)."""
+        parts = line.strip().lstrip("﻿").split(";")
         if len(parts) < 2:
             return None
         try:

@@ -2319,6 +2319,31 @@ n'émet AUCUNE proposition — on ne trade jamais à l'aveugle.
   périmé/vieillissant/jamais ressuscité, silence I/O caplog ×3, event loop jamais gelé,
   conformité au port via l'engine complet) — **513 passed**, ruff clean.
 
+### /devil — rotation, mtime fantôme, floods, concurrence : lecture FENÊTRÉE
+Le monstre de la passe était l'axe mémoire : **`readlines()` chargeait le fichier ENTIER à chaque
+poll** — un flood de 10 Mo (ou 1 Go) mangeait la RAM et le CPU du worker toutes les secondes.
+- **CORRIGÉ — lecture FENÊTRÉE, O(72 Ko) quel que soit le fichier** : tête bornée (8 Ko — le
+  day_start vit dans les premières lignes) + queue bornée (64 Ko — la dernière ligne valide vit à
+  la fin), balayage de la queue À REBOURS. En fenêtre décalée, le fragment INITIAL est écarté
+  (potentiellement coupé en plein milieu de ligne) comme le fragment final (tail-safety).
+  Mesuré : flood de 10 Mo sur une ligne → lecture < 0,5 s, équité de la queue, day_start de la
+  tête. **Conséquence assumée et TESTÉE** : queue illisible (300 Ko de déchets en fin de gros
+  fichier) → l'état RÉCENT est illisible → None — jamais une vieille équité du MILIEU repêchée
+  comme récente.
+- **CORRIGÉ — day_start indéterminable → None** : tête illisible SANS day_start explicite → un
+  day_start inventé (= équité courante) simulerait un JOUR NEUF, le DLL repartirait plein — la
+  corruption deviendrait du levier (la leçon D-047, encore). Un day_start EXPLICITE (3e champ)
+  suffit même à tête illisible — recommandation exporteur : toujours l'écrire.
+- **CORRIGÉ — BOM UTF-8** : sans strip, la PREMIÈRE ligne (celle du day_start déduit) était
+  avalée → day_start faux. Le BOM est ignoré au parsing.
+- **Confirmés par test** : troncature à 0 → cache intact qui VIEILLIT puis meurt, reprise
+  automatique des écritures ; suppression ENTRE stat et open (course réelle, monkeypatch) →
+  OSError attrapée, silence absolu ; **mtime dans le futur** → jamais « infiniment frais »
+  (règle D-047 héritée) ; UTF-16 → déchets → None sans crash ; octets nuls → ligne écartée ;
+  **écritures 100+/s pendant le poll** (thread concurrent, 400 appends) → zéro exception, chaque
+  lecture rend une ligne COMPLÈTE réellement écrite, convergence sur la dernière.
+- **Vérif** : 9 tests /devil (21 NT8) — **522 passed**, ruff clean.
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.

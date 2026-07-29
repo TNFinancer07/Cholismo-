@@ -208,3 +208,182 @@ def test_port_d047_emission_dimensionnee_par_le_fichier(tmp_path):
     assert len(manifests) == 1
     assert manifests[0]["risk"]["positionSize"] == 26
     assert _drain_manifests is not None                     # (import utilisé)
+
+
+# --- /devil D-048 : pathologies de fichiers et de FS ----------------------------------------
+
+def test_devil_troncature_a_zero_puis_reprise(tmp_path):
+    """Rotation NT8 : fichier tronqué à 0 octet → l'ancien cache reste mais VIEILLIT ;
+    reprise des écritures → le provider repart sans intervention."""
+    now = time.time()
+    path = _write(tmp_path, "1700000000;49500.0\n", mtime=now - 10)
+    p = _provider(path)
+    _refresh(p)
+    assert p.current(now) is not None
+    _write(tmp_path, "", mtime=now)                         # troncature à 0
+    _refresh(p)                                             # aucune ligne valide → cache intact
+    assert p.current(now) is not None                       # (mtime d'origine, encore frais)
+    assert p.current(now + 10) is None                      # …et il meurt à son échéance
+    _write(tmp_path, "1700000100;49800.0\n", mtime=now + 12)   # reprise (nouveau jour)
+    _refresh(p)
+    acc = p.current(now + 13)
+    assert acc is not None and acc.current_equity == 49_800.0
+
+
+def test_devil_suppression_au_moment_precis_de_l_io(tmp_path, monkeypatch, caplog):
+    """Le fichier disparaît ENTRE le stat et l'open (fenêtre de course réelle) :
+    OSError attrapée, silence absolu, aucune exception non gérée."""
+    now = time.time()
+    path = _write(tmp_path, "1700000000;49500.0\n", mtime=now)
+    p = _provider(path)
+    real_open = open
+
+    def open_gone(*a, **k):
+        raise FileNotFoundError("supprimé entre stat et open")
+    monkeypatch.setattr("builtins.open", open_gone)
+    with caplog.at_level(logging.DEBUG):
+        caplog.clear()
+        _refresh(p)                                         # ne lève pas
+        assert [r for r in caplog.records if r.name.startswith("cholismo")] == []
+    monkeypatch.setattr("builtins.open", real_open)
+    assert p.current(now) is None                           # jamais de snapshot fabriqué
+
+
+def test_devil_mtime_dans_le_futur_jamais_infiniment_frais(tmp_path):
+    now = time.time()
+    path = _write(tmp_path, "1700000000;49500.0\n", mtime=now + 3600)
+    p = _provider(path)
+    _refresh(p)
+    assert p.current(now) is None                           # fantôme → à l'aveugle → non
+
+
+def test_devil_bom_utf8_n_avale_pas_la_premiere_ligne(tmp_path):
+    """BOM UTF-8 en tête : sans strip, la PREMIÈRE ligne (celle du day_start déduit) devient
+    invalide → day_start faux. Le BOM doit être ignoré."""
+    now = time.time()
+    f = tmp_path / "nt8_account.csv"
+    f.write_bytes("﻿1700000000;50000.0\n1700000001;49500.0\n".encode("utf-8"))
+    os.utime(f, (now, now))
+    p = _provider(str(f))
+    _refresh(p)
+    acc = p.current(now)
+    assert acc is not None
+    assert acc.current_equity == 49_500.0
+    assert acc.day_start_equity == 50_000.0                 # la ligne BOM COMPTE pour le day_start
+
+
+def test_devil_utf16_et_octets_nuls_fail_closed(tmp_path, caplog):
+    now = time.time()
+    f = tmp_path / "nt8_account.csv"
+    f.write_bytes("1700000000;50000.0\n".encode("utf-16"))  # UTF-16 = déchets en utf-8
+    os.utime(f, (now, now))
+    p = _provider(str(f))
+    with caplog.at_level(logging.DEBUG):
+        caplog.clear()
+        _refresh(p)
+        assert p.current(now) is None                       # non supporté → None, pas un crash
+        assert [r for r in caplog.records if r.name.startswith("cholismo")] == []
+    f.write_bytes(b"1700000000;50\x00000.0\n1700000001;49500.0\n")   # octet nul dans l'équité
+    os.utime(f, (now, now))
+    p2 = _provider(str(f))
+    _refresh(p2)
+    acc = p2.current(now)
+    assert acc is not None and acc.current_equity == 49_500.0        # ligne \x00 écartée
+
+
+def test_devil_flood_10mo_borne_memoire_et_cpu(tmp_path):
+    """Ligne géante de 10 Mo : la lecture doit être FENÊTRÉE (tête + queue bornées), jamais un
+    readlines() du fichier entier — préservation mémoire ET vitesse de boucle."""
+    now = time.time()
+    f = tmp_path / "nt8_account.csv"
+    with open(f, "w") as fh:
+        fh.write("1700000000;50000.0\n")                    # tête valide (day_start)
+        fh.write("X" * 10_000_000 + "\n")                   # flood 10 Mo, une seule ligne
+        fh.write("1700000900;49500.0\n")                    # queue valide (dernière)
+    os.utime(f, (now, now))
+    p = _provider(str(f))
+    t0 = time.perf_counter()
+    _refresh(p)
+    elapsed = time.perf_counter() - t0
+    acc = p.current(now)
+    assert acc is not None
+    assert acc.current_equity == 49_500.0                   # la queue gagne
+    assert acc.day_start_equity == 50_000.0                 # la tête donne le day_start
+    assert elapsed < 0.5                                    # borné, pas un scan de 10 Mo par poll
+
+
+def test_devil_fenetre_bornee_queue_illisible_fail_closed(tmp_path):
+    """La PREUVE du fenêtrage : sur un gros fichier dont la QUEUE (fenêtre de lecture) ne
+    contient aucune ligne valide, l'état récent du compte est illisible → None — jamais une
+    vieille équité du MILIEU du fichier repêchée comme si elle était récente."""
+    now = time.time()
+    f = tmp_path / "nt8_account.csv"
+    with open(f, "w") as fh:
+        fh.write("1700000000;50000.0\n")                    # tête valide
+        fh.write("1700000001;49700.0\n")                    # valide, mais hors fenêtre de queue
+        fh.write("Y" * 300_000 + "\n")                      # 300 Ko de déchets EN QUEUE
+    os.utime(f, (now, now))
+    p = _provider(str(f))
+    _refresh(p)
+    assert p.current(now) is None                           # le récent est illisible → à l'aveugle → non
+
+
+def test_devil_day_start_indeterminable_fail_closed(tmp_path):
+    """Gros fichier dont la TÊTE (fenêtre du day_start) est illisible et sans day_start
+    explicite : un day_start inventé (= équité courante) simulerait un JOUR NEUF — le DLL
+    repartirait plein, la corruption deviendrait du levier. → None."""
+    now = time.time()
+    f = tmp_path / "nt8_account.csv"
+    with open(f, "w") as fh:
+        fh.write("Z" * 100_000 + "\n")                      # 100 Ko de déchets EN TÊTE
+        fh.write("1700000900;49500.0\n")                    # queue valide mais sans day_start
+    os.utime(f, (now, now))
+    p = _provider(str(f))
+    _refresh(p)
+    assert p.current(now) is None
+    # …mais un day_start EXPLICITE (3e champ) suffit, même tête illisible :
+    with open(f, "a") as fh:
+        fh.write("1700000901;49400.0;50000.0\n")
+    os.utime(f, (now, now))
+    _refresh(p)
+    acc = p.current(now)
+    assert acc is not None
+    assert acc.current_equity == 49_400.0 and acc.day_start_equity == 50_000.0
+
+
+def test_devil_ecritures_haute_frequence_pendant_le_poll(tmp_path):
+    """100+ appends/s pendant que le poll lit : jamais d'exception, et la dernière ligne
+    COMPLÈTE valide est toujours extraite (jamais une ligne déchirée)."""
+    import threading
+    now = time.time()
+    f = tmp_path / "nt8_account.csv"
+    f.write_text("1700000000;50000.0\n")
+    os.utime(f, (now, now))
+    p = _provider(str(f))
+    written = [50_000.0]
+    stop = threading.Event()
+
+    def writer():
+        i = 0
+        while not stop.is_set() and i < 400:
+            i += 1
+            eq = 50_000.0 - i
+            with open(f, "a") as fh:
+                fh.write(f"17000{i:05d};{eq}\n")
+            written.append(eq)
+    t = threading.Thread(target=writer)
+    t.start()
+    seen = []
+    try:
+        for _ in range(15):                                 # polls concurrents aux écritures
+            _refresh(p)
+            acc = p.current(time.time())
+            if acc is not None:
+                seen.append(acc.current_equity)
+    finally:
+        stop.set()
+        t.join()
+    assert seen                                             # des lectures ont abouti
+    assert all(eq in written for eq in seen)                # toujours une ligne COMPLÈTE écrite
+    _refresh(p)
+    assert p.current(time.time()).current_equity == written[-1]   # convergence sur la dernière
