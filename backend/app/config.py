@@ -204,3 +204,15 @@ ACCOUNT_MAX_AGE_S = float(os.getenv("ACCOUNT_MAX_AGE_S", "15"))
 # fichier exporté en continu par NT8 (lignes `epoch;equity[;day_start]`, un fichier/jour).
 NT8_ACCOUNT_FILE = os.getenv("NT8_ACCOUNT_FILE", "")
 NT8_ACCOUNT_POLL_SECONDS = float(os.getenv("NT8_ACCOUNT_POLL_SECONDS", "1.0"))
+
+# --- MacroNewsProvider & Porte F0 (D-050) ---
+# Fenêtres autour d'une publication USD à fort impact (minutes) : WARNING = [T−15, T−2),
+# HARD_LOCK = [T−2, T+2] bornes incluses. Le flux ("" = désactivé, stack démo → la porte F0
+# n'existe pas ; la protection de facto reste le couplage news D-028 + le blackout humain).
+MACRO_NEWS_FEED_URL = os.getenv("MACRO_NEWS_FEED_URL", "")
+MACRO_NEWS_REFRESH_SECONDS = float(os.getenv("MACRO_NEWS_REFRESH_SECONDS", "3600"))
+# Calendrier plus vieux que ça = FOSSILE → SAFETY_UNKNOWN (on ne trade pas à l'aveugle).
+MACRO_NEWS_MAX_AGE_S = float(os.getenv("MACRO_NEWS_MAX_AGE_S", "21600"))
+NEWS_LOCK_BEFORE_MIN = float(os.getenv("NEWS_LOCK_BEFORE_MIN", "2"))
+NEWS_LOCK_AFTER_MIN = float(os.getenv("NEWS_LOCK_AFTER_MIN", "2"))
+NEWS_WARNING_BEFORE_MIN = float(os.getenv("NEWS_WARNING_BEFORE_MIN", "15"))

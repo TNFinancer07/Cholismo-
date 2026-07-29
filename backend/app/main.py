@@ -14,6 +14,7 @@ from .account_provider import MockAccountProvider, NT8FileAccountProvider
 from .ai.tasks import AITasks
 from .api import router
 from .datasource.mock import MockDataSource
+from .macro_news import MacroNewsProvider
 from .risk_sizer import APEX_EOD_50K, apex_eod_account
 from .engine import Engine
 from .event_store import get_store
@@ -41,10 +42,17 @@ async def lifespan(app: FastAPI):
     else:
         app.state.account_provider = MockAccountProvider(
             state=apex_eod_account(APEX_EOD_50K), always_fresh=True)
+    # Calendrier macro (D-050) : porte F0 active seulement si un flux est configuré — sans lui,
+    # la protection de facto reste le couplage news du détecteur D-028 + le blackout humain.
+    app.state.news_provider = (MacroNewsProvider(config.MACRO_NEWS_FEED_URL)
+                               if config.MACRO_NEWS_FEED_URL else None)
     app.state.engine = Engine(MockDataSource(), app.state.redis,
-                              account_provider=app.state.account_provider)
+                              account_provider=app.state.account_provider,
+                              news_provider=app.state.news_provider)
     if isinstance(app.state.account_provider, NT8FileAccountProvider):
         await app.state.account_provider.start()
+    if app.state.news_provider is not None:
+        await app.state.news_provider.start()
     await app.state.engine.start()
     # AI: async only, out of the hot path (CLAUDE §2.8); no keys -> explicit UNAVAILABLE.
     app.state.ai = AITasks(app.state.engine)
@@ -64,6 +72,8 @@ async def lifespan(app: FastAPI):
             await app.state.log_scraper.stop()
         if isinstance(app.state.account_provider, NT8FileAccountProvider):
             await app.state.account_provider.stop()          # sortie propre : boucle de poll annulée
+        if app.state.news_provider is not None:
+            await app.state.news_provider.stop()
         await app.state.ai.stop()
         await app.state.engine.stop()
         await app.state.redis.close()

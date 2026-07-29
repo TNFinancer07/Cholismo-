@@ -50,6 +50,10 @@ class LsrInputs(BaseModel):
     Tous les champs sont optionnels : l'absence est un état légitime qui mène au rejet, jamais
     à une invention (§3)."""
     now: float
+    # Porte F0 (D-050) : état du calendrier macro, calculé par MacroNewsProvider et INJECTÉ ici
+    # (la fonction reste pure — amendement documenté de l'isolation D-046). None = couche non
+    # câblée → pas de porte ; HARD_LOCK ou SAFETY_UNKNOWN → rejet immédiat.
+    news_state: Optional[str] = None
     sweep_ts: Optional[float] = None
     sweep_direction: Optional[str] = None            # BID_SWEEP | ASK_SWEEP | None
     prints: list[dict] = Field(default_factory=list)  # {ts, price, size, side}
@@ -59,9 +63,10 @@ class LsrInputs(BaseModel):
     vpoc: Optional[float] = None
 
 
-def build_lsr_inputs(schema, now: float) -> LsrInputs:
+def build_lsr_inputs(schema, now: float, news_state: Optional[str] = None) -> LsrInputs:
     """Extrait les entrées du ContextSchema assemblé — **FRESH uniquement** : une microstructure
-    périmée est traitée comme absente (§3), jamais comme un signal."""
+    périmée est traitée comme absente (§3), jamais comme un signal. `news_state` (D-050) est
+    calculé en amont par le MacroNewsProvider et simplement transporté ici."""
     from .meta import Freshness
 
     def fresh(meta) -> Any:
@@ -73,6 +78,7 @@ def build_lsr_inputs(schema, now: float) -> LsrInputs:
     tape = fresh(s1.tape)
     return LsrInputs(
         now=now,
+        news_state=news_state,
         sweep_ts=alert.ts if alert else None,
         sweep_direction=alert.direction if alert else None,
         prints=tape if isinstance(tape, list) else [],
@@ -143,6 +149,11 @@ def _sweep_extreme(prints: list, since: float, now: float, is_long: bool) -> Opt
 def evaluate_lsr(i: LsrInputs) -> Optional[dict]:
     """Évalue un setup de réversion post-sweep. `None` SILENCIEUX dès qu'un critère manque —
     sinon un plan au contrat D-045, prêt pour `manifest_from_lsr_plan`."""
+    # -- F0 : HARD LOCK MACRO (D-050) — AVANT toute microstructure. Trader un sweep dans la
+    # fenêtre d'une publication USD à fort impact, c'est trader le chaos ; et une couche news
+    # câblée mais AVEUGLE (SAFETY_UNKNOWN) vaut un verrou (« on ne trade jamais à l'aveugle »).
+    if i.news_state in ("HARD_LOCK", "SAFETY_UNKNOWN"):
+        return None
     # -- déclencheur : sweep FRAIS et ORIENTÉ --
     if not _finite(i.sweep_ts) or not _finite(i.now):
         return None

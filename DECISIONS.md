@@ -2367,6 +2367,44 @@ passes /devil (lecture fenêtrée, fail-closed sur en-tête, tail-safety dans le
 Chaîne prouvée en réel de bout en bout : export NT8 simulé → provider fenêtré → RiskSizer →
 manifeste « MES 26 contrats » dimensionné par l'équité DU FICHIER → overlay → ACK 226 ms.
 
+## D-050 · MacroNewsProvider & Porte F0 — hard lock macro sur le calendrier économique
+`app/macro_news.py` (+ config `MACRO_NEWS_*`/`NEWS_*`, champ `LsrInputs.news_state`, porte F0
+en tête d'`evaluate_lsr`, câblage engine/main avec start/stop au lifespan).
+
+**Décisions de conception :**
+- **AMENDEMENT D-046 (isolation), tranché par le propriétaire de la spec** : l'isolation disait
+  « aucune donnée news dans la couche LSR ». La Porte F0 la traverse — mais l'état news entre
+  comme un **CHAMP D'ENTRÉE** (`news_state`), calculé par le provider et injecté par l'engine :
+  `evaluate_lsr` reste PURE (zéro I/O, aucune horloge). La pureté est préservée, l'isolation
+  stricte est amendée en connaissance de cause.
+- **États et fenêtres** (config env, minutes) : WARNING = [T−15, T−2) — advisory, la porte
+  laisse passer ; **HARD_LOCK = [T−2, T+2] bornes INCLUSES** (le doute penche vers le verrou) ;
+  plusieurs événements → le plus sévère gagne. Cas exacts de la spec vérifiés : T−3m WARNING,
+  T−1m/T+1m HARD_LOCK, T+3m NORMAL.
+- **`SAFETY_UNKNOWN` bloque aussi** : cache jamais initialisé, FOSSILE (> `MACRO_NEWS_MAX_AGE_S`
+  = 6 h, extension doctrine), au ts futur, ou provider qui LÈVE (garde engine) — couche câblée
+  mais AVEUGLE = « on ne trade jamais à l'aveugle » (précédent D-047). Un calendrier fetché avec
+  succès et VIDE est un état CONNU (semaine calme) → NORMAL, pas UNKNOWN. `news_state=None` =
+  couche NON câblée (stack démo, `MACRO_NEWS_FEED_URL` vide) → la porte n'existe pas ; la
+  protection de facto reste le couplage news du détecteur D-028 + le blackout humain Phase 0.
+- **Parser Forex-Factory JSON pur et défensif** : USD × HIGH seulement (casse tolérée), entrée
+  corrompue écartée LIGNE À LIGNE (non-dict, date illisible, date NAÏVE — fuseau inconnu §3,
+  titre absent), flux illisible → None (l'appelant CONSERVE son ancien cache). Dates ISO avec
+  offset → UTC.
+- **Worker deux étages** (même architecture que D-048) : poll async 3600 s, fetch injectable
+  (tests) ou urllib en `to_thread` (accepte `file://` — utile en local) ; `get_state(now)` SYNC
+  et PUR, horloge injectée. Fetch raté/illisible → cache conservé, qui vieillit vers
+  SAFETY_UNKNOWN par son `fetched_ts` d'origine (jamais re-timbré).
+- **Leçon du harnais (2 itérations)** : mes tests timbraient le cache à `time.time()` réel puis
+  évaluaient à un T0 du passé → la garde « cache du futur » rendait SAFETY_UNKNOWN. La garde
+  avait raison, le harnais avait tort — cache timbré AVANT le plus ancien instant évalué.
+- **Prouvé en réel (2 runs, feed `file://` local)** : MÊME setup microstructure parfait injecté —
+  événement USD High à **T+60 s → 0 manifeste, 0 ligne de log** (F0 silencieuse) ; événement à
+  **T+2 h → 1 manifeste émis** (53 contrats). La porte verrouille et déverrouille exactement.
+- **Vérif** : 17 tests TDD (parser ×4, fenêtres exactes + bornes + sévérité + vide/unknown/
+  fossile, worker ×3, F0 ×3 dont priorité absolue sur la microstructure, intégration engine
+  lock/normal) — **539 passed**, ruff clean.
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.

@@ -28,6 +28,7 @@ from .volume_profile import build_volume_profile
 from .graph.liquidity_sweep import SWEEP_GRAPH, build_sweep_inputs
 from .account_provider import AccountDataProvider
 from .lsr_engine import build_lsr_inputs, evaluate_lsr
+from .macro_news import MacroNewsProvider
 from .risk_sizer import AccountState, size_plan
 from .trade_manifest import manifest_from_lsr_plan
 from .heatmap import latest_column
@@ -211,12 +212,16 @@ def _validate_econ_calendar(meta: MetaField, now: float) -> None:
 
 class Engine:
     def __init__(self, datasource: MarketDataSource, state: RedisState,
-                 account_provider: Optional["AccountDataProvider"] = None):
+                 account_provider: Optional["AccountDataProvider"] = None,
+                 news_provider: Optional["MacroNewsProvider"] = None):
         self.ds = datasource
         self.state = state
         # Source de compte (D-047) : None = pas de source → AUCUNE émission de manifeste
         # (« on ne trade jamais à l'aveugle », fail-closed §3).
         self.account_provider = account_provider
+        # Calendrier macro (D-050) : None = porte F0 absente (stack démo) ; câblé → l'état
+        # news entre dans LsrInputs et HARD_LOCK/SAFETY_UNKNOWN verrouillent l'évaluation.
+        self.news_provider = news_provider
         self.schema = ContextSchema()
         self._tasks: list[asyncio.Task] = []
         self._extras: dict[str, Any] = {"rms": None, "streak": 0, "scenario": None}
@@ -820,9 +825,17 @@ class Engine:
         # alternance ré-émettrait. Une émission max par fenêtre, quel que soit l'événement.
         if now - self._lsr_last_emit_ts < config.LSR_REARM_COOLDOWN_S:
             return
-        plan = evaluate_lsr(build_lsr_inputs(self.schema, now))
+        # Porte F0 (D-050) : l'état news est calculé ICI (get_state est pur, zéro I/O) et entre
+        # dans LsrInputs — un provider cassé vaut un état AVEUGLE (fail-closed), jamais un crash.
+        news_state: Optional[str] = None
+        if self.news_provider is not None:
+            try:
+                news_state = self.news_provider.get_state(now).value
+            except Exception:
+                news_state = "SAFETY_UNKNOWN"
+        plan = evaluate_lsr(build_lsr_inputs(self.schema, now, news_state=news_state))
         if plan is None:
-            return                                    # gates rouges → silence
+            return                                    # gates rouges / F0 → silence
         # COUCHE COMPTE (D-047) : on ne trade JAMAIS à l'aveugle. Pas de source, source
         # déconnectée/périmée, ou RiskSizer en rejet (F8, corruption, plafond) → silence.
         if self.account_provider is None:
