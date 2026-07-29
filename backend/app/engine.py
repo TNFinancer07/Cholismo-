@@ -665,6 +665,17 @@ class Engine:
         if redis_up:
             await self.state.beat()
 
+        # Porte F0 VISIBLE (D-050 polish) : l'opérateur voit l'état news en Zone 0 — jamais un
+        # verrou invisible. `get_state` est PUR et O(petit) : dans le budget hot path (§7).
+        # None = couche non câblée (pas de porte) ; provider cassé = SAFETY_UNKNOWN (aveugle).
+        if self.news_provider is not None:
+            try:
+                self._extras["news_state"] = self.news_provider.get_state(now).value
+            except Exception:
+                self._extras["news_state"] = "SAFETY_UNKNOWN"
+        else:
+            self._extras["news_state"] = None
+
         dump = self.schema.model_dump(mode="json")
         for block in ("session_identity", "s1_state", "bridge_variables",
                       "sync_state", "unified_signal_output", "macro_risk"):

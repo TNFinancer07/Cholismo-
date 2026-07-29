@@ -451,6 +451,9 @@ export interface Extras {
   streak: number
   streak_acked: boolean
   scenario: { name: string; label: string } | null
+  /** Porte F0 macro (D-050) : NORMAL | WARNING | HARD_LOCK | SAFETY_UNKNOWN ;
+   *  null/absent = couche news non câblée (pas de porte). */
+  news_state?: string | null
 }
 
 // --- Zone D : projection du blotter (event-sourced) ---

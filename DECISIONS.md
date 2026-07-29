@@ -2431,6 +2431,24 @@ en tête d'`evaluate_lsr`, câblage engine/main avec start/stop au lifespan).
   T+2:00.001 libre ; symétrique à l'entrée.
 - **Vérif** : 7 tests /devil (24 macro_news) — **546 passed**, ruff clean.
 
+### /polish + Résumé de clôture D-050 (scellé)
+- **PRINCIPE ENREGISTRÉ — « Un flux obèse est un flux empoisonné »** : max **5 000 entrées**
+  (`_MAX_FEED_ENTRIES`, un calendrier hebdo réel < 200) et max **2 Mo** de lecture au fetch
+  (`_MAX_FEED_BYTES`) → au-delà, **fail-closed par CONSERVATION DU CACHE** — jamais une
+  troncature (si l'événement imminent est au-delà de la coupe, la porte s'ouvrirait à tort),
+  jamais une explosion RAM/CPU, l'ancien calendrier vieillit honnêtement vers SAFETY_UNKNOWN.
+- **VISIBILITÉ OPÉRATEUR (Zone 0)** — jamais un verrou invisible : `extras.news_state`
+  (bloc fast du schéma, `get_state` pur et O(petit), dans le budget §7) → badge `NewsGateBadge`
+  en Zone 0, icône + texte, jamais la couleur seule (§3) : `● F0 · RAS` (dim) /
+  `⚠ F0 · NEWS ≤ 15 MIN` (jaune) / `⛔ F0 · NEWS LOCK` (rouge, gras) /
+  `? F0 · CALENDRIER INCONNU` (stale). Tooltip actionnable sur chaque état. Couche non câblée
+  (`news_state` null) → RIEN d'affiché — honnête : la porte n'existe pas. **Prouvé en live** :
+  backend verrouillé (feed `file://`, événement T+60 s) → `⛔ F0 · NEWS LOCK` visible en Zone 0,
+  0 erreur JS, capture à l'appui.
+- **Chaîne de gates au scellement** : `F0 news → sweep D-028 → B1/B2/F4 → géométrie A1/A2/A3 →
+  compte frais (D-047/048) → RiskSizer 1/5e + F8 → garde D-045 → SSE → overlay → humain`.
+- **Vérif finale** : **547 passed**, ruff clean, `tsc` + `vite build` OK.
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.

@@ -333,3 +333,24 @@ def test_devil_frontiere_de_deverrouillage_a_la_milliseconde():
     assert p.get_state(T0 + 120.001) == NewsState.NORMAL    # T+2:00.001 : libre
     assert p.get_state(T0 - 120.0) == NewsState.HARD_LOCK   # symétrique à l'entrée
     assert p.get_state(T0 - 120.001) == NewsState.WARNING
+
+
+# --- /polish : visibilité opérateur (Zone 0 via extras) --------------------------------------
+
+def test_polish_extras_porte_l_etat_news_pour_la_zone_0():
+    """L'opérateur voit F0 : `extras.news_state` suit le provider — jamais un verrou invisible."""
+    from app.datasource.mock import MockDataSource
+    from app.engine import Engine
+    from app.redis_state import RedisState
+
+    async def scenario(news_provider):
+        eng = Engine(MockDataSource(), RedisState(), news_provider=news_provider)
+        await eng._assemble_fast(time.time())
+        return eng._extras.get("news_state")
+
+    now = time.time()
+    assert asyncio.run(scenario(None)) is None              # couche non câblée → pas de porte
+    locked = _provider(events=[_event(now + MIN)], fetched_ts=now - 60)
+    assert asyncio.run(scenario(locked)) == "HARD_LOCK"
+    blind = MacroNewsProvider(url="http://test.invalid/feed")   # jamais fetché
+    assert asyncio.run(scenario(blind)) == "SAFETY_UNKNOWN"

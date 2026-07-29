@@ -19,6 +19,31 @@ function fmtDur(s: number): string {
 /** Badge de régime MACRO (`macro_risk`, D-040) — reflète le Risk Guard déterministe (câblé à
  *  Phase 0 §2.2). Régime encodé par COULEUR + GLYPHE + TEXTE (jamais la couleur seule §3).
  *  Countdown dérivé côté client (event.ts − serverNow) → cohérent avec les autres compte-à-rebours. */
+/** Porte F0 macro (D-050) — l'opérateur voit IMMÉDIATEMENT si le verrou news est actif :
+ *  jamais un verrou invisible. Icône + texte, jamais la couleur seule (§3). Absent (null) =
+ *  couche news non câblée → pas de porte, rien à afficher (honnête). */
+function NewsGateBadge() {
+  const ns = useTerminal((s) => s.extras?.news_state)
+  if (ns == null) return null
+  const cfg: Record<string, { icon: string; txt: string; cls: string; hint: string }> = {
+    NORMAL: { icon: '●', txt: 'F0 · RAS', cls: 'text-term-dim',
+      hint: 'Porte F0 (news macro) armée — aucun événement USD à fort impact à portée.' },
+    WARNING: { icon: '⚠', txt: 'F0 · NEWS ≤ 15 MIN', cls: 'text-risk-yellow font-semibold',
+      hint: 'Événement USD à fort impact dans moins de 15 min — le verrou tombera à T−2 min.' },
+    HARD_LOCK: { icon: '⛔', txt: 'F0 · NEWS LOCK', cls: 'text-risk-red font-black',
+      hint: 'HARD LOCK : fenêtre T−2/T+2 d’une publication USD à fort impact — aucune proposition LSR n’est émise.' },
+    SAFETY_UNKNOWN: { icon: '?', txt: 'F0 · CALENDRIER INCONNU', cls: 'text-stale font-semibold',
+      hint: 'Calendrier macro illisible ou fossile — la couche est AVEUGLE : aucune proposition LSR n’est émise (fail-closed).' },
+  }
+  const c = cfg[ns] ?? cfg.SAFETY_UNKNOWN
+  return (
+    <span className={cn('inline-flex items-center gap-1 text-xxs', c.cls)} title={c.hint}>
+      <span aria-hidden>{c.icon}</span>{c.txt}
+    </span>
+  )
+}
+
+
 function MacroRegimeBadge() {
   const mr = useTerminal((s) => s.macro_risk?.value)
   const now = useTerminal((s) => serverNow(s))
@@ -122,6 +147,7 @@ export function Zone0StatusBar() {
       </div>
 
       <MacroRegimeBadge />
+      <NewsGateBadge />
       <MasterGlyph />
       <span className="text-xxs text-term-dim" title="Avis Groq — advisory seulement, jamais le verrou (CLAUDE §2.2)">
         GROQ: {si?.phase0_advisory ?? 'UNAVAILABLE'}
