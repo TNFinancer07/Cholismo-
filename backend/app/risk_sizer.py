@@ -30,6 +30,11 @@ construction : `account_type` n'admet que les modèles EOD. Le `drawdown_floor` 
 intraday (EOD Trail : le seuil ne se recalcule qu'à la clôture — ce recalcul est le travail du
 driver de fin de session, hors de cette couche).
 
+**Couture avec le pipeline LSR (T2)** : `size_plan(plan, account)` dérive le stop en ticks de la
+GÉOMÉTRIE du plan D-046 (`|entrée − stop| / tick_size`, une seule source de vérité) et rend un
+NOUVEAU plan aux contrats remplacés — l'engine ne l'appelle qu'avec un compte FRAIS fourni par
+`account_provider.py` (sans compte : aucune émission).
+
 Fonctions PURES et déterministes : compte + géométrie en entrée, résultat en sortie — aucune
 horloge lue, aucun état retenu, aucun ordre passé (§2.1). Les montants du preset `APEX_EOD_50K`
 sont des ordres de grandeur publics **À VÉRIFIER le jour de l'achat** (doc LSR ; depuis mars 2026

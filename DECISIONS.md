@@ -2255,6 +2255,34 @@ Aucun débris de debug. Tranche 1 scellée (DONE).
   Go/No-Go humain et le DLL côté broker.
 - **Vérif** : 7 tests /devil (23 provider/câblage) — **501 passed**, ruff clean.
 
+### /polish final + Résumé de clôture D-047 (tranches 1 et 2 scellées)
+Hygiène : zéro débris (TODO/FIXME/print), docstrings au niveau des passes /devil (fraîcheur
+stricte du provider et couture `size_plan` désormais dans le contrat écrit).
+
+**Attestation fail-closed — vérifiée par TEST, pas par déclaration :**
+| Frontière | Chemin d'échec | Verdict |
+|---|---|---|
+| Provider absent/None/périmé/futur/NaN | pas d'émission | 5 tests |
+| Provider qui LÈVE ou rend un mauvais type | silence, 0 log | 2 tests (caplog) |
+| Buffer ≤ 0, gap d'ouverture, équité au plancher | `INSUFFICIENT_BUFFER` | 6 tests |
+| Corruption (non-fini, ≤ 0, floor négatif, tick ≤ 0) | `INVALID_INPUT` | 5 tests |
+| Taille implausible (équité corrompue finie) | `SIZE_SANITY_CAP` | 1 test |
+| Chute d'équité en vol (sous DLL pendant l'évaluation) | F8 in extremis | 1 test |
+| Invariant global (grille 9×7×7 valide+corrompu) | APPROVED ⟺ contrats ≥ 1, zéro exception | 1 balayage |
+
+**Attestation de pureté mathématique — vérifiée par grep + test :** aucune horloge
+(`time.time`/`datetime`/`perf_counter`) dans `risk_sizer.py`, `account_provider.py`,
+`lsr_engine.py`, `trade_manifest.py` (grep = zéro occurrence) ; `now` TOUJOURS injecté ;
+mêmes entrées → mêmes sorties (tests de pureté) ; entrées jamais mutées (testé sizer + plan).
+Latence mesurée : `size_plan` **5,3 µs médian** (max 119 µs / 5 000 appels) — invisible sur la
+cadence sweep, et hors hot path de toute façon.
+
+**Chaîne complète au scellement** : microstructure → sweep (D-028) → evaluate_lsr (D-046) →
+compte frais (provider) → RiskSizer 1/5e (D-047) → garde D-045 → SSE → overlay → ACK humain →
+event store. Prouvée en live : « MES 53 contrats » dimensionné depuis le buffer Apex,
+ACK 140 ms. Un seul mode dégradé subsiste, VOULU : sans source de compte, le terminal
+n'émet AUCUNE proposition — on ne trade jamais à l'aveugle.
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.

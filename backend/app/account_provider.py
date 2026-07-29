@@ -3,9 +3,12 @@
 Le RiskSizer (D-047 T1) est pur : quelqu'un doit lui apporter l'état du compte. Ce module est ce
 port. Contrat : `current(now) -> AccountState | None` — l'horloge est INJECTÉE (règle commune
 D-045/046/047 : rien ici ne lit l'heure), et le provider est seul juge de la FRAÎCHEUR de sa
-photo. `None` couvre TROIS réalités que l'appelant traite pareil (fail-closed §3, « on ne trade
-jamais à l'aveugle ») : jamais connecté, déconnecté, ou photo périmée (> `ACCOUNT_MAX_AGE_S`) —
-une équité fossile n'est pas une équité.
+photo. `None` couvre les réalités que l'appelant traite TOUTES pareil (fail-closed §3, « on ne trade
+jamais à l'aveugle ») : jamais connecté, déconnecté, photo périmée (> `ACCOUNT_MAX_AGE_S`),
+photo au ts NON FINI (NaN passerait une comparaison naïve) ou datée du FUTUR (désync d'horloge
+broker — son heure réelle est inconnue, leçon D-028/D-046) — une équité fossile ou fantôme
+n'est pas une équité. Côté engine, le port est consommé sous `try/except` + garde de type :
+un provider réel qui LÈVE ou rend n'importe quoi = coupure = rejet naturel = silence.
 
 `MockAccountProvider` simule le flux NinjaTrader/broker pour les tests et le stack mock :
 - `push(state, ts)` : nouvelle photo datée (mise à jour d'équité après un fill) ;
