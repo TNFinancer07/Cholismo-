@@ -2344,6 +2344,29 @@ poll** — un flood de 10 Mo (ou 1 Go) mangeait la RAM et le CPU du worker toute
   lecture rend une ligne COMPLÈTE réellement écrite, convergence sur la dernière.
 - **Vérif** : 9 tests /devil (21 NT8) — **522 passed**, ruff clean.
 
+### /polish + Résumé d'architecture D-048 (clôture)
+Hygiène : zéro débris ; **UNE seule ligne de log dans tout le module** (l'exception inattendue de
+la boucle de poll — une panne se voit, un rejet naturel jamais) ; contrat écrit au niveau des
+passes /devil (lecture fenêtrée, fail-closed sur en-tête, tail-safety dans le docstring de classe).
+
+**Les trois choix d'architecture qui portent le module :**
+1. **I/O FENÊTRÉ, deux étages** — boucle de poll async → `asyncio.to_thread` → lecture bornée
+   tête 8 Ko + queue 64 Ko (O(72 Ko)/poll quel que soit le fichier, queue balayée à rebours) →
+   cache `(AccountState, mtime)` ; `current(now)` SYNC applique la fraîcheur D-047 sur le cache.
+   L'event loop ne gèle jamais (prouvé : lecture bloquée 300 ms, ticker concurrent vivant), le
+   port D-047 est inchangé, l'engine n'a pas bougé d'une ligne.
+2. **FAIL-CLOSED SUR EN-TÊTE** — le day_start se déduit de la tête du fichier ; tête illisible
+   sans day_start explicite → None (un day_start inventé = jour neuf simulé = DLL plein = la
+   corruption devient du levier). Le mtime (horloge du FS backend, jamais le ts interne des
+   lignes) fait vieillir le cache naturellement — un refresh raté ne le ressuscite jamais.
+3. **TAIL-SAFETY** — seules les lignes TERMINÉES par `\n` comptent (une écriture en vol n'a pas
+   son newline, et un float tronqué reste un float : « 49600.0 » déchiré en « 4 » = 4 $ valides) ;
+   en fenêtre décalée, le fragment initial est écarté comme le final. Sous 400 appends
+   concurrents : zéro exception, toujours une ligne complète réellement écrite.
+
+Chaîne prouvée en réel de bout en bout : export NT8 simulé → provider fenêtré → RiskSizer →
+manifeste « MES 26 contrats » dimensionné par l'équité DU FICHIER → overlay → ACK 226 ms.
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.

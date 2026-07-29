@@ -96,9 +96,19 @@ class NT8FileAccountProvider:
     PREMIÈRE ligne valide du fichier ; floor et DLL viennent du preset Apex (NT8 ne les connaît
     pas — le recalcul EOD Trail reste au driver de fin de session, D-047).
 
+    **Lecture FENÊTRÉE — O(72 Ko) quel que soit le fichier (/devil)** : jamais un readlines()
+    du fichier entier (un flood de 10 Mo mangerait RAM et CPU à chaque poll). Tête bornée
+    (8 Ko, le day_start vit au début) + queue bornée (64 Ko, balayée À REBOURS pour la dernière
+    ligne valide) ; fragments coupés écartés aux DEUX bords (tail-safety : une écriture en vol
+    n'a pas son `\\n`, et un float tronqué reste un float). Conséquences assumées : queue
+    illisible = état récent illisible → None ; **day_start indéterminable → None** (un
+    day_start inventé simulerait un jour neuf, DLL plein — la corruption deviendrait du
+    levier) ; recommandation exporteur : toujours écrire le day_start explicite en 3e champ.
+
     **FAIL-CLOSED I/O, silence ABSOLU** : introuvable, verrouillé, illisible, aucune ligne valide,
     équité non-finie ou ≤ 0 → pas de snapshot, aucun log — un échec d'I/O attendu est un rejet
-    naturel (hygiène D-046), pas une panne à hurler."""
+    naturel (hygiène D-046), pas une panne à hurler. Seule l'exception INATTENDUE de la boucle
+    de poll se logge (une panne doit se voir)."""
 
     def __init__(self, path: str, preset: ApexEodPreset,
                  drawdown_floor: Optional[float] = None,
