@@ -2541,6 +2541,62 @@ Bloc `account_state` du ContextSchema (canal RAPIDE) + `account_view()` pur + pa
 - **Vérif finale** : **46 Vitest** + **559 pytest**, ruff clean, `tsc` + `vite build` OK, essai
   réel (découvrabilité + suivi live), 0 erreur JS.
 
+## D-052 · LsrLiveDriver — port Python durci du harnais push-driven
+`backend/app/lsr_driver.py` — port du `LsrLiveDriver` TypeScript (moteur LSR v1.2, externe),
+**durci par la revue de son original**. Il n'exécute rien et n'émet rien : il cadence une
+fonction d'évaluation INJECTÉE sur des snapshots poussés et remet le résultat à des callbacks.
+
+**PÉRIMÈTRE — pas câblé, et c'est délibéré.** Le chemin d'émission LIVE reste
+`Engine._maybe_emit_lsr` (D-046), qui TIRE la microstructure du ContextSchema sur la cadence
+sweep. Ce driver est l'autre modèle (on POUSSE des snapshots d'un flux temps réel Rithmic/NT8) :
+il est fourni comme harnais pour ce jour-là. **Les deux ne doivent jamais tourner ensemble** —
+deux chemins d'émission concurrents casseraient la source unique de vérité. Absent de `main.py`.
+
+**Les cinq correctifs par rapport à l'original TypeScript :**
+1. **La boucle « fail-safe » était en réalité fail-OPEN.** L'original gardait les snapshots
+   indéfiniment : un feed mort le laissait réévaluer toutes les 250 ms sur des données
+   FOSSILES — et avec un `now` frais, le moteur ne pouvait pas voir la différence. Ici chaque
+   injection est ESTAMPILLÉE : marché ou compte périmé (ou daté du FUTUR, leçon D-050) → aucune
+   évaluation ; order flow périmé → passé à `None` (mesure absente = fail-closed côté gates
+   B1-B4 : c'est au moteur de refuser, pas au driver de relayer un fossile). Seuils :
+   `LSR_DRIVER_MAX_AGE_S` (2 s, marché/flux) et `ACCOUNT_MAX_AGE_S` (15 s, doctrine D-047 réutilisée).
+2. **Callbacks BORNÉS.** L'original appelait `onStateUpdated?.(...)` sans `await` ni `.catch`
+   alors que le type autorise `Promise<void>` : un rejet devenait une *unhandled rejection*,
+   fatale sous Node ≥ 15 — un Redis qui hoquette tuait le driver. Ici tout callback (sync ou
+   coroutine) est awaité sous `try/except` : la boucle survit, l'échec est JOURNALISÉ (échec
+   inattendu ≠ rejet naturel, hygiène D-046).
+3. **Persistance AVANT avancement.** L'original faisait `this.runtimeState = nextState` puis
+   lançait la persistance : une écriture ratée laissait la mémoire en avance sur le durable et
+   le redémarrage repartait d'un état faux. Ici, persistance en échec → **l'état n'avance pas** ;
+   le moteur étant déterministe, l'évaluation suivante recalcule le même état et réessaie
+   (convergence sans file de retry — testé).
+4. **Comparaison d'état STRUCTURELLE** (`!=`) au lieu de `JSON.stringify` ×2 par évaluation :
+   exacte, **insensible à l'ordre des clés** (l'original déclenchait une FAUSSE mutation sur un
+   simple changement d'ordre d'insertion — testé), sans allocation.
+5. **APPROVED et ALERT sur DEUX callbacks distincts.** L'original les faisait sortir par le même
+   `onPlanGenerated` : un `onPlanGenerated: p => broker.submit(...)` exécutait donc sur une
+   simple ALERTE. Deux callbacks rendent l'erreur IMPOSSIBLE, pas seulement documentée.
+
+**Aussi** : `start()` idempotent (l'original écrasait `this.timer`, fuyant le premier) ;
+l'évaluation n'est plus déclenchée par CHAQUE injection mais par la cadence — backpressure : une
+évaluation par tick est inutile (le détecteur de sweep tourne à la seconde) et non bornée ;
+horloge INJECTABLE (le driver est le seul propriétaire d'horloge, et même là c'est contrôlable en
+test) ; `record_trade_outcome(won, ts)` EXIGE l'horodatage, là où le défaut `Date.now()` de
+l'original rendait les tests non déterministes. §2.1 : aucun ordre, la responsabilité courtier
+reste hors du module comme dans l'original.
+
+- **Leçon de mesure (mon erreur, corrigée)** : mon premier essai a compté « 33 évaluations
+  pendant la coupure » et conclu à un échec. En recomptant : 7 + 33 = 40 évaluations × 50 ms =
+  **exactement 2,0 s**, soit le seuil. La garde avait mordu au bon moment ; c'est l'assertion qui
+  était fausse (je traitais toute la fenêtre de 3 s comme « périmée », alors que la donnée reste
+  légitimement fraîche pendant ses 2 premières secondes). Essai corrigé pour mesurer la fenêtre
+  POST-seuil : **0 évaluation**, reprise automatique au retour du feed.
+- **Vérif** : 22 tests (péremption ×6 dont futur et horloge non finie, séparation APPROVED/ALERT,
+  persistance ratée sans divergence + convergence à la reprise, ordre des clés, callbacks
+  sync/async qui lèvent, évaluateur qui lève, `start()` idempotent, survie de la boucle,
+  horloge injectée, horodatage obligatoire) — **581 passed**, ruff clean ; essai manuel sur vraie
+  boucle asyncio avec le VRAI `evaluate_lsr`.
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.

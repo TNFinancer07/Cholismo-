@@ -219,3 +219,11 @@ NEWS_WARNING_BEFORE_MIN = float(os.getenv("NEWS_WARNING_BEFORE_MIN", "15"))
 # Stop de RÉFÉRENCE pour le ticket pré-calculé affiché en Zone C (D-051) : l'opérateur voit sa
 # capacité AVANT l'alerte. 3 ticks = géométrie LSR typique sur MES (entrée+1t, stop−2t).
 RISK_REFERENCE_STOP_TICKS = int(os.getenv("RISK_REFERENCE_STOP_TICKS", "3"))
+
+# --- LsrLiveDriver (D-052) : harnais push-driven du moteur LSR ---
+# Cadence d'évaluation (le détecteur de sweep tourne à la seconde — 250 ms suffit largement).
+LSR_DRIVER_POLL_SECONDS = float(os.getenv("LSR_DRIVER_POLL_SECONDS", "0.25"))
+# Fraîcheur maximale d'un snapshot marché / order flow poussé : au-delà, la donnée est FOSSILE et
+# aucune évaluation n'a lieu (la boucle périodique doit être fail-CLOSED, pas fail-open).
+# Le compte garde sa propre doctrine (ACCOUNT_MAX_AGE_S, D-047).
+LSR_DRIVER_MAX_AGE_S = float(os.getenv("LSR_DRIVER_MAX_AGE_S", "2.0"))
