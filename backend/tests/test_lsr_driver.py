@@ -337,6 +337,19 @@ def _run(scenario, timeout=2.0):
         return await asyncio.wait_for(scenario(), timeout)
     return asyncio.run(guarded())
 
+
+async def keep_fresh(d, duration):
+    """Démarre le driver si besoin et l'alimente EN CONTINU pendant `duration` (temps réel) : la
+    boucle ne s'observe qu'avec un feed vivant, sinon la péremption masque tout le reste."""
+    if d._task is None:
+        await d.start()
+    end = time.monotonic() + duration
+    while time.monotonic() < end:
+        now = time.time()
+        d.update_market(MARKET, ts=now)
+        d.update_account(ACCOUNT, ts=now)
+        await asyncio.sleep(0.005)
+
 # --- 1. Écriture perdue : un cooldown F6 écrasé par une évaluation EN VOL --------------------
 
 def test_outcome_pendant_une_evaluation_en_vol_n_est_PAS_ECRASE():
@@ -513,3 +526,112 @@ def test_horloge_qui_RECULE_reste_muette_mais_SIGNALE_une_seule_fois(caplog):
     assert len(spy.calls) == 2                               # la 1re, puis au retour de l'horloge
     records = [r for r in caplog.records if r.name.startswith("cholismo")]
     assert len(records) == 1                                 # un seul signal, pas trois
+
+
+# =============================================================================================
+# /polish (Loop 5) — cadence honnête, arrêt propre depuis un callback
+# =============================================================================================
+
+def test_cadence_a_ECHEANCE_le_travail_ne_s_ajoute_pas_a_la_periode():
+    """« Travail puis sieste fixe » donne une période réelle de `poll + travail` : la cadence
+    annoncée devient un mensonge silencieux. Ici la boucle vise une ÉCHÉANCE — et ne rattrape
+    jamais un retard par une rafale (évaluer le passé n'a aucun sens en microstructure)."""
+    async def scenario():
+        evals = []
+
+        async def slow_persist(_state):
+            await asyncio.sleep(0.02)                        # travail = période nominale
+
+        def evaluator(payload):
+            evals.append(payload.now)
+            return _plan(), {"v": len(evals)}                # état neuf → persistance à chaque tick
+
+        d = LsrLiveDriver(evaluator, initial_state={"v": 0}, persist_state=slow_persist,
+                          poll_seconds=0.02)
+        await keep_fresh(d, 0.30)
+        await d.stop()
+        return len(evals)
+
+    n = _run(scenario, timeout=3.0)
+    # « sieste fixe » plafonnerait à 0,30 / (0,02 + 0,02) ≈ 7. Borne haute : jamais plus d'une
+    # évaluation par période (+ marge) — donc aucune rafale de rattrapage.
+    assert 10 <= n <= 20, n
+
+
+def test_stop_pendant_un_callback_EN_VOL_ne_PEND_pas():
+    """Trouvé par l'essai réel, pas par un test : `asyncio.wait_for` (3.11) AVALE une annulation
+    externe si sa future interne vient de se terminer. La boucle survivait donc à son propre
+    `cancel()` et `stop()` attendait pour toujours — l'arrêt du terminal restait pendu ~1 fois sur
+    2. Course : on répète, avec des instants d'arrêt décalés."""
+    async def scenario():
+        for k in range(30):
+            async def persist(_state):
+                return None                                  # future interne terminée AUSSITÔT :
+                #                                              c'est la fenêtre exacte de l'avalement
+
+            counter = {"n": 0}
+
+            def evaluator(_payload):
+                counter["n"] += 1
+                return _plan(), {"v": counter["n"]}          # état neuf → persistance à chaque tick
+
+            d = LsrLiveDriver(evaluator, initial_state={"v": 0}, persist_state=persist,
+                              poll_seconds=0.02)
+            _feed(d, now=time.time())
+            await d.start()
+            await asyncio.sleep(0.02 + (k % 5) * 0.004)      # arrêt à des phases différentes
+            stopper = asyncio.create_task(d.stop())
+            for _ in range(10):
+                if stopper.done():
+                    break
+                await asyncio.sleep(0.01)
+            if not stopper.done():
+                stopper.cancel()
+                return k                                     # blocage à l'itération k
+        return None
+
+    assert _run(scenario, timeout=15.0) is None
+
+
+def test_stop_ne_CONFISQUE_pas_l_annulation_de_l_appelant():
+    """`except CancelledError: pass` avalait aussi l'annulation de l'APPELANT : pendant un
+    shutdown, `await driver.stop()` rendait la main normalement et la séquence d'arrêt continuait
+    comme si rien ne s'était passé (Loop H)."""
+    async def scenario():
+        async def stubborn():
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                await asyncio.Event().wait()                 # ignore l'annulation : stop() attend
+
+        d = _driver(_Spy(plan=_plan()))
+        d._task = asyncio.create_task(stubborn())
+        caller = asyncio.create_task(d.stop())
+        await asyncio.sleep(0)                               # `caller` est à `await task`
+        caller.cancel()
+        try:
+            await caller
+            return "avalée"
+        except asyncio.CancelledError:
+            return "propagée"
+
+    assert _run(scenario) == "propagée"
+
+
+def test_stop_DEPUIS_un_callback_ne_leve_pas():
+    """Un consommateur qui coupe le driver depuis son propre callback (« arrête tout ») :
+    s'attendre soi-même lève « Task cannot await on itself » — un arrêt gracieux ne doit pas
+    exploser au moment précis où on le demande."""
+    async def scenario():
+        d = None
+
+        async def emit(_plan):
+            await d.stop()                                   # depuis l'intérieur de la boucle
+
+        d = LsrLiveDriver(_Spy(plan=_plan()), initial_state={"v": 1},
+                          on_plan_approved=emit, poll_seconds=0.02)
+        await d.start()
+        await keep_fresh(d, 0.10)
+        return d._task
+
+    assert _run(scenario) is None

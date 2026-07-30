@@ -121,6 +121,31 @@ loop while running:
 - Fuite mémoire : un buffer de données qui grossit sans borne → borner/évincer les anciennes valeurs.
 - Une exception non capturée qui tue silencieusement le worker → logger et repartir.
 
+### Instances réelles de Loop D dans le code
+
+| Boucle | Fichier | Cadence | Parades notables |
+|---|---|---|---|
+| Cadence rapide / lente du schéma | `backend/app/engine.py` | 0,25 s / 15 s | exception par tick capturée (« le schéma continue de vieillir ») |
+| Poll compte NT8 | `backend/app/account_provider.py` | 1 s | I/O bloquant déporté (`asyncio.to_thread`), lecture fenêtrée O(72 Ko) |
+| Poll calendrier macro | `backend/app/macro_news.py` | 1 h | cache conservé si le flux est obèse ou empoisonné |
+| Évaluation LSR push-driven | `backend/app/lsr_driver.py` | 0,25 s | voir ci-dessous |
+
+**`lsr_driver.py` cumule les quatre pièges de Loop D et les traite explicitement** (D-052, passes
+`/devil` + `/polish`) — c'est le gabarit à reprendre pour toute nouvelle boucle de données :
+
+- **Race** — un verrou unique sérialise le cycle d'état ; un `await` de persistance au milieu d'un
+  read-modify-write faisait perdre un cooldown (donc autorisait un trade de revanche).
+- **Backpressure** — une évaluation concurrente est **droppée**, pas empilée (deux émettraient deux
+  fois le même ticket) ; l'issue de trade, elle, attend son tour.
+- **Exception avalée** — filet de dernier recours autour du tick, plus un **plafond de durée** sur
+  chaque callback : un `await` qui ne rend jamais la main pendait la boucle en silence, et *un
+  driver mort ressemble à un driver calme*.
+- **Cadence** — visée à l'**échéance** (`loop.time()` monotone), sans rattrapage : « travail puis
+  sieste fixe » donne une période réelle de `poll + travail`, et une rafale de rattrapage
+  évaluerait le passé.
+- **Fraîcheur** — snapshot périmé ou daté du **futur** → aucune évaluation (fail-closed §3) ; une
+  horloge qui recule est signalée une fois par épisode, pas à chaque tick.
+
 ---
 
 ## Loop E — Retry avec backoff exponentiel

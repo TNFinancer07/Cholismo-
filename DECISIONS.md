@@ -2653,6 +2653,47 @@ tests ont d'abord été prouvés ROUGES sur le driver d'avant (relance ciblée s
   retour ; annulation externe → relance + signalement ; horloge −30 s → **1 alerte** (pas ~15) et
   1 reprise ; arrêt propre. **6 logs pour toute la session** — chacun une anomalie réelle.
 
+### /polish (Loop 5) — dont une faille que le correctif /devil avait lui-même ouverte
+- **`asyncio.wait_for` AVALE une annulation externe (3.11) — l'arrêt du terminal restait pendu.**
+  Le plafond de callback (faille B) reposait sur `wait_for` ; or son code 3.11 fait
+  `except CancelledError: if fut.done(): return fut.result()` — si la future interne vient de se
+  terminer, l'annulation venue de l'extérieur est **consommée sans être relayée**. La boucle
+  survivait donc à son propre `cancel()` et `stop()` attendait pour toujours. **Trouvé par l'essai
+  réel, pas par un test** : l'essai calait une fois sur deux ; le dump de piles a montré la tâche
+  vivante à `_poll_loop` avec `cancelling=1` — elle avait encaissé son annulation. Remplacé par
+  `asyncio.timeout` (3.11+), qui distingue sa propre échéance d'une annulation externe. Test de
+  course sur 30 arrêts déphasés : rouge dès la 1re itération avant, vert 3 fois sur 3 après.
+- **`stop()` ne confisque plus l'annulation de l'appelant.** `except CancelledError: pass`
+  avalait aussi le cas « c'est MOI qu'on annule » : pendant un shutdown, `await driver.stop()`
+  rendait la main normalement et la séquence d'arrêt continuait comme si rien ne s'était passé
+  (Loop H). Discriminé par `current_task().cancelling()`.
+- **`stop()` depuis un callback** (« coupe tout ») : s'attendre soi-même lève « Task cannot await
+  on itself ». L'annulation est posée, on ne s'attend pas.
+- **Cadence à l'ÉCHÉANCE.** « Travail puis sieste fixe » donne une période réelle de
+  `poll + travail` : la cadence annoncée (250 ms) devenait un mensonge silencieux. La boucle vise
+  une échéance sur l'horloge **monotone** de l'event loop (pas l'horloge injectée, qui est murale
+  et peut faire un pas NTP), **sans rattrapage** — une rafale de rattrapage évaluerait le passé.
+  Mesuré dans le régime discriminant (travail ≈ période, persistance réelle à chaque tick) :
+  **27 évaluations en 0,60 s**, plafond d'une par période = 30 jamais dépassé ; « sieste fixe »
+  aurait plafonné à 15. *Erreur de mesure corrigée en route* : ma première version mesurait sans
+  changement d'état — la persistance n'était donc appelée qu'une fois et la comparaison annoncée
+  était fausse.
+- **Logs actionnables** : `_safe_call` nomme le callback fautif (`persist_state`,
+  `on_plan_approved`…). « La persistance a lâché » et « le ticket n'est pas parti » n'appellent pas
+  la même intervention ; un log qui ne dit pas lequel oblige à deviner.
+- **Découvrabilité** : `RUNTIME_LOOPS.md` §Loop D liste désormais les **instances réelles** de
+  boucle de données du dépôt (engine, NT8, macro, driver LSR) avec leur cadence et leurs parades —
+  une boucle absente de ce document est invisible pour `/loop-check`.
+- **Cadence bornée une seule fois** (`__init__`) : une valeur de config absurde ne peut plus
+  devenir un busy-wait.
+- **Résiduel assumé** : `stop()` attend la boucle **sans plafond**. Les callbacks étant désormais
+  bornés en durée, seule une coroutine qui *avale* `CancelledError` peut pendre l'arrêt — et
+  plafonner ici laisserait vivre une tâche qui émet encore, ce qui est bien pire qu'un arrêt lent.
+- **Vérif /polish** : +2 tests d'arrêt (course sur 30 arrêts, annulation de l'appelant) et
+  +2 tests (cadence à l'échéance — prouvé discriminant : 8 évaluations en « sieste fixe » contre
+  14 attendues —, `stop()` depuis un callback) → **593 passed**, ruff clean, essai réel relancé
+  **5 fois de suite sans blocage** (avant : ~1 sur 2).
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.

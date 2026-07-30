@@ -170,7 +170,10 @@ class LsrLiveDriver:
         self._on_state_updated = on_state_updated
         self._persist = persist_state
         self._record_outcome = record_outcome
-        self._poll_s = poll_seconds if poll_seconds is not None else config.LSR_DRIVER_POLL_SECONDS
+        poll = poll_seconds if poll_seconds is not None else config.LSR_DRIVER_POLL_SECONDS
+        # Cadence bornée UNE fois ici : `_poll_s` est ensuite une valeur sûre partout (une valeur
+        # absurde en config ne doit pas se transformer en busy-wait).
+        self._poll_s = max(0.01, poll) if _finite(poll) else config.LSR_DRIVER_POLL_SECONDS
         self._max_age_s = max_age_s if max_age_s is not None else config.LSR_DRIVER_MAX_AGE_S
         self._account_max_age_s = (account_max_age_s if account_max_age_s is not None
                                    else config.ACCOUNT_MAX_AGE_S)
@@ -229,14 +232,33 @@ class LsrLiveDriver:
         if task is None:
             return
         task.cancel()
+        if task is asyncio.current_task():
+            # `stop()` appelé DEPUIS la boucle (un callback qui demande l'arrêt) : s'attendre
+            # soi-même lève « Task cannot await on itself ». L'annulation prendra effet au
+            # prochain point d'attente ; il n'y a rien à attendre ici.
+            return
         try:
             await task
         except asyncio.CancelledError:
-            pass
+            # Distinguer « la boucle s'est bien arrêtée » de « c'est MOI qu'on annule » : pendant un
+            # shutdown, `await driver.stop()` peut lui-même être annulé, et l'avaler ferait croire
+            # à l'appelant que son arrêt s'est déroulé normalement (Loop H).
+            current = asyncio.current_task()
+            if current is not None and current.cancelling() > 0:
+                raise
         except Exception:
             log.exception("LSR driver loop had already died before stop()")
 
     async def _poll_loop(self) -> None:
+        """Cadence à ÉCHÉANCE, pas « travail puis sieste fixe » : sinon la période réelle vaut
+        `poll + durée du travail` et la cadence annoncée (250 ms) est un mensonge silencieux. On
+        se recale sur l'horloge MONOTONE de la boucle (pas sur l'horloge injectée, qui est murale
+        et peut faire un pas NTP).
+
+        Aucun rattrapage : après un tick long, on se réancre à maintenant au lieu d'enchaîner les
+        évaluations en retard — une rafale de rattrapage évaluerait le PASSÉ (doctrine D-045 T3)."""
+        loop = asyncio.get_running_loop()
+        next_at = loop.time()
         while True:
             try:
                 await self.evaluate_now()
@@ -246,7 +268,12 @@ class LsrLiveDriver:
                 # Filet de dernier recours : `evaluate` capture déjà tout, mais la boucle ne
                 # doit JAMAIS mourir sur un imprévu (RUNTIME_LOOPS).
                 log.exception("LSR driver loop tick failed (fail-closed: no emission)")
-            await asyncio.sleep(max(0.01, self._poll_s))
+            next_at += self._poll_s
+            delay = next_at - loop.time()
+            if delay <= 0.0:
+                next_at = loop.time()                       # en retard → on se réancre, pas de rafale
+                delay = 0.001                               # mais on rend TOUJOURS la main (§busy-wait)
+            await asyncio.sleep(delay)
 
     async def evaluate_now(self) -> None:
         """Évalue à l'instant de l'horloge injectée."""
@@ -338,12 +365,12 @@ class LsrLiveDriver:
             return False
         if not differs:
             return True                                     # comparaison structurelle, O(champs)
-        if self._persist is not None and not await self._safe_call(self._persist, next_state):
+        if self._persist is not None and not await self._safe_call(self._persist, "persist_state", next_state):
             return False                                    # durable en échec → on n'avance pas
         self._state = next_state
         # L'état est durable : une notification ratée ne le remet pas en cause (elle est
         # journalisée par `_safe_call`), l'émission reste légitime.
-        await self._safe_call(self._on_state_updated, next_state)
+        await self._safe_call(self._on_state_updated, "on_state_updated", next_state)
         return True
 
     async def _dispatch_plan(self, plan: Any) -> None:
@@ -353,28 +380,39 @@ class LsrLiveDriver:
             return
         status = plan.get("status")
         if status == "APPROVED":
-            await self._safe_call(self._on_approved, plan)
+            await self._safe_call(self._on_approved, "on_plan_approved", plan)
         elif status == "ALERT":
-            await self._safe_call(self._on_alert, plan)
+            await self._safe_call(self._on_alert, "on_alert", plan)
 
-    async def _safe_call(self, fn: Optional[Callable], *args: Any) -> bool:
+    async def _safe_call(self, fn: Optional[Callable], role: str, *args: Any) -> bool:
         """Appelle un callback sync OU coroutine, toujours awaité, toujours borné — en durée aussi
         (faille B) : un `await` qui ne rend jamais la main pendait la boucle pour l'éternité, en
         silence. Rend False si le callback a échoué : c'est un échec INATTENDU (pas un rejet
-        naturel), il se journalise."""
+        naturel), il se journalise.
+
+        `role` nomme le callback fautif : « la persistance a lâché » et « le ticket n'est pas
+        parti » ne demandent pas la même intervention, et un log qui ne dit pas lequel des deux
+        oblige à deviner."""
         if fn is None:
             return True
         try:
             result = fn(*args)
             if inspect.isawaitable(result):
-                await asyncio.wait_for(result, self._cb_timeout_s)
+                # `asyncio.timeout` et NON `asyncio.wait_for` : en 3.11, `wait_for` AVALE une
+                # annulation venue de l'extérieur quand sa future interne vient de se terminer
+                # (`except CancelledError: if fut.done(): return fut.result()`). La boucle
+                # survivait alors à son propre `cancel()` et `stop()` attendait POUR TOUJOURS —
+                # l'arrêt gracieux du terminal restait pendu (mesuré : ~1 arrêt sur 2).
+                # `asyncio.timeout` distingue sa propre échéance d'une annulation externe.
+                async with asyncio.timeout(self._cb_timeout_s):
+                    await result
             return True
         except asyncio.TimeoutError:
-            log.error("LSR driver callback TIMED OUT after %.2fs — treated as failure "
-                      "(fail-closed: state not advanced)", self._cb_timeout_s)
+            log.error("LSR driver callback %s TIMED OUT after %.2fs — treated as a failure "
+                      "(fail-closed: state not advanced, nothing emitted)", role, self._cb_timeout_s)
             return False
         except Exception:
-            log.exception("LSR driver callback failed (bounded: loop survives)")
+            log.exception("LSR driver callback %s failed (bounded: loop survives)", role)
             return False
 
     # -- issue de trade (F6) : horodatage EXPLICITE exigé --
