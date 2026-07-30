@@ -80,7 +80,7 @@ function useStaticCommands(): Command[] {
       panel('B1', 'B'), panel('B2', 'B'), panel('B3', 'B'), panel('B4', 'B'),
       panel('OB', 'B'), panel('TP', 'B'), panel('CVD', 'B'), panel('HM', 'B'),
       panel('FP', 'B'), panel('CDS', 'B'), panel('VP', 'B'), panel('OMON', 'B'), panel('VTS', 'B'), panel('IA', 'B'),
-      panel('C1', 'C'), panel('C2', 'C'), panel('C4', 'C'),
+      panel('C1', 'C'), panel('C2', 'C'), panel('C4', 'C'), panel('C5', 'C'),
       mode('LIVE', 'LIVE'), mode('PRE', 'PRE_SESSION', ['PRESESSION']),
       mode('POST', 'POST_SESSION', ['POSTSESSION']),
       view('TERM', 'TERMINAL', ['TERMINAL']), view('ORCH', 'ORCHESTRATEUR', ['ORCHESTRATEUR']),

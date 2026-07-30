@@ -2526,6 +2526,21 @@ Bloc `account_state` du ContextSchema (canal RAPIDE) + `account_view()` pur + pa
 - **Vérif** : 8 tests /devil en logique pure + 7 en RTL (**46 tests Vitest** au total) —
   **559 passed** backend, ruff clean, `tsc` + `vite build` OK ; essai visuel 3 axes, 0 erreur JS.
 
+### /polish + clôture D-051 (scellé)
+- **DÉFAUT de découvrabilité corrigé** : C5 était absent de la **CommandBar** — un opérateur qui
+  tape `/` ne pouvait pas le trouver (le panneau n'existait que pour qui connaît déjà sa place).
+  Ajouté à la liste des panneaux : `/` → `C5` propose « panneau C5 (zone C) » et focalise la
+  zone C (vérifié en essai réel).
+- **Latence perçue vérifiée** : le panneau suit le canal fast, l'équité est présente à chaque
+  lecture (6 relevés à 300 ms) — aucune fenêtre de vide entre deux ticks.
+- **Découvrabilité INTERNE au panneau** : la règle du 1/5e est expliquée à l'écran
+  (« risque 100 $ (1/5) ») et le stop de référence est nommé (« stop réf. 3 ticks MES ») — le
+  chiffre affiché est auditable par l'opérateur sans documentation.
+- Hygiène : aucun débris (TODO/FIXME/console), `STATUS_LABEL` désormais encapsulé dans
+  `ticketDisplay()` (le composant ne fait plus de logique de statut).
+- **Vérif finale** : **46 Vitest** + **559 pytest**, ruff clean, `tsc` + `vite build` OK, essai
+  réel (découvrabilité + suivi live), 0 erreur JS.
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.
