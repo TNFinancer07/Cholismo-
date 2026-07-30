@@ -56,6 +56,51 @@ l'évaluation n'est plus déclenchée par chaque injection mais par la CADENCE (
 non bornée) ; l'horloge est INJECTABLE (le driver est le seul propriétaire d'horloge du système,
 et même là elle se contrôle en test) ; `record_trade_outcome` EXIGE un horodatage explicite,
 là où le défaut `Date.now()` de l'original rendait les tests non déterministes.
+
+**Passe /devil (Loop 4) — six failles trouvées et fermées :**
+
+A. **Cycle d'état SÉRIALISÉ.** `evaluate` et `record_trade_outcome` faisaient tous deux un
+   read-modify-write de `_state` avec un `await` (persistance) AU MILIEU. Une perte enregistrée
+   pendant qu'une évaluation attendait Redis était donc **écrasée** par l'état calculé avant la
+   perte : cooldown F6 effacé, on retrade juste après une perte — fail-OPEN sur une règle de
+   sécurité. Un verrou unique sérialise le cycle. Une évaluation concurrente est **droppée** (une
+   en vol suffit ; deux émettraient deux fois le même ticket — strict drop D-045 T3, sans log car
+   c'est un rejet naturel) ; une issue de trade, elle, **attend** son tour : on ne perd jamais un
+   cooldown.
+
+B. **Callbacks PLAFONNÉS.** Le fix 2 bornait les callbacks qui *lèvent*, pas ceux qui ne rendent
+   jamais la main. Un `await` suspendu (socket Redis sans timeout côté client) pendait la boucle
+   pour l'éternité : zéro évaluation, zéro log — **un driver mort ressemble à un driver calme**.
+   `LSR_DRIVER_CALLBACK_TIMEOUT_S` transforme la pendaison en échec visible. Corollaire : un
+   callback **synchrone** bloquant (`time.sleep`) reste indéfendable — il gèle la boucle avant
+   tout point d'attente ; c'est un contrat de consommateur, pas un défaut du driver.
+
+C. **Pas d'état durable → pas d'émission.** Le plan naît de la transition d'état ; le fix 3
+   empêchait la mémoire d'avancer sans le durable, mais le plan sortait quand même. Au
+   redémarrage, l'état revenait en arrière et le même sweep pouvait ré-émettre → doublon de
+   ticket. L'émission est maintenant conditionnée à la cohérence de l'état (doctrine du journal
+   D-045 : l'enregistrement précède l'acte).
+
+D. **Comparaison d'état qui LÈVE.** `next_state != self._state` n'est pas toujours booléen — un
+   état embarquant un `ndarray` lève « truth value of an array is ambiguous », et l'exception
+   remontait à l'appelant en dehors de la boucle (contrat « ne lève jamais » rompu). Capturée :
+   état incomparable = état non avancé = aucune émission.
+
+E. **Boucle tuée de l'extérieur.** `if self._task is not None: return` rendait `start()`
+   idempotent *et* impuissant : après une annulation externe (arrêt d'un TaskGroup, balayage de
+   shutdown) la tâche est `done()` mais non-None, donc le driver restait **mort en silence**. Une
+   boucle morte se signale et se relance. Symétriquement `stop()` ne propage plus l'exception
+   d'une tâche déjà morte (`await task` la re-lève) : un arrêt gracieux n'explose pas.
+
+F. **Horloge qui RECULE.** Un pas NTP arrière fait paraître tous les snapshots « datés du
+   futur » : le driver se tait, ce qui est correct (§3), mais indéfiniment et sans trace. La
+   régression ne *bloque* rien (c'est la fraîcheur qui décide) ; elle est **signalée une fois par
+   épisode**, avec la reprise — à 4 ticks/s, un log par tick serait un flood (hygiène D-046).
+
+**Ré-entrance :** un callback ne doit pas rappeler le driver. `evaluate_now()` depuis un callback
+est droppé sans dommage (verrou déjà tenu) ; `await record_trade_outcome(...)` s'auto-bloquerait —
+le plafond B le résout en échec journalisé plutôt qu'en pendaison, mais le contrat reste :
+**un callback consomme, il ne pilote pas**.
 """
 from __future__ import annotations
 
@@ -73,6 +118,15 @@ log = logging.getLogger("cholismo.lsr_driver")
 
 def _finite(x: Any) -> bool:
     return isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x)
+
+
+def _death_reason(task: "asyncio.Task") -> str:
+    """Pourquoi la boucle est morte — lu SANS lever : `task.exception()` explose sur une tâche
+    annulée. Le lire ici évite aussi le « exception was never retrieved » à la collecte."""
+    if task.cancelled():
+        return "cancelled"
+    exc = task.exception()
+    return repr(exc) if exc is not None else "returned"
 
 
 @dataclass(frozen=True)
@@ -107,6 +161,7 @@ class LsrLiveDriver:
                  poll_seconds: float = None,        # type: ignore[assignment]
                  max_age_s: float = None,           # type: ignore[assignment]
                  account_max_age_s: float = None,   # type: ignore[assignment]
+                 callback_timeout_s: float = None,  # type: ignore[assignment]
                  clock: Optional[Callable[[], float]] = None):
         self._evaluator = evaluator
         self._state = initial_state
@@ -119,6 +174,12 @@ class LsrLiveDriver:
         self._max_age_s = max_age_s if max_age_s is not None else config.LSR_DRIVER_MAX_AGE_S
         self._account_max_age_s = (account_max_age_s if account_max_age_s is not None
                                    else config.ACCOUNT_MAX_AGE_S)
+        # Plafond callback : jamais désactivable (une valeur absurde retombe sur le défaut, un 0
+        # ou un `inf` rouvrirait précisément la faille B).
+        cb = (callback_timeout_s if callback_timeout_s is not None
+              else config.LSR_DRIVER_CALLBACK_TIMEOUT_S)
+        self._cb_timeout_s = (max(0.01, cb) if _finite(cb)
+                              else config.LSR_DRIVER_CALLBACK_TIMEOUT_S)
         if clock is None:
             import time as _time
             clock = _time.time
@@ -127,6 +188,10 @@ class LsrLiveDriver:
         self._account: Optional[_Stamped] = None
         self._order_flow: Optional[_Stamped] = None
         self._task: Optional[asyncio.Task] = None
+        # Verrou du cycle d'état (faille A) : un seul read-modify-write de `_state` à la fois.
+        self._gate = asyncio.Lock()
+        self._now_high_water: Optional[float] = None
+        self._clock_regressed = False
 
     @property
     def state(self) -> Any:
@@ -146,21 +211,30 @@ class LsrLiveDriver:
     # -- boucle de cadence --
 
     async def start(self) -> None:
-        """Idempotent : un second appel ne crée PAS de boucle supplémentaire (l'original TS
-        écrasait son timer et fuyait le premier)."""
-        if self._task is not None:
+        """Idempotent tant que la boucle est VIVANTE : un second appel ne crée pas de boucle
+        supplémentaire (l'original TS écrasait son timer et fuyait le premier). Mais une tâche
+        morte — annulation externe, arrêt d'un TaskGroup — est `done()` sans être `None` : la
+        garde naïve laissait alors le driver mort en silence. On la relance, et ça se voit."""
+        task = self._task
+        if task is not None and not task.done():
             return
+        if task is not None:
+            log.warning("LSR driver loop was dead (%s) — restarting", _death_reason(task))
         self._task = asyncio.create_task(self._poll_loop())
 
     async def stop(self) -> None:
-        if self._task is None:
+        """Idempotent et non propageant : `await task` re-lève l'exception d'une tâche déjà morte,
+        ce qui faisait exploser l'arrêt gracieux au pire moment (RUNTIME_LOOPS §arrêt)."""
+        task, self._task = self._task, None
+        if task is None:
             return
-        self._task.cancel()
+        task.cancel()
         try:
-            await self._task
+            await task
         except asyncio.CancelledError:
             pass
-        self._task = None
+        except Exception:
+            log.exception("LSR driver loop had already died before stop()")
 
     async def _poll_loop(self) -> None:
         while True:
@@ -187,11 +261,40 @@ class LsrLiveDriver:
             return False
         return not (snap.ts > now or now - snap.ts > max_age)
 
+    def _check_clock(self, now: float) -> None:
+        """Visibilité d'une horloge qui RECULE (faille F). Ne bloque rien — c'est la fraîcheur qui
+        décide, et un snapshot antérieur au recul paraît « daté du futur » donc refusé. Signale
+        une fois par ÉPISODE (front descendant puis reprise) : à 4 ticks/s, un log par tick serait
+        un flood, et un rejet naturel ne se journalise pas (hygiène D-046)."""
+        high = self._now_high_water
+        if high is not None and now < high:
+            if not self._clock_regressed:
+                self._clock_regressed = True
+                log.warning("LSR driver clock went BACKWARDS (%.3f < %.3f) — evaluations stay "
+                            "fail-closed until it catches up", now, high)
+            return
+        self._now_high_water = now
+        if self._clock_regressed:
+            self._clock_regressed = False
+            log.info("LSR driver clock recovered (%.3f) — evaluations resume", now)
+
     async def evaluate(self, now: Any) -> None:
-        """Un cycle d'évaluation. Ne lève JAMAIS : toute défaillance (évaluateur, callback,
-        persistance) est capturée — la boucle survit et rien n'est émis (fail-closed §3)."""
+        """Un cycle d'évaluation. Ne lève JAMAIS (hors annulation, qui doit remonter) : toute
+        défaillance — évaluateur, callback, persistance, comparaison d'état — est capturée, la
+        boucle survit et rien n'est émis (fail-closed §3).
+
+        Le cycle est SÉRIALISÉ (faille A) et une évaluation concurrente est DROPPÉE : une en vol
+        suffit, deux émettraient deux fois le même ticket. Aucun log — c'est du backpressure
+        normal, pas une panne."""
+        if self._gate.locked():
+            return
+        async with self._gate:
+            await self._evaluate_serialized(now)
+
+    async def _evaluate_serialized(self, now: Any) -> None:
         if not _finite(now):
             return                                          # horloge douteuse → on n'évalue pas
+        self._check_clock(now)
         if not self._fresh(self._market, now, self._max_age_s):
             return                                          # feed marché mort/fossile → silence
         if not self._fresh(self._account, now, self._account_max_age_s):
@@ -210,19 +313,38 @@ class LsrLiveDriver:
             log.exception("LSR evaluator raised (fail-closed: no plan, state untouched)")
             return
 
-        await self._advance_state(next_state)
-        await self._dispatch_plan(plan)
+        # Pas d'état durable → pas d'émission (faille C) : le plan naît de la transition d'état ;
+        # l'émettre sans que la transition tienne, c'est risquer un doublon de ticket au
+        # redémarrage (l'état revenu en arrière laisserait le même sweep ré-émettre).
+        if await self._advance_state(next_state):
+            await self._dispatch_plan(plan)
 
-    async def _advance_state(self, next_state: Any) -> None:
-        """Persistance AVANT avancement : une écriture ratée laisse l'état INCHANGÉ, donc pas de
-        divergence mémoire/durable. Le moteur est déterministe → la tentative suivante recalcule
-        le même état et réessaie."""
-        if next_state == self._state:
-            return                                          # comparaison structurelle, O(champs)
+    def _state_differs(self, next_state: Any) -> Optional[bool]:
+        """`None` = état INCOMPARABLE (faille D) : `!=` n'est pas toujours booléen — un `ndarray`
+        dans l'état lève « truth value of an array is ambiguous ». Incomparable → fail-closed."""
+        try:
+            return bool(next_state != self._state)
+        except Exception:
+            log.exception("LSR state comparison failed (fail-closed: state untouched, no emission)")
+            return None
+
+    async def _advance_state(self, next_state: Any) -> bool:
+        """Rend True si l'état est COHÉRENT (inchangé, ou avancé et durable) — seul cas où une
+        émission est légitime. Persistance AVANT avancement : une écriture ratée laisse l'état
+        INCHANGÉ, donc pas de divergence mémoire/durable. Le moteur est déterministe → la
+        tentative suivante recalcule le même état et réessaie."""
+        differs = self._state_differs(next_state)
+        if differs is None:
+            return False
+        if not differs:
+            return True                                     # comparaison structurelle, O(champs)
         if self._persist is not None and not await self._safe_call(self._persist, next_state):
-            return                                          # durable en échec → on n'avance pas
+            return False                                    # durable en échec → on n'avance pas
         self._state = next_state
+        # L'état est durable : une notification ratée ne le remet pas en cause (elle est
+        # journalisée par `_safe_call`), l'émission reste légitime.
         await self._safe_call(self._on_state_updated, next_state)
+        return True
 
     async def _dispatch_plan(self, plan: Any) -> None:
         """APPROVED et ALERT sur deux callbacks DISTINCTS — un consommateur ne peut plus exécuter
@@ -236,15 +358,21 @@ class LsrLiveDriver:
             await self._safe_call(self._on_alert, plan)
 
     async def _safe_call(self, fn: Optional[Callable], *args: Any) -> bool:
-        """Appelle un callback sync OU coroutine, toujours awaité, toujours borné. Rend False si
-        le callback a échoué — c'est un échec INATTENDU (pas un rejet naturel) : il se journalise."""
+        """Appelle un callback sync OU coroutine, toujours awaité, toujours borné — en durée aussi
+        (faille B) : un `await` qui ne rend jamais la main pendait la boucle pour l'éternité, en
+        silence. Rend False si le callback a échoué : c'est un échec INATTENDU (pas un rejet
+        naturel), il se journalise."""
         if fn is None:
             return True
         try:
             result = fn(*args)
             if inspect.isawaitable(result):
-                await result
+                await asyncio.wait_for(result, self._cb_timeout_s)
             return True
+        except asyncio.TimeoutError:
+            log.error("LSR driver callback TIMED OUT after %.2fs — treated as failure "
+                      "(fail-closed: state not advanced)", self._cb_timeout_s)
+            return False
         except Exception:
             log.exception("LSR driver callback failed (bounded: loop survives)")
             return False
@@ -254,12 +382,16 @@ class LsrLiveDriver:
     async def record_trade_outcome(self, *, won: bool, ts: float) -> None:
         """Enregistre l'issue d'un trade terminé (cooldown F6). `ts` est OBLIGATOIRE : le défaut
         `Date.now()` de l'original rendait les tests non déterministes et cassait la discipline
-        d'horloge injectée du moteur."""
+        d'horloge injectée du moteur.
+
+        Contrairement à une évaluation, une issue de trade n'est JAMAIS droppée : elle ATTEND le
+        verrou. Un cooldown perdu, c'est un trade de revanche autorisé (faille A)."""
         if self._record_outcome is None or not _finite(ts):
             return
-        try:
-            next_state = self._record_outcome(self._state, won, ts)
-        except Exception:
-            log.exception("LSR record_outcome raised (fail-closed: state untouched)")
-            return
-        await self._advance_state(next_state)
+        async with self._gate:
+            try:
+                next_state = self._record_outcome(self._state, won, ts)
+            except Exception:
+                log.exception("LSR record_outcome raised (fail-closed: state untouched)")
+                return
+            await self._advance_state(next_state)

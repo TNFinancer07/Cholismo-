@@ -2597,6 +2597,62 @@ reste hors du module comme dans l'original.
   horloge injectée, horodatage obligatoire) — **581 passed**, ruff clean ; essai manuel sur vraie
   boucle asyncio avec le VRAI `evaluate_lsr`.
 
+### /devil (Loop 4) — six failles trouvées dans mon propre port
+Les cinq correctifs ci-dessus visaient l'original TS. Cette passe attaque **ma** version. Les six
+tests ont d'abord été prouvés ROUGES sur le driver d'avant (relance ciblée sur le code stashé).
+
+- **A. Écriture perdue → cooldown F6 effacé (la plus grave, fail-OPEN).** `evaluate` et
+  `record_trade_outcome` faisaient tous deux un read-modify-write de `_state` avec un `await`
+  (persistance) AU MILIEU. Une perte enregistrée pendant qu'une évaluation attendait Redis était
+  **écrasée** par l'état calculé avant la perte : cooldown anti-revanche effacé, on retrade
+  immédiatement après une perte — exactement le biais que D-035 mesure. Correctif : un **verrou
+  unique** sérialise le cycle d'état. Asymétrie assumée — une évaluation concurrente est
+  **droppée** (une en vol suffit ; deux émettraient deux fois le même ticket → strict drop D-045
+  T3, sans log car c'est un rejet naturel), une issue de trade **attend son tour** : on ne perd
+  jamais un cooldown. Le drop-plutôt-qu'attendre supprime aussi la fenêtre de péremption (on
+  n'évalue jamais sur une fraîcheur vérifiée avant une attente).
+- **B. Un callback qui ne rend JAMAIS la main pendait la boucle.** Le correctif 2 bornait les
+  callbacks qui *lèvent*, pas ceux qui ne reviennent pas (socket Redis suspendue sans timeout
+  client) : zéro évaluation, zéro log — **un driver mort ressemble à un driver calme**.
+  `LSR_DRIVER_CALLBACK_TIMEOUT_S` (2 s) le traite en ÉCHEC visible → l'état n'avance pas, la
+  tentative suivante réécrit. Résiduel assumé et mesuré : pendant la panne, la cadence tombe au
+  plafond (une évaluation par timeout au lieu de 4/s) — dégradée, pas morte. Un callback
+  **synchrone** bloquant (`time.sleep`) reste indéfendable : il gèle la boucle avant tout point
+  d'attente. C'est un contrat de consommateur, pas un défaut du driver.
+- **C. Pas d'état durable → pas d'émission.** Le correctif 3 empêchait la mémoire d'avancer sans
+  le durable, mais **le plan sortait quand même**. Au redémarrage, l'état revenu en arrière
+  laissait le même sweep ré-émettre → doublon de ticket. L'émission est désormais conditionnée à
+  la cohérence de l'état (même doctrine que le journal D-045 : l'enregistrement précède l'acte).
+- **D. Comparaison d'état qui LÈVE.** `next_state != self._state` n'est pas toujours booléen : un
+  `ndarray` dans l'état lève « truth value of an array is ambiguous », et l'exception remontait à
+  l'appelant hors de la boucle — contrat « ne lève jamais » rompu. Capturée : incomparable = non
+  avancé = aucune émission. *Risque résiduel tracé* : un état portant un NaN **reconstruit** à
+  chaque tick comparerait toujours inégal → une écriture durable par tick. Non détectable sans
+  introspection profonde de l'état ; le contrat du moteur LSR est un état de compteurs et
+  d'horodatages FINIS (`record_trade_outcome` refuse déjà un `ts` non fini).
+- **E. Boucle tuée de l'extérieur.** `if self._task is not None: return` rendait `start()`
+  idempotent *et impuissant* : après une annulation externe (arrêt d'un TaskGroup, balayage de
+  shutdown) la tâche est `done()` mais non-None → le driver restait **mort en silence**. Une
+  boucle morte se signale (WARNING avec la cause, lue sans lever) et se relance. Symétriquement,
+  `stop()` ne propage plus l'exception d'une tâche déjà morte (`await task` la re-lève) : un arrêt
+  gracieux n'explose plus au pire moment (RUNTIME_LOOPS §arrêt).
+- **F. Horloge qui RECULE.** Un pas NTP arrière fait paraître tous les snapshots « datés du
+  futur » : le driver se tait — correct (§3) — mais **indéfiniment et sans trace**. La régression
+  ne bloque rien par elle-même (c'est la fraîcheur qui décide) ; elle est signalée **une fois par
+  épisode**, reprise incluse : à 4 ticks/s, un log par tick serait un flood (hygiène D-046).
+- **Ré-entrance (contrat documenté)** : un callback ne pilote pas le driver. `evaluate_now()`
+  depuis un callback est droppé sans dommage (verrou tenu) ; `await record_trade_outcome(...)`
+  s'auto-bloquerait — le plafond B le convertit en échec journalisé plutôt qu'en pendaison.
+- **Vérif /devil** : +8 tests (écrasement du cooldown, drop de l'évaluation concurrente, callback
+  pendu borné, émission refusée sans état durable, état incomparable, relance d'une boucle morte,
+  `stop()` sur tâche morte, horloge qui recule) — **589 passed**, ruff clean. Essai réel sur
+  boucle asyncio, horloge maîtrisée et persistance pathologique : sweep unique → 1 ticket et
+  **0 log** (rejets naturels muets) ; perte pendant une persistance lente → `cooldown_until`
+  conservé, **0 ticket sur un sweep NEUF** pendant la fenêtre, émission au-delà ; persistance
+  pendue → **3 évaluations** (boucle vivante), 0 ticket, 2 timeouts journalisés, ticket émis au
+  retour ; annulation externe → relance + signalement ; horloge −30 s → **1 alerte** (pas ~15) et
+  1 reprise ; arrêt propre. **6 logs pour toute la session** — chacun une anomalie réelle.
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.

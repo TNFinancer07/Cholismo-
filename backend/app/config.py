@@ -227,3 +227,8 @@ LSR_DRIVER_POLL_SECONDS = float(os.getenv("LSR_DRIVER_POLL_SECONDS", "0.25"))
 # aucune évaluation n'a lieu (la boucle périodique doit être fail-CLOSED, pas fail-open).
 # Le compte garde sa propre doctrine (ACCOUNT_MAX_AGE_S, D-047).
 LSR_DRIVER_MAX_AGE_S = float(os.getenv("LSR_DRIVER_MAX_AGE_S", "2.0"))
+# Plafond d'un callback consommateur (persistance, émission). Un `await` qui ne rend JAMAIS la
+# main (socket Redis suspendue, pas de timeout côté client) pendait la boucle pour toujours, en
+# silence : sans plafond, un driver mort ressemble à un driver calme (/devil D-052). 2 s sur une
+# cadence de 250 ms est déjà pathologique — au-delà, on traite en ÉCHEC (donc l'état n'avance pas).
+LSR_DRIVER_CALLBACK_TIMEOUT_S = float(os.getenv("LSR_DRIVER_CALLBACK_TIMEOUT_S", "2.0"))
