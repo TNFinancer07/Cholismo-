@@ -65,7 +65,10 @@ export function Panel({
     >
       <header
         className={cn(
-          'flex h-5 shrink-0 items-center justify-between gap-2 border-b border-term-border bg-term-panel2 px-1.5',
+          // `overflow-hidden` : CONFINEMENT pur (aucun effet quand la place existe). Le groupe de
+          // droite est `shrink-0` — en colonne extrêmement étroite, un slot `right` long (ex: le
+          // badge NT8 de C5) débordait de l'entête et pouvait empiéter sur le voisin (/devil D-051).
+          'flex h-5 shrink-0 items-center justify-between gap-2 overflow-hidden border-b border-term-border bg-term-panel2 px-1.5',
           accent === 'sony' && 'border-b-sony/40',
           accent === 'youssef' && 'border-b-youssef/40',
           accent === 'router' && 'border-b-router/60',

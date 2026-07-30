@@ -2493,6 +2493,39 @@ Bloc `account_state` du ContextSchema (canal RAPIDE) + `account_view()` pur + pa
 - **Placement** : C5 en tête de la colonne C de l'espace DÉFAUT et de l'espace DISCIPLINE — la
   survie du compte se lit avant tout le reste.
 
+### /devil — payloads contradictoires, jauge indéterminable, débordements, flapping
+**3 défauts réels corrigés, 2 comportements confirmés, 1 mesure de test corrigée.**
+- **CORRIGÉ — le plus grave : un payload CONTRADICTOIRE affichait une taille REFUSÉE.** Le
+  composant ne regardait que `contracts` : `{contracts: 26, status: INSUFFICIENT_BUFFER}` montrait
+  « 26 contrats » alors que le RiskSizer avait rejeté — le pire mensonge possible sur ce panneau.
+  Nouvelle garde pure `ticketDisplay()` : la taille n'est affichable QUE si **les deux** statuts
+  (bloc ET ticket) valent APPROVED **et** que les contrats sont un entier > 0 ; sinon badge de
+  rejet, et `INDÉTERMINÉ` quand la cause est inconnue (ticket absent, contrats fractionnaires,
+  0, négatifs, non finis). Un statut inconnu du backend est affiché TEL QUEL, jamais masqué.
+- **CORRIGÉ — une jauge indéterminable rendait une barre PLEINE (grise)**, lisible comme « 100 %
+  de marge ». Remplacée par un bandeau `? MARGE INDÉTERMINABLE` : on affiche l'ignorance en
+  toutes lettres (§3), jamais une barre qui rassure à tort.
+- **CORRIGÉ — débordements aux valeurs à 9-10 chiffres** : formatage compacté au-delà du million
+  (`1.00 G`, `−50.0 M` — compacter plutôt que tronquer : « 1,000,00… » serait un mensonge) +
+  `min-w-0`/`truncate`/`shrink-0` sur toutes les lignes en flex. Et un défaut de CONFINEMENT
+  dans le composant `Panel` PARTAGÉ : le groupe de droite de l'entête est `shrink-0`, donc un
+  slot `right` long (le badge NT8 de C5) débordait de l'entête en colonne étroite et pouvait
+  empiéter sur le voisin → `overflow-hidden` sur l'entête (confinement pur, aucun effet quand la
+  place existe ; bénéficie à tous les panneaux).
+- **`buffer > buffer_initial` est LÉGITIME, pas une corruption** — insight de la passe : une
+  journée PROFITABLE augmente le buffer au-delà de son ouverture (équité 50 600 → buffer 1 600
+  vs 1 000 à l'ouverture). Le bornage à 100 % est donc un choix d'AFFICHAGE (le P&L du jour
+  porte déjà l'information de surplus), pas une garde anti-corruption. Un `buffer_initial`
+  négatif, lui, est bien une corruption → indéterminable.
+- **Flapping confirmé propre** : 30 bascules frais ↔ déconnecté à 10 Hz → **une seule hauteur de
+  panneau** (222 px, aucun saut de layout), état final stable, **0 erreur JS**.
+- **Débordements mesurés à 3 largeurs** (900/700/520 px de viewport, panneau jusqu'à ~137 px) :
+  **0 débordement visible**. Correction de méthode : mon détecteur comptait d'abord les éléments
+  TRONQUÉS comme des débordements — or `truncate` EST la correction (contenu clippé, pas
+  répandu) ; seul un `overflow-x: visible` qui dépasse est un défaut.
+- **Vérif** : 8 tests /devil en logique pure + 7 en RTL (**46 tests Vitest** au total) —
+  **559 passed** backend, ruff clean, `tsc` + `vite build` OK ; essai visuel 3 axes, 0 erreur JS.
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.

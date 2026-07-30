@@ -1,7 +1,7 @@
 /** Tests unitaires des dérivations d'affichage du compte (D-051) — logique PURE.
  *  Les paliers de la spec : > 60 % sain · 30–60 % réduit · < 30 % critique · ≤ 0 mort. */
 import { describe, expect, it } from 'vitest'
-import { BUFFER_CAUTION, BUFFER_CRITICAL, TIER_STYLE, bufferRatio, bufferTier, isLive, usd, usdSigned } from './account'
+import { BUFFER_CAUTION, BUFFER_CRITICAL, TIER_STYLE, bufferRatio, bufferTier, isLive, ticketDisplay, usd, usdSigned } from './account'
 import type { AccountStateBlock } from '@/types/schema'
 
 const base: AccountStateBlock = {
@@ -94,5 +94,72 @@ describe('formatage', () => {
   })
   it('séparateurs de milliers pour la lecture rapide', () => {
     expect(usd(49_500)).toBe('49,500')
+  })
+})
+
+// --- /devil D-051 : cohérence du ticket, jauge indéterminable, valeurs extrêmes -------------
+
+describe('/devil — ticketDisplay : la taille n\'est affichable que si le sizer l\'a APPROUVÉE', () => {
+  it('APPROVED + contrats entiers positifs → taille', () => {
+    const d = ticketDisplay(acc())
+    expect(d).toEqual({ kind: 'SIZE', contracts: 26 })
+  })
+  it('PAYLOAD CONTRADICTOIRE — contrats présents mais statut REJETÉ → jamais la taille', () => {
+    const d = ticketDisplay(acc({ status: 'INSUFFICIENT_BUFFER',
+      next_ticket: { ...base.next_ticket, contracts: 26, status: 'INSUFFICIENT_BUFFER' } }))
+    expect(d.kind).toBe('REJECT')
+    expect(d).not.toHaveProperty('contracts', 26)
+  })
+  it('statut du bloc et du ticket DIVERGENTS → rejet (le plus prudent gagne)', () => {
+    expect(ticketDisplay(acc({ status: 'INSUFFICIENT_BUFFER' })).kind).toBe('REJECT')
+    expect(ticketDisplay(acc({
+      next_ticket: { ...base.next_ticket, status: 'SIZE_SANITY_CAP' } })).kind).toBe('REJECT')
+  })
+  it('ticket ABSENT alors que le statut dit APPROVED → INDÉTERMINÉ, jamais une valeur inventée', () => {
+    const d = ticketDisplay(acc({ next_ticket: undefined as never }))
+    expect(d).toEqual({ kind: 'REJECT', label: 'INDÉTERMINÉ' })
+    expect(ticketDisplay(acc({ next_ticket: null as never })))
+      .toEqual({ kind: 'REJECT', label: 'INDÉTERMINÉ' })
+  })
+  it('contrats non entiers, nuls ou négatifs → INDÉTERMINÉ (jamais « 0 contrat » ni « 2.5 »)', () => {
+    for (const bad of [0, -3, 2.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+      const d = ticketDisplay(acc({ next_ticket: { ...base.next_ticket, contracts: bad } }))
+      expect(d).toEqual({ kind: 'REJECT', label: 'INDÉTERMINÉ' })
+    }
+  })
+  it('statut inconnu du backend → affiché tel quel, jamais masqué en silence', () => {
+    const d = ticketDisplay(acc({ status: 'MARGIN_CALL_XYZ',
+      next_ticket: { ...base.next_ticket, contracts: null, status: 'MARGIN_CALL_XYZ' } })) as
+      { kind: 'REJECT'; label: string }
+    expect(d.label).toBe('MARGIN_CALL_XYZ')
+  })
+})
+
+describe('/devil — buffer > buffer_initial est LÉGITIME (journée profitable), pas une corruption', () => {
+  it('borné à 100 % pour l\'affichage, sans casser le palier', () => {
+    const profitable = acc({ current_equity: 50_600, day_pnl: 600, buffer: 1_600 })
+    expect(bufferRatio(profitable)).toBe(1)
+    expect(bufferTier(profitable)).toBe('SAFE')
+  })
+  it('buffer_initial négatif (corruption) → indéterminable, pas un ratio négatif', () => {
+    expect(bufferRatio(acc({ buffer_initial: -1_000 }))).toBeNull()
+    expect(bufferTier(acc({ buffer: 500, buffer_initial: -1_000 }))).toBe('UNKNOWN')
+  })
+})
+
+describe('/devil — formatage des valeurs extrêmes (9-10 chiffres)', () => {
+  it('compacte au-delà du seuil lisible pour ne pas déborder du panneau', () => {
+    expect(usd(1_000_000_000)).toBe('1.00 G')
+    expect(usd(50_000_000)).toBe('50.0 M')
+    expect(usd(1_500_000)).toBe('1.50 M')
+    expect(usd(999_999)).toBe('999,999')          // sous le seuil : chiffres exacts
+  })
+  it('compacte aussi les négatifs et garde le signe du P&L', () => {
+    expect(usd(-50_000_000)).toBe('−50.0 M')
+    expect(usdSigned(-1_200_000)).toBe('−1.20 M')
+    expect(usdSigned(2_500_000)).toBe('+2.50 M')
+  })
+  it('les grandeurs non finies restent des tirets, même énormes', () => {
+    expect(usd(Number.MAX_VALUE * 2)).toBe('·')   // Infinity
   })
 })

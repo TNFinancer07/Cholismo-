@@ -68,14 +68,52 @@ export const STATUS_LABEL: Record<string, string> = {
   DISCONNECTED: 'CONNECTIVITÉ NT8 REQUISE',
 }
 
-/** Montant en USD, jamais un faux zéro : absent → tiret neutre. */
+/** Au-delà du million, les chiffres exacts DÉBORDENT du panneau (/devil) : on compacte plutôt
+ *  que de tronquer — « 1.00 G » reste lisible et vrai, « 1,000,00… » serait un mensonge. */
+const MILLION = 1_000_000
+const GIGA = 1_000_000_000
+
+/** Montant en USD, jamais un faux zéro : absent/non fini → tiret neutre. Compacté au-delà du
+ *  million pour tenir dans la largeur du panneau (§ lisibilité > décoration). */
 export function usd(v: number | null | undefined, digits = 0): string {
   if (!finite(v)) return '·'
-  return v.toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits })
+  const abs = Math.abs(v)
+  const sign = v < 0 ? '−' : ''
+  if (abs >= GIGA) return `${sign}${(abs / GIGA).toFixed(2)} G`
+  if (abs >= MILLION) return `${sign}${(abs / MILLION).toFixed(2).slice(0, 4)} M`
+  return sign + abs.toLocaleString('en-US', { minimumFractionDigits: digits,
+    maximumFractionDigits: digits })
 }
 
 /** Montant SIGNÉ (P&L du jour) — le signe est explicite, y compris pour un gain. */
 export function usdSigned(v: number | null | undefined, digits = 0): string {
   if (!finite(v)) return '·'
-  return (v > 0 ? '+' : v < 0 ? '−' : '') + usd(Math.abs(v), digits)
+  return (v > 0 ? '+' : '') + usd(v, digits)
+}
+
+export type TicketDisplay =
+  | { kind: 'SIZE'; contracts: number }
+  | { kind: 'REJECT'; label: string }
+
+/** Ce que le bloc « prochain ticket » doit AFFICHER — la garde la plus importante du panneau.
+ *
+ *  Une taille ne s'affiche QUE si le sizer l'a APPROUVÉE **des deux côtés** (statut du bloc ET
+ *  statut du ticket) et que les contrats sont un entier > 0. Sans cette double condition, un
+ *  payload CONTRADICTOIRE (`contracts: 26` + `status: INSUFFICIENT_BUFFER`, trouvé au /devil)
+ *  afficherait une taille que le RiskSizer a refusée — le pire mensonge possible ici.
+ *  Ticket absent, contrats non entiers/nuls/négatifs → `INDÉTERMINÉ` : on n'invente rien (§3).
+ *  Un statut inconnu du backend est affiché TEL QUEL, jamais masqué en silence. */
+export function ticketDisplay(a: AccountStateBlock | null | undefined): TicketDisplay {
+  const t = a?.next_ticket
+  if (a == null || t == null) return { kind: 'REJECT', label: 'INDÉTERMINÉ' }
+  const approved = a.status === 'APPROVED' && t.status === 'APPROVED'
+  const n = t.contracts
+  if (approved && typeof n === 'number' && Number.isInteger(n) && n > 0) {
+    return { kind: 'SIZE', contracts: n }
+  }
+  if (!approved) {
+    const worst = a.status !== 'APPROVED' ? a.status : t.status
+    return { kind: 'REJECT', label: STATUS_LABEL[worst] ?? worst }
+  }
+  return { kind: 'REJECT', label: 'INDÉTERMINÉ' }   // APPROVED mais taille inexploitable
 }

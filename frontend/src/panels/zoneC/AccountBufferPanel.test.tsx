@@ -112,3 +112,51 @@ describe('fail-closed UI', () => {
     expect(screen.queryByText(/49,500/)).toBeNull()
   })
 })
+
+// --- /devil D-051 : payloads contradictoires, jauge indéterminable, valeurs extrêmes ---------
+
+describe('/devil — payload contradictoire', () => {
+  it('contrats présents MAIS statut rejeté → le badge de rejet, jamais la taille', () => {
+    mount({ status: 'INSUFFICIENT_BUFFER', buffer: 10,
+      next_ticket: { ...base.next_ticket, contracts: 26, status: 'INSUFFICIENT_BUFFER' } })
+    expect(screen.queryByTestId('next-contracts')).toBeNull()
+    expect(screen.getByTestId('next-reject')).toHaveTextContent('MARGE INSUFFISANTE')
+  })
+  it('ticket ABSENT avec statut APPROVED → INDÉTERMINÉ, aucun crash', () => {
+    mount({ next_ticket: undefined as never })
+    expect(screen.getByTestId('next-reject')).toHaveTextContent('INDÉTERMINÉ')
+  })
+  it('contrats fractionnaires → INDÉTERMINÉ (jamais « 2.5 contrats »)', () => {
+    mount({ next_ticket: { ...base.next_ticket, contracts: 2.5 } })
+    expect(screen.getByTestId('next-reject')).toHaveTextContent('INDÉTERMINÉ')
+    expect(screen.queryByText(/2\.5/)).toBeNull()
+  })
+})
+
+describe('/devil — jauge indéterminable', () => {
+  it('ratio inconnu → bandeau EXPLICITE, jamais une barre pleine (qui se lirait 100 %)', () => {
+    mount({ buffer: 500, buffer_initial: null })
+    expect(screen.getByTestId('buffer-indeterminate')).toHaveTextContent('MARGE INDÉTERMINABLE')
+    expect(screen.queryByTestId('buffer-bar')).toBeNull()
+  })
+  it('buffer > buffer_initial (journée profitable) → 100 % borné, palier SAIN', () => {
+    mount({ current_equity: 50_600, day_pnl: 600, buffer: 1_600 })
+    expect(screen.getByTestId('buffer-bar')).toHaveStyle({ width: '100%' })
+    expect(screen.getByTestId('buffer-tier')).toHaveTextContent('MARGE SAINE')
+  })
+})
+
+describe('/devil — valeurs financières extrêmes', () => {
+  it('équité à 10 chiffres → compactée, jamais un débordement de texte', () => {
+    mount({ current_equity: 1_000_000_000, day_start_equity: 1_000_000_000, day_pnl: 0,
+      buffer: 1_000, buffer_initial: 1_000 })
+    expect(screen.getByTestId('equity')).toHaveTextContent('1.00 G')
+    expect(screen.getByTestId('equity').className).toContain('truncate')
+  })
+  it('buffer négatif à 5 chiffres → BLOQUÉ + valeur compacte lisible', () => {
+    mount({ buffer: -50_000, status: 'INSUFFICIENT_BUFFER',
+      next_ticket: { ...base.next_ticket, contracts: null, status: 'INSUFFICIENT_BUFFER' } })
+    expect(screen.getByTestId('buffer-dead')).toHaveTextContent('BLOQUÉ')
+    expect(screen.getByTestId('buffer-abs')).toHaveTextContent('−50,000 $')
+  })
+})

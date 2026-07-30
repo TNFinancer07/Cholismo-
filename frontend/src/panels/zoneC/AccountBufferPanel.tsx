@@ -16,7 +16,7 @@
  *  « CONNECTIVITÉ NT8 REQUISE » et AUCUNE grandeur affichée (jamais une équité fossile).
  *  LECTURE SEULE (§2.1) : ce panneau observe, il ne passe aucun ordre. */
 import { Panel } from '@/components/ui/panel'
-import { STATUS_LABEL, TIER_STYLE, bufferRatio, bufferTier, isLive, usd, usdSigned } from '@/lib/account'
+import { TIER_STYLE, bufferRatio, bufferTier, isLive, ticketDisplay, usd, usdSigned } from '@/lib/account'
 import { cn } from '@/lib/utils'
 import { useTerminal } from '@/store/terminal'
 
@@ -27,6 +27,7 @@ export function AccountBufferPanel() {
   const style = TIER_STYLE[tier]
   const ratio = bufferRatio(acc)
   const ticket = acc?.next_ticket
+  const display = ticketDisplay(acc)
   const pnl = acc?.day_pnl ?? null
   const pnlUp = typeof pnl === 'number' && pnl > 0
 
@@ -57,16 +58,16 @@ export function AccountBufferPanel() {
       ) : (
         <div className="flex h-full min-h-0 flex-col gap-2">
           {/* 1. ÉQUITÉ + P&L du jour */}
-          <div className="flex items-baseline justify-between border-b border-term-border pb-1">
-            <div>
+          <div className="flex items-baseline justify-between gap-2 border-b border-term-border pb-1">
+            <div className="min-w-0">
               <div className="text-xxs text-term-faint">ÉQUITÉ</div>
-              <div className="font-mono text-2xl font-bold tabular-nums text-term-text"
+              <div className="truncate font-mono text-2xl font-bold tabular-nums text-term-text"
                 data-testid="equity">{usd(acc?.current_equity)}<span className="text-xs text-term-dim"> $</span></div>
             </div>
-            <div className="text-right">
+            <div className="min-w-0 text-right">
               <div className="text-xxs text-term-faint">P&amp;L DU JOUR</div>
               <div data-testid="day-pnl"
-                className={cn('font-mono text-lg font-bold tabular-nums',
+                className={cn('truncate font-mono text-lg font-bold tabular-nums',
                   pnl === 0 || pnl == null ? 'text-term-dim'
                     : pnlUp ? 'text-risk-green' : 'text-risk-red')}>
                 <span aria-hidden>{pnl == null || pnl === 0 ? '' : pnlUp ? '▲ ' : '▼ '}</span>
@@ -77,9 +78,9 @@ export function AccountBufferPanel() {
 
           {/* 2. JAUGE — distance vers la mort */}
           <div>
-            <div className="flex items-baseline justify-between text-xxs">
-              <span className="text-term-faint">MARGE AVANT BLOCAGE</span>
-              <span className={cn('font-bold', style.text)} data-testid="buffer-tier">
+            <div className="flex items-baseline justify-between gap-2 text-xxs">
+              <span className="truncate text-term-faint">MARGE AVANT BLOCAGE</span>
+              <span className={cn('shrink-0 font-bold', style.text)} data-testid="buffer-tier">
                 <span aria-hidden>{style.icon} </span>{style.label}
                 {ratio != null && <span className="ml-1 tabular-nums font-normal text-term-dim">
                   {(ratio * 100).toFixed(0)} %</span>}
@@ -89,18 +90,23 @@ export function AccountBufferPanel() {
               {tier === 'DEAD' ? (
                 <div className="grid h-full place-items-center bg-risk-red/25 text-xxs font-black text-risk-red"
                   data-testid="buffer-dead">⛔ BLOQUÉ · MARGE ÉPUISÉE</div>
+              ) : ratio == null ? (
+                // Ratio INDÉTERMINABLE : une barre pleine (même grise) se lirait « 100 % de
+                // marge » — on affiche l'ignorance en toutes lettres (§3, /devil).
+                <div className="grid h-full place-items-center bg-stale/20 text-xxs font-bold text-stale"
+                  data-testid="buffer-indeterminate">? MARGE INDÉTERMINABLE</div>
               ) : (
                 <div data-testid="buffer-bar" role="progressbar"
-                  aria-valuenow={ratio != null ? Math.round(ratio * 100) : undefined}
+                  aria-valuenow={Math.round(ratio * 100)}
                   aria-valuemin={0} aria-valuemax={100} aria-label="Marge avant blocage"
                   className={cn('h-full transition-[width] duration-300', style.bar,
                     style.blink && 'animate-pulse')}
-                  style={{ width: ratio != null ? `${ratio * 100}%` : '100%' }} />
+                  style={{ width: `${ratio * 100}%` }} />
               )}
             </div>
-            <div className="mt-0.5 flex justify-between text-xxs tabular-nums text-term-dim">
-              <span data-testid="buffer-abs">{usd(acc?.buffer)} $ / {usd(acc?.buffer_initial)} $</span>
-              <span title="Plancher de drawdown (campagne) — la frontière la plus dure">
+            <div className="mt-0.5 flex justify-between gap-2 text-xxs tabular-nums text-term-dim">
+              <span className="truncate" data-testid="buffer-abs">{usd(acc?.buffer)} $ / {usd(acc?.buffer_initial)} $</span>
+              <span className="truncate" title="Plancher de drawdown (campagne) — la frontière la plus dure">
                 plancher {usd(acc?.drawdown_floor)} $
               </span>
             </div>
@@ -108,26 +114,27 @@ export function AccountBufferPanel() {
 
           {/* 3. PROCHAIN TICKET — capacité pré-calculée */}
           <div className="mt-auto border-t border-term-border pt-1">
-            <div className="flex items-baseline justify-between">
-              <span className="text-xxs text-term-faint">
+            <div className="flex items-baseline justify-between gap-2">
+              <span className="truncate text-xxs text-term-faint">
                 PROCHAIN TICKET · stop réf. {ticket?.stop_ticks ?? '·'} ticks {ticket?.instrument ?? ''}
               </span>
               {typeof ticket?.risk_allowed === 'number' && (
-                <span className="text-xxs tabular-nums text-term-dim">
+                <span className="shrink-0 text-xxs tabular-nums text-term-dim">
                   risque {usd(ticket.risk_allowed)} $ (1/5)
                 </span>
               )}
             </div>
-            {typeof ticket?.contracts === 'number' ? (
-              <div className="font-mono text-xl font-bold tabular-nums text-router"
+            {/* La taille n'est affichée que si le sizer l'a approuvée DES DEUX CÔTÉS
+                (`ticketDisplay`) — un payload contradictoire ne peut plus montrer un lot refusé. */}
+            {display.kind === 'SIZE' ? (
+              <div className="truncate font-mono text-xl font-bold tabular-nums text-router"
                 data-testid="next-contracts">
-                {ticket.contracts} contrat{ticket.contracts > 1 ? 's' : ''}
+                {display.contracts} contrat{display.contracts > 1 ? 's' : ''}
               </div>
             ) : (
-              <div className="mt-0.5 inline-flex items-center gap-1 border border-risk-red/60 px-1 text-xs font-bold text-risk-red"
+              <div className="mt-0.5 inline-flex max-w-full items-center gap-1 border border-risk-red/60 px-1 text-xs font-bold text-risk-red"
                 data-testid="next-reject">
-                <span aria-hidden>⛔</span>
-                {STATUS_LABEL[ticket?.status ?? ''] ?? ticket?.status ?? 'REJETÉ'}
+                <span aria-hidden>⛔</span><span className="truncate">{display.label}</span>
               </div>
             )}
           </div>
