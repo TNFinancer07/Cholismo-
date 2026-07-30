@@ -445,6 +445,33 @@ export interface ContextSchema {
 
 // --- hors-schéma : extras opérationnels poussés sur le canal rapide ---
 
+// --- account_state → ZONE C HUD (« distance vers la mort », D-051) [fast] ---
+
+export interface NextTicket {
+  instrument: string
+  stop_ticks: number
+  /** N'existe QUE sur APPROVED — jamais un 0 déguisé en taille (§3). */
+  contracts: number | null
+  risk_allowed: number | null
+  status: string
+}
+
+export interface AccountStateBlock {
+  /** APPROVED | INSUFFICIENT_BUFFER | INVALID_INPUT | SIZE_SANITY_CAP | DISCONNECTED */
+  status: string
+  is_stale: boolean
+  current_equity: number | null
+  day_start_equity: number | null
+  drawdown_floor: number | null
+  daily_loss_limit: number | null
+  /** Distance vers la mort : min(equity − floor, equity − (day_start − DLL)). */
+  buffer: number | null
+  /** Buffer à l'OUVERTURE du jour — dénominateur de la jauge (D-051). */
+  buffer_initial: number | null
+  day_pnl: number | null
+  next_ticket: NextTicket
+}
+
 export interface Extras {
   rms: number | null
   rms_meta?: MetaField<number>

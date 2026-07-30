@@ -216,3 +216,6 @@ MACRO_NEWS_MAX_AGE_S = float(os.getenv("MACRO_NEWS_MAX_AGE_S", "21600"))
 NEWS_LOCK_BEFORE_MIN = float(os.getenv("NEWS_LOCK_BEFORE_MIN", "2"))
 NEWS_LOCK_AFTER_MIN = float(os.getenv("NEWS_LOCK_AFTER_MIN", "2"))
 NEWS_WARNING_BEFORE_MIN = float(os.getenv("NEWS_WARNING_BEFORE_MIN", "15"))
+# Stop de RÉFÉRENCE pour le ticket pré-calculé affiché en Zone C (D-051) : l'opérateur voit sa
+# capacité AVANT l'alerte. 3 ticks = géométrie LSR typique sur MES (entrée+1t, stop−2t).
+RISK_REFERENCE_STOP_TICKS = int(os.getenv("RISK_REFERENCE_STOP_TICKS", "3"))

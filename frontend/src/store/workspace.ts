@@ -7,7 +7,8 @@ import { useTerminal } from './terminal'
 
 /** Identifiants canoniques des panneaux disponibles (couverts par panels/registry). */
 export const PANEL_IDS = ['A1', 'A2', 'A3', 'EC', 'MCAL', 'S2P', 'MOCK', 'B1', 'B2', 'B3', 'B4',
-  'S1S', 'OB', 'TP', 'CVD', 'HM', 'FP', 'CDS', 'VP', 'OMON', 'VTS', 'IA', 'C1', 'C2', 'C4', 'MODE'] as const
+  'S1S', 'OB', 'TP', 'CVD', 'HM', 'FP', 'CDS', 'VP', 'OMON', 'VTS', 'IA', 'C1', 'C2', 'C4', 'C5',
+  'MODE'] as const
 export type PanelId = (typeof PANEL_IDS)[number]
 
 export interface Workspace {
@@ -21,13 +22,13 @@ export interface Workspace {
 function builtins(): Workspace[] {
   return [
     { id: 'defaut', name: 'DÉFAUT', builtin: true, showBlotter: true,
-      columns: [['A1', 'S2P', 'A3', 'MOCK'], ['B4', 'S1S', 'B1'], ['EC', 'MCAL', 'C1', 'C2', 'C4', 'MODE']] },
+      columns: [['A1', 'S2P', 'A3', 'MOCK'], ['B4', 'S1S', 'B1'], ['C5', 'EC', 'MCAL', 'C1', 'C2', 'C4', 'MODE']] },
     { id: 'micro', name: 'MICRO · S1', builtin: true, showBlotter: true,
       columns: [['S1S', 'B2', 'IA', 'FP'], ['B4', 'OB', 'CVD', 'VP', 'CDS', 'B1'], ['TP', 'HM', 'EC', 'B3', 'C1', 'C2', 'MOCK']] },
     { id: 'macro', name: 'MACRO · S2', builtin: true, showBlotter: false,
       columns: [['A1', 'A3', 'EC', 'VTS'], ['S2P', 'A2', 'OMON'], ['B4', 'B3', 'MOCK']] },
     { id: 'discipline', name: 'DISCIPLINE', builtin: true, showBlotter: true,
-      columns: [['C1', 'C2'], ['B4', 'C4'], ['MODE', 'MOCK']] },
+      columns: [['C5', 'C1', 'C2'], ['B4', 'C4'], ['MODE', 'MOCK']] },
   ]
 }
 

@@ -359,6 +359,36 @@ class LiquiditySweep(BaseModel):
     recent: list[LiquiditySweepAlert] = Field(default_factory=list)
 
 
+# --- account_state → Zone C HUD (« distance vers la mort », D-051) [fast] ---
+
+class NextTicket(BaseModel):
+    """Taille que porterait le PROCHAIN ticket sur un stop de RÉFÉRENCE — affichage préventif :
+    l'opérateur voit sa capacité AVANT qu'une alerte tombe. `contracts` n'existe que sur
+    APPROVED (jamais un 0 déguisé en taille, §3) ; sinon `status` dit POURQUOI."""
+    instrument: str = ""
+    stop_ticks: int = 0
+    contracts: Optional[int] = None
+    risk_allowed: Optional[float] = None
+    status: str = "DISCONNECTED"
+
+
+class AccountStateBlock(BaseModel):
+    """État de compte prop-firm projeté pour l'affichage (D-047/048 → D-051). OBSERVÉ, jamais un
+    ordre (§2.1). `buffer_initial` = buffer à l'OUVERTURE du jour = dénominateur de la jauge.
+    FAIL-CLOSED : sans source exploitable (périmée OU déconnectée — le port D-047 ne distingue
+    pas), `status=DISCONNECTED`, `is_stale=True` et TOUTES les valeurs restent None."""
+    status: str = "DISCONNECTED"
+    is_stale: bool = True
+    current_equity: Optional[float] = None
+    day_start_equity: Optional[float] = None
+    drawdown_floor: Optional[float] = None
+    daily_loss_limit: Optional[float] = None
+    buffer: Optional[float] = None
+    buffer_initial: Optional[float] = None
+    day_pnl: Optional[float] = None
+    next_ticket: NextTicket = Field(default_factory=NextTicket)
+
+
 # --- Full schema (conceptual object; transported as partial per-block SSE events) ---
 
 class ContextSchema(BaseModel):
@@ -379,8 +409,11 @@ class ContextSchema(BaseModel):
     # value: {regime ∈ NORMAL|WARNING|EXECUTION_PAUSED, event: {name, ts, impact, country} | null,
     # seconds_until, in_window}. Canal RAPIDE (régime + countdown frais, en phase avec Phase 0).
     macro_risk: MetaField = Field(default_factory=MetaField)
+    # Compte prop-firm (D-051) — Zone C HUD : équité, buffer (« distance vers la mort »), ticket
+    # de référence pré-calculé. Canal RAPIDE (l'opérateur doit voir sa capacité en temps réel).
+    account_state: AccountStateBlock = Field(default_factory=AccountStateBlock)
 
 
 FAST_BLOCKS = ("session_identity", "s1_state", "bridge_variables", "sync_state",
-               "unified_signal_output", "liquidity_sweep", "macro_risk")
+               "unified_signal_output", "liquidity_sweep", "macro_risk", "account_state")
 SLOW_BLOCKS = ("s2_state", "econ_calendar", "vol_surface", "macro_calendar")

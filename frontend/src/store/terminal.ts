@@ -3,7 +3,7 @@
  *  hormis l'état d'instance (opérateur, focus clavier, vue) et les projections Zone D. */
 import { create } from 'zustand'
 import type {
-  BlotterRow, BridgeVariables, Calibration, ContextSchema, EconCalendar, Extras,
+  AccountStateBlock, BlotterRow, BridgeVariables, Calibration, ContextSchema, EconCalendar, Extras,
   LiquiditySweep, MacroCalendarValue, MacroRiskValue, MetaField, OperationalMode, Operator,
   OrchestratorPayload, S1State, S2State, SessionIdentity, SyncState, UnifiedSignalOutput, VolSurface,
 } from '@/types/schema'
@@ -37,6 +37,7 @@ interface TerminalStore {
   vol_surface: VolSurface | null
   macro_calendar: MetaField<MacroCalendarValue> | null
   macro_risk: MetaField<MacroRiskValue> | null
+  account_state: AccountStateBlock | null
   extras: Extras | null
 
   // santé des canaux (fail-closed UI : canal muet => BLOQUÉ affiché)
@@ -85,6 +86,7 @@ export const useTerminal = create<TerminalStore>((set) => ({
   vol_surface: null,
   macro_calendar: null,
   macro_risk: null,
+  account_state: null,
   sync_state: null,
   unified_signal_output: null,
   extras: null,
@@ -146,6 +148,7 @@ export const useTerminal = create<TerminalStore>((set) => ({
         case 'vol_surface': return { vol_surface: payload as VolSurface }
         case 'macro_calendar': return { macro_calendar: payload as MetaField<MacroCalendarValue> }
         case 'macro_risk': return { macro_risk: payload as MetaField<MacroRiskValue> }
+        case 'account_state': return { account_state: payload as AccountStateBlock }
         case 'unified_signal_output': {
           const signal = payload as UnifiedSignalOutput
           return { unified_signal_output: signal, history: push(state.history, 'score', signal.score) }
@@ -198,6 +201,11 @@ if (import.meta.env.DEV && typeof window !== 'undefined') {
   ;(window as unknown as { __setVolSurface?: (vs: unknown) => void }).__setVolSurface = (vs) => {
     const s = useTerminal.getState()
     s.set({ vol_surface: vs as never })
+  }
+  // D-051 : force un `account_state` (marge critique, buffer mort, déconnecté) — ces états sont
+  // difficiles à provoquer en démo (le mock est toujours un compte sain à l'ouverture).
+  ;(window as unknown as { __setAccount?: (a: unknown) => void }).__setAccount = (a) => {
+    useTerminal.getState().set({ account_state: a as never })
   }
   // D-045 : lit la vue active — permet aux essais de PROUVER qu'aucune touche ne fuit vers les
   // raccourcis globaux pendant qu'une alerte TradeManifest est affichée (V ne change pas la vue).

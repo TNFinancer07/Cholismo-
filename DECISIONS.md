@@ -2449,6 +2449,50 @@ en tête d'`evaluate_lsr`, câblage engine/main avec start/stop au lifespan).
   compte frais (D-047/048) → RiskSizer 1/5e + F8 → garde D-045 → SSE → overlay → humain`.
 - **Vérif finale** : **547 passed**, ruff clean, `tsc` + `vite build` OK.
 
+## D-051 · Zone C HUD — Compte & « distance vers la mort » (panneau C5)
+Bloc `account_state` du ContextSchema (canal RAPIDE) + `account_view()` pur + panneau C5 +
+`lib/account.ts` (dérivations d'affichage) + **Vitest/RTL** installé (nouvelle capacité de test).
+
+**Décisions de conception :**
+- **`buffer_initial` = le buffer À L'OUVERTURE du jour** (`min(day_start − floor, DLL)`) —
+  dénominateur de la jauge. Ni une constante (fausse dès le 2e jour de campagne), ni le buffer
+  courant (qui afficherait toujours 100 %) : une grandeur **pure et sans état**, recalculable à
+  chaque tick depuis le seul `AccountState`. Aucun historique à mémoriser.
+- **`is_stale` et `DISCONNECTED` sont le MÊME état, assumé** : le port D-047 rend `None` pour
+  *périmé* **et** pour *déconnecté* — je n'ai pas inventé une distinction que le contrat ne porte
+  pas. Un seul verdict honnête (« pas de vue exploitable ») → l'UI affiche
+  **« ⛔ CONNECTIVITÉ NT8 REQUISE »** avec un message actionnable, et **aucune grandeur**.
+- **Ticket de référence pré-calculé** (`RISK_REFERENCE_STOP_TICKS = 3`, géométrie LSR typique
+  sur MES) : l'opérateur voit sa capacité **avant** qu'une alerte tombe. `contracts` n'existe
+  que sur APPROVED ; sinon un **badge de rejet explicite** (MARGE INSUFFISANTE / DONNÉES COMPTE
+  INVALIDES / TAILLE INVRAISEMBLABLE) — jamais un « 0 contrat » qu'on pourrait lire comme valide.
+- **Paliers de la jauge** (spec) : > 60 % `MARGE SAINE` · 30–60 % `MARGE RÉDUITE` · < 30 %
+  `MARGE CRITIQUE` (clignotant) · **buffer ≤ 0 → la barre est REMPLACÉE** par
+  `⛔ BLOQUÉ · MARGE ÉPUISÉE` (une barre à 0 % se confondrait avec « critique »). Bornes : 60 %
+  et 30 % pile appartiennent au palier le PLUS PRUDENT (le doute penche vers la prudence, comme
+  les bornes de verrou D-050).
+- **§3 — jamais la couleur seule** : chaque palier porte un LIBELLÉ TEXTE + une ICÔNE, et les
+  libellés sont deux à deux distincts (testé) ; le P&L porte une flèche ▲/▼ en plus de sa
+  couleur ; les grandeurs absentes s'affichent en tiret neutre `·`.
+- **`account_view` est PURE** (aucune horloge, aucune mutation, O(1)) : publiée à chaque tick
+  fast sans coût mesurable. Une grandeur non finie n'est JAMAIS affichée (None), même si le
+  reste de l'état est lisible.
+- **DÉFAUT RÉEL trouvé par l'essai manuel, invisible aux tests** : le bloc arrivait bien en SSE
+  (`APPROVED`, équité 50 000) mais **`account_state` manquait dans `FAST_BLOCKS` de `sse.ts`** —
+  un event non écouté est silencieusement perdu, et le panneau fail-closait comme si la donnée
+  n'existait pas. Les tests Vitest écrivent le store directement, le test backend vérifie le
+  broadcaster : **aucun des deux ne pouvait voir le trou**. Corrigé + commentaire d'avertissement
+  sur la liste. C'est exactement la raison d'être de l'essai manuel dans la Definition of Done.
+- **Vérif** : **12 tests pytest** (`account_view` : nominal, buffer_initial contraint par le
+  floor, 4 statuts de rejet, non-finies, DISCONNECTED, pureté, publication SSE) + **28 tests
+  Vitest/RTL** (15 logique pure : ratio borné/null, paliers et bornes, §3 libellés distincts,
+  formatage ; 13 composant : équité, P&L fléché, 4 états de jauge, singulier/pluriel, 3 badges
+  de rejet, 3 chemins fail-closed) — **559 passed** backend, ruff clean, `tsc` + `vite build` OK.
+  **Essai réel 4 états** (live 50 000/100 %/53 contrats, critique 18 % clignotant, buffer mort
+  BLOQUÉ + rejet, déconnecté sans valeurs), **0 erreur JS**, captures à l'appui.
+- **Placement** : C5 en tête de la colonne C de l'espace DÉFAUT et de l'espace DISCIPLINE — la
+  survie du compte se lit avant tout le reste.
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.

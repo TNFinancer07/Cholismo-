@@ -29,6 +29,7 @@ import { UnifiedSignalPanel } from '@/panels/zoneB/UnifiedSignalPanel'
 import { Phase0DetailPanel } from '@/panels/zoneC/Phase0DetailPanel'
 import { StreakPanel } from '@/panels/zoneC/StreakPanel'
 import { CalibrationPanel } from '@/panels/zoneC/CalibrationPanel'
+import { AccountBufferPanel } from '@/panels/zoneC/AccountBufferPanel'
 import { ModePanel } from '@/panels/modes/ModePanel'
 
 export interface PanelDef {
@@ -63,6 +64,7 @@ export const PANEL_REGISTRY: Record<PanelId, PanelDef> = {
   C1: { id: 'C1', label: 'Phase 0 — règles', component: Phase0DetailPanel },
   C2: { id: 'C2', label: 'Streak pertes', component: StreakPanel },
   C4: { id: 'C4', label: 'Calibration', component: CalibrationPanel },
+  C5: { id: 'C5', label: 'Compte · distance vers la mort', component: AccountBufferPanel },
   MODE: { id: 'MODE', label: 'Vue par mode', component: ModePanel },
 }
 

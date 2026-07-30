@@ -115,6 +115,63 @@ def compute_buffer(account: AccountState) -> float:
     return min(to_floor, to_dll)
 
 
+def account_view(account: Optional[AccountState],
+                 reference_stop_ticks: int = None,          # type: ignore[assignment]
+                 instrument: str = None) -> dict:           # type: ignore[assignment]
+    """Projection d'AFFICHAGE de l'état de compte (Zone C HUD, D-051) — PURE, aucune horloge.
+
+    Porte de quoi rendre la « distance vers la mort » lisible d'un coup d'œil :
+    - `buffer` courant ET **`buffer_initial`** = le buffer À L'OUVERTURE du jour
+      (`min(day_start − floor, DLL)`) — dénominateur HONNÊTE et SANS ÉTAT de la jauge : ni une
+      constante (fausse dès le 2e jour), ni le buffer courant (qui donnerait toujours 100 %) ;
+    - `day_pnl` = equity − day_start ;
+    - `next_ticket` : la taille que porterait le PROCHAIN ticket sur un stop de RÉFÉRENCE
+      (3 ticks MES par défaut) — affichage préventif, l'opérateur voit sa capacité avant l'alerte ;
+    - `status` : celui du RiskSizer (APPROVED / INSUFFICIENT_BUFFER / INVALID_INPUT /
+      SIZE_SANITY_CAP) ou **DISCONNECTED** si aucun compte.
+
+    FAIL-CLOSED (§3) : `account is None` → tout à `None`, `status=DISCONNECTED`, `is_stale=True`.
+    Le port D-047 rend `None` pour PÉRIMÉ **et** pour DÉCONNECTÉ : on n'invente pas une
+    distinction que le contrat ne porte pas — un seul état honnête, « pas de vue exploitable ».
+    Une grandeur non finie n'est JAMAIS affichée (None), même si le reste de l'état est lisible."""
+    ticks = (reference_stop_ticks if reference_stop_ticks is not None
+             else config.RISK_REFERENCE_STOP_TICKS)
+    inst = instrument if instrument is not None else config.LSR_INSTRUMENT
+    spec = INSTRUMENT_SPECS.get(inst)
+    empty = {k: None for k in ("current_equity", "day_start_equity", "drawdown_floor",
+                               "daily_loss_limit", "buffer", "buffer_initial", "day_pnl")}
+    if account is None or spec is None:
+        return {**empty, "status": "DISCONNECTED", "is_stale": True,
+                "next_ticket": {"instrument": inst, "stop_ticks": ticks, "contracts": None,
+                                "risk_allowed": None, "status": "DISCONNECTED"}}
+
+    result = size_position(account, stop_distance_ticks=ticks, tick_value=spec["tick_value"])
+    fields = {k: (float(v) if _finite(v) else None) for k, v in (
+        ("current_equity", account.current_equity),
+        ("day_start_equity", account.day_start_equity),
+        ("drawdown_floor", account.drawdown_floor),
+        ("daily_loss_limit", account.daily_loss_limit))}
+    buffer_now = compute_buffer(account) if all(v is not None for v in fields.values()) else None
+    # buffer à l'OUVERTURE : le même calcul, l'équité prise au day_start (jour à sa naissance)
+    buffer_open = (min(account.day_start_equity - account.drawdown_floor,
+                       account.daily_loss_limit)
+                   if all(v is not None for v in fields.values()) else None)
+    day_pnl = (account.current_equity - account.day_start_equity
+               if fields["current_equity"] is not None and fields["day_start_equity"] is not None
+               else None)
+    return {
+        **fields,
+        "buffer": buffer_now if _finite(buffer_now) else None,
+        "buffer_initial": buffer_open if _finite(buffer_open) else None,
+        "day_pnl": day_pnl if _finite(day_pnl) else None,
+        "is_stale": False,
+        "status": result.status if result.status == "APPROVED" else result.reason,
+        "next_ticket": {"instrument": inst, "stop_ticks": ticks, "contracts": result.contracts,
+                        "risk_allowed": result.risk_allowed,
+                        "status": result.status if result.status == "APPROVED" else result.reason},
+    }
+
+
 def size_plan(plan: Any, account: AccountState) -> Optional[dict]:
     """Dimensionne un plan LSR APPROVED (contrat D-045/046) via la règle du 1/5e — le stop en
     ticks est dérivé de la GÉOMÉTRIE du plan (`|entrée − stop| / tick_size`), jamais fourni à

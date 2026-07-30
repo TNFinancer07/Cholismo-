@@ -29,7 +29,7 @@ from .graph.liquidity_sweep import SWEEP_GRAPH, build_sweep_inputs
 from .account_provider import AccountDataProvider
 from .lsr_engine import build_lsr_inputs, evaluate_lsr
 from .macro_news import MacroNewsProvider
-from .risk_sizer import AccountState, size_plan
+from .risk_sizer import AccountState, account_view, size_plan
 from .trade_manifest import manifest_from_lsr_plan
 from .heatmap import latest_column
 from .macro_risk import build_macro_calendar, compute_macro_risk
@@ -39,7 +39,8 @@ from .phase0 import Phase0Input, evaluate_phase0
 from .projections import loss_streak
 from .redis_state import RedisState
 from .options_chain import build_options_chain, build_term_structure
-from .schema import (BridgeVariables, Cascade, ContextSchema, CvdLevel, CvdState, Decision,
+from .schema import (AccountStateBlock, BridgeVariables, Cascade, ContextSchema, CvdLevel,
+                     CvdState, Decision,
                      DecisionWindow, EconCalendar, LiquiditySweep, LiquiditySweepAlert,
                      MasterState, OperationalMode, OrderFlow, Phase0State, S1State, S2State,
                      SessionIdentity, SessionMarker, Structure, SyncState, SyncVerdict, VolSurface)
@@ -676,9 +677,21 @@ class Engine:
         else:
             self._extras["news_state"] = None
 
+        # account_state (D-051) : la « distance vers la mort » VISIBLE en Zone C. `account_view`
+        # est PURE et O(1) — dans le budget hot path (§7). Provider absent/cassé/périmé →
+        # DISCONNECTED sans aucune valeur affichable (§3), jamais une équité inventée.
+        account_now: Optional[AccountState] = None
+        if self.account_provider is not None:
+            try:
+                candidate = self.account_provider.current(now)
+                account_now = candidate if isinstance(candidate, AccountState) else None
+            except Exception:
+                account_now = None
+        self.schema.account_state = AccountStateBlock(**account_view(account_now))
+
         dump = self.schema.model_dump(mode="json")
         for block in ("session_identity", "s1_state", "bridge_variables",
-                      "sync_state", "unified_signal_output", "macro_risk"):
+                      "sync_state", "unified_signal_output", "macro_risk", "account_state"):
             broadcaster.publish("fast", block, dump[block])
         broadcaster.publish("fast", "extras", self._extras)
 
