@@ -61,9 +61,20 @@ class LsrInputs(BaseModel):
     aggressor_ratio: Optional[float] = None          # part acheteuse 0..1
     book: Optional[dict] = None                      # {bids: [[p, s], …], asks: [[p, s], …]}
     vpoc: Optional[float] = None
+    # Mesures order flow calculées CHEZ NOUS (D-055/D-056). `orderflow_source` décide qui fait
+    # foi pour B1/B2 : "source" (proxys du fournisseur, DÉFAUT et comportement historique) ou
+    # "inhouse". La bascule est explicite — changer la source de vérité du chemin d'émission ne
+    # doit jamais arriver par effet de bord.
+    orderflow: Optional[Any] = None                  # OrderFlowSnapshot | None
+    # `None` = « non spécifié » → la source est résolue À L'APPEL depuis la config. Mettre
+    # `config.LSR_ORDERFLOW_SOURCE` en défaut de champ le figerait à l'IMPORT du module : toute
+    # bascule au runtime (env relue, réglage event-sourcé, essai) resterait sans effet, et le
+    # moteur jurerait « [source] » en mode maison. Trouvé par l'essai, pas par un test.
+    orderflow_source: Optional[str] = None
 
 
-def build_lsr_inputs(schema, now: float, news_state: Optional[str] = None) -> LsrInputs:
+def build_lsr_inputs(schema, now: float, news_state: Optional[str] = None,
+                     orderflow: Any = None) -> LsrInputs:
     """Extrait les entrées du ContextSchema assemblé — **FRESH uniquement** : une microstructure
     périmée est traitée comme absente (§3), jamais comme un signal. `news_state` (D-050) est
     calculé en amont par le MacroNewsProvider et simplement transporté ici."""
@@ -86,6 +97,9 @@ def build_lsr_inputs(schema, now: float, news_state: Optional[str] = None) -> Ls
         aggressor_ratio=fresh(s1.order_flow.aggressor_ratio),
         book=fresh(s1.order_book),
         vpoc=fresh(s1.structure.vpoc),
+        # Mesures maison (D-056) — transportées telles quelles ; c'est `orderflow_source` qui
+        # décide si elles font foi, et son défaut est le comportement historique.
+        orderflow=orderflow,
     )
 
 
@@ -163,18 +177,33 @@ def evaluate_lsr(i: LsrInputs) -> Optional[dict]:
         return None                                   # inorientable → pas de réversion
     is_long = i.sweep_direction == "BID_SWEEP"        # bid balayé → réversion acheteuse
 
-    # -- B1-like : défense du niveau (absorption) --
-    if i.absorption is not True:
+    # -- B1/B2 : deux SOURCES DE VÉRITÉ possibles, jamais les deux à la fois --
+    source = i.orderflow_source if i.orderflow_source is not None else config.LSR_ORDERFLOW_SOURCE
+    if source == "source":
+        # B1-like : défense du niveau (absorption booléenne du fournisseur).
+        if i.absorption is not True:
+            return None
+        flip = i.aggressor_ratio
+    elif source == "inhouse":
+        # Mesures maison (D-055). Une porte non calculable n'est pas une porte ouverte : on ne
+        # retombe JAMAIS sur les proxys en silence — ce serait la bascule implicite qu'on refuse,
+        # à l'envers.
+        if i.orderflow is None:
+            return None
+        refill = getattr(i.orderflow, "wall_refill_ratio", None)
+        if not _finite(refill) or refill < config.LSR_B1_REFILL_MIN:
+            return None
+        flip = getattr(i.orderflow, "tape_aggressor_buy_fraction", None)
+    else:
+        return None                                   # source inconnue → on ne devine pas
+    # Une part acheteuse est une FRACTION : hors [0,1] = erreur de flux, quelle que soit son
+    # origine. Sans cette borne, un 1.7 corrompu passerait la gate LONG comme un flip
+    # « ultra-fort » (§3 : la corruption ne devient jamais un signal).
+    if not _finite(flip) or not (0.0 <= flip <= 1.0):
         return None
-    # -- B2-like : bascule des agressifs côté réversion --
-    # Une part acheteuse est une FRACTION : hors [0,1] = erreur de flux source. Sans cette borne,
-    # un 1.7 corrompu passerait la gate LONG comme un flip « ultra-fort » (§3 : la corruption ne
-    # devient jamais un signal).
-    if not _finite(i.aggressor_ratio) or not (0.0 <= i.aggressor_ratio <= 1.0):
+    if is_long and flip < config.LSR_B2_FLIP:
         return None
-    if is_long and i.aggressor_ratio < config.LSR_B2_FLIP:
-        return None
-    if not is_long and i.aggressor_ratio > 1.0 - config.LSR_B2_FLIP:
+    if not is_long and flip > 1.0 - config.LSR_B2_FLIP:
         return None
     # -- F4-like : fenêtre de liquidité --
     if not _f4_liquidity_ok(i.book):
@@ -217,8 +246,9 @@ def evaluate_lsr(i: LsrInputs) -> Optional[dict]:
         "status": "APPROVED",
         "instrument": config.LSR_INSTRUMENT,
         "direction": side,
-        "reason": (f"LSR — {i.sweep_direction} réintégré · absorption · "
-                   f"flip {i.aggressor_ratio:.2f} · VPOC {vpoc}"),
+        "reason": (f"LSR — {i.sweep_direction} réintégré · "
+                   f"{'absorption' if source == 'source' else 'mur rechargé'} · "
+                   f"flip {flip:.2f} [{source}] · VPOC {vpoc}"),
         "executionPlan": {"entryType": "LIMIT", "entryPrice": entry, "stopLoss": _grid(stop),
                           "takeProfit": _grid(tp), "contracts": config.LSR_CONTRACTS},
     }

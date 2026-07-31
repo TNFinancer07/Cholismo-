@@ -261,3 +261,17 @@ ORDERFLOW_MIN_VOLUME = float(os.getenv("ORDERFLOW_MIN_VOLUME", "20"))
 # Durée MINIMALE de part et d'autre du sweep pour que B4 soit un débit : un taux mesuré sur
 # quelques millisecondes est du bruit multiplié par mille (/devil D-055, 2e passe). v1 provisional.
 ORDERFLOW_MIN_SPAN_S = float(os.getenv("ORDERFLOW_MIN_SPAN_S", "1.0"))
+
+# --- Câblage du calculateur order flow dans le moteur LSR (D-056) ---
+# "source"  : les portes B1/B2 lisent les PROXYS du fournisseur (absorption booléenne,
+#             aggressor_ratio pré-agrégé) — comportement historique, DÉFAUT.
+# "inhouse" : elles lisent les mesures calculées chez nous (D-055). Bascule explicite, jamais
+#             implicite : changer la source de vérité du chemin d'émission est une décision.
+LSR_ORDERFLOW_SOURCE = os.getenv("LSR_ORDERFLOW_SOURCE", "source")
+# Seuil B1 in-house : part du mur consommé qui doit être RECHARGÉE pour valider la défense.
+# v1 provisional (PLACEHOLDER §11) — remplace un booléen `absorption` par une mesure continue,
+# donc le seuil est neuf et non calibré : c'est précisément pourquoi le défaut reste "source".
+LSR_B1_REFILL_MIN = float(os.getenv("LSR_B1_REFILL_MIN", "0.5"))
+# Historique de carnet L2 gardé par l'Engine pour B1 (le schéma ne porte que le carnet COURANT ;
+# la heatmap, elle, accumule côté frontend). 120 snapshots ≈ 30 s à 4 Hz.
+BOOK_HISTORY_MAX = int(os.getenv("BOOK_HISTORY_MAX", "120"))

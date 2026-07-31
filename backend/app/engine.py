@@ -33,6 +33,7 @@ from .risk_sizer import AccountState, account_view, size_plan
 from .trade_manifest import manifest_from_lsr_plan
 from .heatmap import latest_column
 from .macro_risk import build_macro_calendar, compute_macro_risk
+from .orderflow.bridge import book_history_push, orderflow_shadow, snapshot_for_lsr
 from .rates import build_yield_curve
 from .sentiment import build_long_short
 from .macro_score import compute_s2_macro_score
@@ -238,6 +239,10 @@ class Engine:
         # sous un détecteur qui alterne BID/ASK en continu, la clé seule laisserait spammer).
         self._lsr_emitted_key: Optional[str] = None
         self._lsr_last_emit_ts: float = 0.0
+        # Historique de carnet L2 (D-056) : le schéma ne porte que le carnet COURANT, or le
+        # rechargement d'un mur est par nature une mesure DANS LE TEMPS. Tampon borné — sans
+        # plafond, six heures à 4 Hz garderaient 86 400 carnets en mémoire.
+        self._book_history: list[dict] = []
         # CVD par niveau (D-029) : accumulateur prix -> [buy, sell], seq déjà traité,
         # clé de l'événement du dernier reset, bornes de la fenêtre courante.
         self._cvd_levels: dict[float, list[float]] = {}
@@ -543,6 +548,7 @@ class Engine:
         # s1_state
         order_book = await self._meta("order_book", raws, now)
         _validate_order_book(order_book)
+        book_history_push(self._book_history, order_book, now)   # D-056 — FRESH seulement
         tape = await self._meta("tape", raws, now)
         _validate_tape(tape)
         # Heatmap LOB (D-036) : diffusion en DELTA — n'émet QUE la colonne courante (le frontend
@@ -850,6 +856,15 @@ class Engine:
         le manifeste est une proposition affichée, l'humain tranche."""
         sw = self.schema.liquidity_sweep
         alert = sw.alert if sw.triggered else None
+        # Mesures MAISON (D-055) calculées à chaque tick sweep, QUEL QUE SOIT LE MODE : c'est la
+        # preuve qu'on accumule avant d'oser basculer la source de vérité du chemin d'émission.
+        # Hors hot path (cadence sweep, ~3 ms mesurés) et sans effet sur la décision en mode
+        # "source" — le défaut reste le comportement historique.
+        snapshot = snapshot_for_lsr(
+            self.schema, self._book_history, now=now,
+            sweep_ts=alert.ts if alert else None,
+            sweep_direction=alert.direction if alert else None)
+        self._extras["orderflow_shadow"] = orderflow_shadow(self.schema, snapshot)
         if not sw.triggered:
             # Condition levée → le PROCHAIN sweep est un événement NEUF (même sémantique que
             # `_sweep_last_key`, D-028). Sans ce reset, un trigger|direction identique plus tard
@@ -876,7 +891,8 @@ class Engine:
                 news_state = self.news_provider.get_state(now).value
             except Exception:
                 news_state = "SAFETY_UNKNOWN"
-        plan = evaluate_lsr(build_lsr_inputs(self.schema, now, news_state=news_state))
+        plan = evaluate_lsr(build_lsr_inputs(self.schema, now, news_state=news_state,
+                                             orderflow=snapshot))
         if plan is None:
             return                                    # gates rouges / F0 → silence
         # COUCHE COMPTE (D-047) : on ne trade JAMAIS à l'aveugle. Pas de source, source

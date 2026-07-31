@@ -3028,6 +3028,63 @@ STRUCTURE des entrées : ordre, doublons, unité de grille, durée.
   identifiants du code portent le sens (`wall_refill_ratio`…), et snake_case côté Python là où le
   doc LSR écrit `wallRefillRatio` — la correspondance est dans la docstring du module.
 
+## D-056 · Câblage du calculateur order flow dans `evaluate_lsr`
+Le calculateur (D-055) entre dans le **chemin d'émission live** — le changement le plus risqué du
+dépôt. Quatre décisions gouvernent la tranche, toutes assumées :
+
+**1. Un interrupteur, dont le défaut est le comportement HISTORIQUE.**
+`LSR_ORDERFLOW_SOURCE` = `"source"` (proxys du fournisseur : `absorption` booléenne,
+`aggressor_ratio` pré-agrégé) ou `"inhouse"` (mesures maison). Défaut : **`"source"`**. La
+propriété testée en PREMIER n'est pas « les mesures maison marchent » (D-055 l'a prouvé) mais
+**« rien ne change tant qu'on ne l'a pas demandé »** : avec ou sans snapshot attaché, le mode
+défaut produit le même plan. Un câblage qui modifie le chemin d'émission sans qu'on l'ait demandé
+est un bug, pas une amélioration.
+
+**2. B3 et B4 ne deviennent PAS des portes.** Les transformer en critères de rejet ajouterait des
+refus sur des seuils **non calibrés**. Ils sont mesurés et exposés ; la décision de les faire
+gater est séparée et se prendra sur des observations, pas sur une idée.
+
+**3. B1 in-house exigeait un historique que le backend n'avait jamais gardé.** Le schéma ne porte
+que le carnet COURANT (la heatmap, elle, accumule côté frontend), or le rechargement d'un mur est
+par nature une mesure DANS LE TEMPS. Sans tampon, `wall_refill_ratio` n'aurait jamais été
+calculable et le câblage aurait été **fictif**. D'où `_book_history` dans l'Engine, borné
+(`BOOK_HISTORY_MAX` = 120 ≈ 30 s à 4 Hz — sans plafond, six heures garderaient 86 400 carnets).
+
+**4. Comparaison OMBRE dans les DEUX modes** (`extras.orderflow_shadow`) : les deux valeurs, les
+deux **verdicts de porte** (ce qui compte n'est pas l'écart mais s'il change une décision) et les
+motifs du calculateur. C'est la preuve qu'on accumule avant d'oser basculer (§10). Elle ne décide
+rien et **ne lève jamais** — un défaut d'observation ne doit pas casser la boucle qu'il observe.
+
+**Le pont** (`app/orderflow/bridge.py`) traite le piège qui inverserait tout : un `BID_SWEEP`
+signifie qu'une agression VENDEUSE a balayé le bid, donc le mur attaqué est un mur **ACHETEUR**,
+au plus-BAS de la fenêtre. Le chercher à l'ask mesurerait la défense du camp adverse — un
+contresens invisible dans un nombre qui aurait l'air correct. Sans sweep orienté, **aucun mur
+n'est désigné** : en choisir un au hasard mesurerait une défense que personne n'a attaquée.
+
+- **Bug trouvé par l'ESSAI, invisible en test unitaire.** `orderflow_source: str =
+  config.LSR_ORDERFLOW_SOURCE` fige le défaut **à l'import** du module (Pydantic évalue le défaut
+  à la définition de la classe). Toute bascule au runtime — variable d'environnement relue,
+  réglage event-sourcé, essai — restait donc sans effet, et le moteur jurait « [source] » en mode
+  maison. Mes tests unitaires passaient parce qu'ils fournissaient la source explicitement. La
+  source se résout désormais **à l'appel**, et deux tests le verrouillent.
+- **Le motif d'émission NOMME la source** (« absorption · flip 0,82 [source] » vs « mur rechargé ·
+  flip 0,74 [inhouse] »). Sans ça, deux manifestes identiques à l'écran auraient pu être décidés
+  par deux moteurs différents, sans moyen de le savoir après coup.
+- **Ce que l'essai a démontré** (sweep forcé — on teste le câblage, pas le détecteur) :
+  *scène A* mur rechargé à 0,875 et flux acheteur → les deux modes émettent, chacun avec son
+  motif ; *scène B* **mur JAMAIS rechargé (0,125) alors que le proxy `absorption` dit toujours
+  « défendu »** → le mode source émet, **le mode maison REFUSE**, et l'ombre l'annonçait
+  (`verdict_source=True, verdict_inhouse=False, agree=False`). C'est exactement la valeur du
+  calcul maison : il voit ce qu'un booléen fournisseur ne peut pas dire.
+- **Premier essai non concluant, dit comme tel** : sur 60 ticks de mock, aucun sweep ne s'est
+  déclenché — donc ni B1 ni l'émission n'étaient exercés, et les chiffres d'ombre ne prouvaient
+  rien. Refait avec un sweep forcé plutôt que présenté comme une réussite.
+- **Vérif** : 14 tests de câblage (dont la propriété de sûreté du mode défaut, fail-closed sur
+  mesure absente, source inconnue rejetée, B3/B4 non gatants) + 11 tests de pont (côté du mur,
+  fraîcheur, historique borné, ombre) → **716 passed**, ruff clean.
+- **Reste ouvert** : la bascule elle-même. Elle se fera quand l'ombre aura montré assez d'accords
+  — et le désaccord de la scène B est précisément le genre de cas à examiner avant, pas après.
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.
