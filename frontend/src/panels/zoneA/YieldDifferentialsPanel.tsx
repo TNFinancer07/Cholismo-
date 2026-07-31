@@ -10,6 +10,7 @@
 import { Unplug } from 'lucide-react'
 import { Panel } from '@/components/ui/panel'
 import { FlagIcons, useDataAge } from '@/components/MetaValue'
+import { useSlowChannelPending } from '@/lib/channel'
 import { fmtAge, fmtNum } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { useTerminal } from '@/store/terminal'
@@ -64,7 +65,8 @@ function SpreadRow({ spread }: { spread: YieldSpread }) {
       </span>
       <span className="font-mono text-sm font-black tabular-nums text-term-text">
         {positive ? '+' : '−'}{fmtNum(Math.abs(spread.value_bp), 1)}
-        <span className="ml-0.5 text-xxs font-normal text-term-dim">bp</span>
+        {/* espace insécable : l'unité colle au nombre sans jamais passer à la ligne (§5). */}
+        <span className="text-xxs font-normal text-term-dim">&nbsp;bp</span>
       </span>
     </div>
   )
@@ -74,6 +76,7 @@ export function YieldDifferentialsPanel() {
   const meta = useTerminal((s) => s.yield_curve)
   const age = useDataAge(meta)
   const value = meta && meta.freshness !== 'ABSENT' ? meta.value : null
+  const pending = useSlowChannelPending()
 
   if (!value || value.tenors.length === 0) {
     return (
@@ -81,8 +84,12 @@ export function YieldDifferentialsPanel() {
         <div className="flex h-full flex-col items-center justify-center gap-1 text-absent absent-pulse"
           data-testid="yld-offline">
           <Unplug size={14} aria-hidden />
-          <span className="text-xxs font-bold tracking-tight">PAS DE DONNÉES</span>
-          <span className="text-xxs text-term-faint">flux de taux absent</span>
+          <span className="text-xxs font-bold tracking-tight">
+            {pending ? 'EN ATTENTE DU CANAL LENT' : 'PAS DE DONNÉES'}
+          </span>
+          <span className="text-xxs text-term-faint">
+            {pending ? 'premier envoi sous 15 s' : 'flux de taux absent'}
+          </span>
         </div>
       </Panel>
     )

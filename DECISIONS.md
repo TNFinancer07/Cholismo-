@@ -2790,6 +2790,29 @@ demandé `LsrSentimentPanel.tsx`, mais le mnémonique opérateur est **SENT** : 
   ruff clean, **83 tests Vitest**, tsc + vite build verts. Deux hooks DEV (`__setLongShort`,
   `__setYields`) ajoutés pour forcer les positions extrêmes, invisibles en démo.
 
+### /polish (Loop 5) — dire « attends » plutôt que « débogue »
+- **« PAS DE DONNÉES » était exact mais trompeur à l'ouverture.** Le canal lent tourne à 15 s : un
+  panneau qui en dépend affiche son écran vide pendant un tick entier, avec le MÊME message qu'un
+  flux réellement mort. L'opérateur ne peut pas distinguer « attendre » de « déboguer ». Tant
+  qu'aucun événement lent n'est arrivé (`useSlowChannelPending`), les deux panneaux disent
+  **EN ATTENTE DU CANAL LENT · premier envoi sous 15 s** ; ensuite seulement, l'absence redevient
+  une absence. Aucune valeur inventée, aucun état dur masqué (§3) — seule la CAUSE affichée devient
+  juste. *Portée réelle mesurée* : le cache de rejeu SSE hydrate un nouvel abonné immédiatement,
+  donc la fenêtre est courte en pratique ; elle reste entière au démarrage à froid du backend,
+  exactement quand l'opérateur ouvre le terminal.
+- **Vocabulaire de l'absence unifié.** Le panneau SENT mélangeait trois notations : « PAS DE
+  DONNÉES » (bloc entier), « — » (sous-valeur) et « N/D » (ratio) — cette dernière unique dans tout
+  le dépôt. Ramené à deux formes, avec l'explication en infobulle (« plus personne n'est short »)
+  plutôt qu'un sigle de plus à apprendre.
+- **Typographie des unités** : `−23,5bp` → `−23,5 bp` (espace insécable : l'unité ne quitte jamais
+  son nombre en colonne étroite).
+- **Vérifié à l'écran, pas déduit** : libellés `LONG 100,0` / `97,6 SHORT` — **aucun débordement**
+  de boîte ; géométrie re-mesurée sur position extrême (100,0 % et 2,4 %) ; drapeau `LATE_FEED`
+  visible dans l'entête d'un bloc FRESH ; aucun panneau ne déborde horizontalement.
+- **Vérif /polish** : +2 tests RTL (attente distinguée de l'absence, sur les deux panneaux),
+  assertions d'absence rendues explicites (canal vivant vs canal muet) → **85 tests Vitest**,
+  632 backend, ruff clean, tsc + vite build verts.
+
 - **Défaut PRÉ-EXISTANT trouvé au passage, hors périmètre** : avec une projection REST tronquée
   (ce que renvoie un backend qui redémarre), `CalibrationPanel` et `DecisionBlotter` **lèvent**
   (`q.progress_pct` / `decisions.length` non gardés) au lieu de fail-closer. Reproduit en

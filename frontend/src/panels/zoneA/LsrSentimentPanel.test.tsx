@@ -25,7 +25,11 @@ const block = (o: Partial<LongShortValue> = {}, meta: Partial<MetaField<LongShor
   return render(<LsrSentimentPanel />)
 }
 
-beforeEach(() => useTerminal.getState().set({ long_short_ratio: null }))
+// `lastSlowEventAt` non nul par défaut = canal lent DÉJÀ vivant : sans ça, tous les tests
+// tomberaient dans la branche « en attente du premier tick » et ne prouveraient plus l'absence.
+beforeEach(() => useTerminal.getState().set({
+  long_short_ratio: null, lastSlowEventAt: Date.now() / 1000,
+}))
 
 describe('jauge', () => {
   it('montre les deux côtés en TEXTE, pas seulement en couleur (§3)', () => {
@@ -89,9 +93,10 @@ describe('pedigree de la donnée (/devil)', () => {
 })
 
 describe('honnêteté des valeurs', () => {
-  it('affiche N/D quand le ratio est indéterminable, jamais « ∞ »', () => {
+  it('marque un ratio indéterminable par un tiret, jamais « ∞ »', () => {
     block({ instruments: [inst({ long_pct: 100, short_pct: 0, ratio: null })] })
-    expect(screen.getByTestId('ls-ratio-EURUSD')).toHaveTextContent('N/D')
+    // Vocabulaire unifié (/polish) : « — » = sous-valeur absente, partout dans le panneau.
+    expect(screen.getByTestId('ls-ratio-EURUSD')).toHaveTextContent('—')
     expect(screen.queryByText('∞')).toBeNull()
     // …mais les pourcentages, eux, restent affichés : ce SONT des données réelles.
     expect(screen.getByTestId('ls-pct-long-EURUSD')).toHaveTextContent('100,0')
@@ -138,10 +143,19 @@ describe('déséquilibre', () => {
 })
 
 describe('fail-closed (§3)', () => {
-  it('affiche PAS DE DONNÉES quand le bloc est absent', () => {
-    useTerminal.getState().set({ long_short_ratio: null })
+  it('affiche PAS DE DONNÉES quand le bloc est absent ET le canal vivant', () => {
+    useTerminal.getState().set({ long_short_ratio: null, lastSlowEventAt: Date.now() / 1000 })
     render(<LsrSentimentPanel />)
     expect(screen.getByTestId('ls-offline')).toHaveTextContent('PAS DE DONNÉES')
+  })
+
+  it('distingue l\'ATTENTE du premier tick lent d\'une vraie absence (/polish)', () => {
+    // Sinon, à l'ouverture, « PAS DE DONNÉES » pendant 15 s est indiscernable d'un flux mort :
+    // l'opérateur ne sait pas s'il doit attendre ou déboguer.
+    useTerminal.getState().set({ long_short_ratio: null, lastSlowEventAt: 0 })
+    render(<LsrSentimentPanel />)
+    expect(screen.getByTestId('ls-offline')).toHaveTextContent('EN ATTENTE DU CANAL LENT')
+    expect(screen.getByTestId('ls-offline')).not.toHaveTextContent('PAS DE DONNÉES')
   })
 
   it('affiche PAS DE DONNÉES quand la fraîcheur est ABSENT, même si une valeur traîne', () => {

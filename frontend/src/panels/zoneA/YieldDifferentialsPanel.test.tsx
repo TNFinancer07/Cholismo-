@@ -25,7 +25,10 @@ const mount = (o: Partial<YieldCurveValue> = {}, meta: Partial<MetaField<YieldCu
   return render(<YieldDifferentialsPanel />)
 }
 
-beforeEach(() => useTerminal.getState().set({ yield_curve: null }))
+// Canal lent déjà vivant par défaut (cf. panneau SENT) : l'absence testée est une vraie absence.
+beforeEach(() => useTerminal.getState().set({
+  yield_curve: null, lastSlowEventAt: Date.now() / 1000,
+}))
 
 describe('lecture des taux', () => {
   it('affiche le taux avec son unité et son libellé', () => {
@@ -103,10 +106,16 @@ describe('fail-closed (§3)', () => {
     expect(screen.getByTestId('yld-tenor-US10Y')).toBeInTheDocument()   // les taux restent lisibles
   })
 
-  it('affiche PAS DE DONNÉES quand le bloc est absent', () => {
-    useTerminal.getState().set({ yield_curve: null })
+  it('affiche PAS DE DONNÉES quand le bloc est absent ET le canal vivant', () => {
+    useTerminal.getState().set({ yield_curve: null, lastSlowEventAt: Date.now() / 1000 })
     render(<YieldDifferentialsPanel />)
     expect(screen.getByTestId('yld-offline')).toHaveTextContent('PAS DE DONNÉES')
+  })
+
+  it('distingue l\'ATTENTE du premier tick lent d\'une vraie absence (/polish)', () => {
+    useTerminal.getState().set({ yield_curve: null, lastSlowEventAt: 0 })
+    render(<YieldDifferentialsPanel />)
+    expect(screen.getByTestId('yld-offline')).toHaveTextContent('EN ATTENTE DU CANAL LENT')
   })
 
   it('affiche PAS DE DONNÉES sur fraîcheur ABSENT, même si une valeur traîne', () => {

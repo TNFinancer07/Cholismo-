@@ -13,6 +13,7 @@
 import { AlertTriangle, Unplug } from 'lucide-react'
 import { Panel } from '@/components/ui/panel'
 import { FlagIcons, useDataAge } from '@/components/MetaValue'
+import { useSlowChannelPending } from '@/lib/channel'
 import { fmtAge, fmtNum } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { useTerminal } from '@/store/terminal'
@@ -56,8 +57,11 @@ function Row({ inst }: { inst: LongShortInstrument }) {
         <span className="flex items-baseline gap-2 text-xxs">
           <span className="text-term-dim">
             ratio{' '}
-            <span className="font-bold tabular-nums text-term-text" data-testid={`ls-ratio-${inst.symbol}`}>
-              {inst.ratio === null ? 'N/D' : fmtNum(inst.ratio, 2)}
+            <span className="font-bold tabular-nums text-term-text" data-testid={`ls-ratio-${inst.symbol}`}
+              title={inst.ratio === null
+                ? 'Ratio indéterminable : plus personne n’est short'
+                : 'Comptes longs / comptes shorts'}>
+              {inst.ratio === null ? '—' : fmtNum(inst.ratio, 2)}
             </span>
           </span>
           <Delta value={inst.delta_24h_pct} />
@@ -96,6 +100,9 @@ export function LsrSentimentPanel() {
   const meta = useTerminal((s) => s.long_short_ratio)
   const age = useDataAge(meta)
   const value = meta && meta.freshness !== 'ABSENT' ? meta.value : null
+  // Canal lent = 15 s : à l'ouverture, « PAS DE DONNÉES » serait exact mais indiscernable d'un
+  // flux mort. On dit ce qu'il en est — attendre n'est pas déboguer.
+  const pending = useSlowChannelPending()
 
   return (
     <Panel code="SENT" title="Positionnement Long/Short" block="long_short_ratio" accent="youssef"
@@ -113,8 +120,12 @@ export function LsrSentimentPanel() {
         <div className="flex h-full flex-col items-center justify-center gap-1 text-absent absent-pulse"
           data-testid="ls-offline">
           <Unplug size={14} aria-hidden />
-          <span className="text-xxs font-bold tracking-tight">PAS DE DONNÉES</span>
-          <span className="text-xxs text-term-faint">flux de positionnement absent</span>
+          <span className="text-xxs font-bold tracking-tight">
+            {pending ? 'EN ATTENTE DU CANAL LENT' : 'PAS DE DONNÉES'}
+          </span>
+          <span className="text-xxs text-term-faint">
+            {pending ? 'premier envoi sous 15 s' : 'flux de positionnement absent'}
+          </span>
         </div>
       ) : (
         <>
