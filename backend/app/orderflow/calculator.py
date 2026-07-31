@@ -189,13 +189,24 @@ def _crossed(book: Any) -> bool:
 
 
 def _b1_wall_refill(books: Sequence[Any], price: Optional[float], side: Optional[str],
-                    tick: float, missing: list[str]) -> Optional[float]:
+                    tick: float, max_gap: float, missing: list[str]) -> Optional[float]:
     if price is None or side not in ("BID", "ASK") or not _finite(price):
         missing.append(_motif("B1", "aucun niveau de mur désigné"))
         return None
     sane = [b for b in books if not _crossed(b)]
     if len(sane) < len(books):
         missing.append(_motif("B1", f"{len(books) - len(sane)} snapshot(s) de carnet CROISÉ écarté(s)"))
+    # TROU d'observation (/devil) : deux snapshots adjacents dans la liste peuvent être séparés
+    # de trente secondes de cécité (coupure de flux). La « déplétion » constatée de part et
+    # d'autre n'a alors jamais été observée — elle est INFÉRÉE. Un trou n'est pas une observation,
+    # même faute que « hors profondeur ≠ taille nulle ».
+    stamps = [b["ts"] for b in sane if isinstance(b, dict) and _finite(b.get("ts"))]
+    if len(stamps) >= 2:
+        gap = max(b - a for a, b in zip(sorted(stamps), sorted(stamps)[1:]))
+        if gap > max_gap:
+            missing.append(_motif("B1", f"trou d'observation de {gap:.3g}s dans le carnet "
+                                        f"(> {max_gap:g}s) — déplétion non observée"))
+            return None
     sizes = [s for s in (_level_size(b, price, side, tick) for b in sane) if s is not None]
     if len(sizes) < 2:
         missing.append(_motif("B1", "moins de deux observations du niveau (ou niveau hors profondeur)"))
@@ -349,6 +360,7 @@ def compute_snapshot(*, now: Any, prints: Any = (), books: Any = (), bars: Any =
                      min_side_coverage: float = None,                 # type: ignore[assignment]
                      min_volume: float = None,                        # type: ignore[assignment]
                      min_span: float = None,                          # type: ignore[assignment]
+                     max_book_gap_s: float = None,                    # type: ignore[assignment]
                      ) -> OrderFlowSnapshot:
     """Calcule un `OrderFlowSnapshot`. Ne lève JAMAIS : toute entrée inexploitable dégrade la
     grandeur concernée en `None` motivé, sans toucher aux autres (§3)."""
@@ -432,10 +444,12 @@ def compute_snapshot(*, now: Any, prints: Any = (), books: Any = (), bars: Any =
 
     min_volume = (min_volume if min_volume is not None else config.ORDERFLOW_MIN_VOLUME)
     min_span = (min_span if min_span is not None else config.ORDERFLOW_MIN_SPAN_S)
+    max_gap = (max_book_gap_s if max_book_gap_s is not None
+               else config.ORDERFLOW_MAX_BOOK_GAP_S)
     return OrderFlowSnapshot(
         now=now, window_s=window_s,
         wall_refill_ratio=_publishable(
-            _b1_wall_refill(books_in_window, wall_price, wall_side, tick, missing)
+            _b1_wall_refill(books_in_window, wall_price, wall_side, tick, max_gap, missing)
             if tick_ok else None, "B1", missing),
         tape_aggressor_buy_fraction=_publishable(
             _b2_aggressor_fraction(kept, coverage, min_volume, missing), "B2", missing),

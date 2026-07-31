@@ -90,8 +90,8 @@ def test_B2_volume_nul_ou_non_fini_rend_None():
 def test_B1_nominal_consomme_puis_recharge():
     """Mur à 100, mangé jusqu'à 20 (consommé 80), revenu à 80 (rechargé 60) → 0,75."""
     books = [_book(0, [[4999.75, 100]], [[5000.25, 50]]),
-             _book(5, [[4999.75, 20]], [[5000.25, 50]]),
-             _book(10, [[4999.75, 80]], [[5000.25, 50]])]
+             _book(0.5, [[4999.75, 20]], [[5000.25, 50]]),
+             _book(1.0, [[4999.75, 80]], [[5000.25, 50]])]
     s = _snap(books=books, wall_price=4999.75, wall_side="BID")
     assert s.wall_refill_ratio == pytest.approx(0.75)
 
@@ -99,7 +99,7 @@ def test_B1_nominal_consomme_puis_recharge():
 def test_B1_mur_JAMAIS_entame_rend_None_pas_1():
     """Sans déplétion, le rapport rechargé/consommé est une division par zéro. Rendre 1,0
     (« le mur a tenu ») serait inventer une défense qui n'a jamais été testée."""
-    books = [_book(0, [[4999.75, 100]], []), _book(5, [[4999.75, 100]], [])]
+    books = [_book(0, [[4999.75, 100]], []), _book(0.5, [[4999.75, 100]], [])]
     s = _snap(books=books, wall_price=4999.75, wall_side="BID")
     assert s.wall_refill_ratio is None
     assert any("B1" in m for m in s.missing)
@@ -109,7 +109,7 @@ def test_B1_mur_RETIRE_est_un_rechargement_NUL():
     """Le niveau disparaît du carnet alors qu'il est DANS la profondeur publiée : taille 0, fait
     réel (le mur a été retiré) — à distinguer du niveau hors profondeur, testé plus bas."""
     books = [_book(0, [[4999.75, 100], [4999.50, 40]], []),
-             _book(5, [[4999.50, 40]], [])]                 # 4999.75 dans la plage, absent → 0
+             _book(0.5, [[4999.50, 40]], [])]                 # 4999.75 dans la plage, absent → 0
     s = _snap(books=books, wall_price=4999.75, wall_side="BID")
     assert s.wall_refill_ratio == 0.0
 
@@ -118,7 +118,7 @@ def test_B1_niveau_HORS_PROFONDEUR_publiee_rend_None():
     """Un carnet tronqué à 3 niveaux ne dit RIEN du 8e : absence ≠ taille nulle. C'est le piège
     exact d'un feed L2 partiel — le confondre inventerait un mur disparu."""
     books = [_book(0, [[4999.75, 100], [4999.50, 40]], []),
-             _book(5, [[4999.75, 100], [4999.50, 40]], [])]
+             _book(0.5, [[4999.75, 100], [4999.50, 40]], [])]
     s = _snap(books=books, wall_price=4990.00, wall_side="BID")   # bien sous la profondeur
     assert s.wall_refill_ratio is None
 
@@ -132,21 +132,21 @@ def test_B1_un_seul_snapshot_ou_aucun_rend_None():
 def test_B1_sans_niveau_de_reference_rend_None():
     """Pas de mur désigné (pas de sweep, pas de prix fourni) → rien à mesurer, et surtout pas un
     niveau choisi au hasard."""
-    books = [_book(0, [[4999.75, 100]], []), _book(5, [[4999.75, 20]], [])]
+    books = [_book(0, [[4999.75, 100]], []), _book(0.5, [[4999.75, 20]], [])]
     assert _snap(books=books).wall_refill_ratio is None
 
 
 def test_B1_rechargement_SUPERIEUR_au_consomme_reste_honnete():
     """Mur mangé de 100 à 20 puis reconstruit à 160 : le ratio dépasse 1 — c'est une défense
     agressive, pas une anomalie. On ne l'écrête pas."""
-    books = [_book(0, [[4999.75, 100]], []), _book(5, [[4999.75, 20]], []),
-             _book(10, [[4999.75, 160]], [])]
+    books = [_book(0, [[4999.75, 100]], []), _book(0.5, [[4999.75, 20]], []),
+             _book(1.0, [[4999.75, 160]], [])]
     assert _snap(books=books, wall_price=4999.75, wall_side="BID").wall_refill_ratio == pytest.approx(1.75)
 
 
 def test_B1_carnet_malforme_ignore_sans_casser():
-    books = [_book(0, [[4999.75, 100]], []), {"ts": T0 + 5, "bids": "cassé", "asks": []},
-             _book(10, [[4999.75, 40]], [])]
+    books = [_book(0, [[4999.75, 100]], []), {"ts": T0 + 0.5, "bids": "cassé", "asks": []},
+             _book(1.0, [[4999.75, 40]], [])]
     s = _snap(books=books, wall_price=4999.75, wall_side="BID")
     assert s.wall_refill_ratio is not None                  # les snapshots sains suffisent
 
@@ -391,7 +391,7 @@ def test_devil_carnet_CROISE_invalide_la_mesure_du_mur():
     CROSSED_BOOK). Mesurer un rechargement de mur dessus produirait un nombre plausible à partir
     d'une donnée fausse — la pire des sorties."""
     croise = [{"ts": T0 + t, "bids": [[5000.25, size]], "asks": [[5000.00, 40]]}
-              for t, size in ((0, 100), (5, 20), (10, 80))]
+              for t, size in ((0, 100), (0.5, 20), (1.0, 80))]
     s = _snap(books=croise, wall_price=5000.25, wall_side="BID")
     assert s.wall_refill_ratio is None
     assert any("B1" in m and "crois" in m.lower() for m in s.missing)
@@ -399,7 +399,7 @@ def test_devil_carnet_CROISE_invalide_la_mesure_du_mur():
 
 def test_devil_un_seul_snapshot_SAIN_parmi_des_croises_ne_suffit_pas():
     books = [{"ts": T0, "bids": [[4999.75, 100]], "asks": [[5000.25, 40]]},          # sain
-             {"ts": T0 + 5, "bids": [[5000.50, 20]], "asks": [[5000.00, 40]]}]       # croisé
+             {"ts": T0 + 0.5, "bids": [[5000.50, 20]], "asks": [[5000.00, 40]]}]     # croisé
     assert _snap(books=books, wall_price=4999.75,
                  wall_side="BID").wall_refill_ratio is None
 
@@ -445,8 +445,8 @@ def test_devil_volume_qui_DEBORDE_ne_produit_AUCUNE_mesure():
 
 def test_devil_carnet_a_tailles_geantes_ne_publie_pas_inf():
     books = [_book(0, [[4999.75, 1e308]], [[5000.25, 1]]),
-             _book(5, [[4999.75, 1.0]], [[5000.25, 1]]),
-             _book(10, [[4999.75, 1e308]], [[5000.25, 1]])]
+             _book(0.5, [[4999.75, 1.0]], [[5000.25, 1]]),
+             _book(1.0, [[4999.75, 1e308]], [[5000.25, 1]])]
     r = _snap(books=books, wall_price=4999.75, wall_side="BID").wall_refill_ratio
     assert r is None or math.isfinite(r)
 
@@ -493,8 +493,8 @@ def test_devil2_carnets_DESORDONNES_sont_remis_en_ordre():
     """Les prints étaient triés, pas les carnets : `sizes[0]` et `sizes[-1]` étaient donc la
     PREMIÈRE et la DERNIÈRE reçues, pas la plus ancienne et la plus récente. Deux tampons
     concaténés (ou un feed qui double-livre) suffisaient à mesurer entre les mauvaises bornes."""
-    ordonne = [_book(0, [[4999.75, 100]], []), _book(5, [[4999.75, 20]], []),
-               _book(10, [[4999.75, 80]], [])]
+    ordonne = [_book(0, [[4999.75, 100]], []), _book(0.5, [[4999.75, 20]], []),
+               _book(1.0, [[4999.75, 80]], [])]
     melange = [ordonne[2], ordonne[0], ordonne[1]]
     a = _snap(books=ordonne, wall_price=4999.75, wall_side="BID").wall_refill_ratio
     b = _snap(books=melange, wall_price=4999.75, wall_side="BID").wall_refill_ratio

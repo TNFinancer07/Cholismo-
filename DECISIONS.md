@@ -3082,6 +3082,48 @@ n'est désigné** : en choisir un au hasard mesurerait une défense que personne
 - **Vérif** : 14 tests de câblage (dont la propriété de sûreté du mode défaut, fail-closed sur
   mesure absente, source inconnue rejetée, B3/B4 non gatants) + 11 tests de pont (côté du mur,
   fraîcheur, historique borné, ombre) → **716 passed**, ruff clean.
+### /devil (Loop 4) — conditions de marché dégradées
+Deux axes demandés : sweeps chaotiques et coupure de flux. Le premier a révélé un défaut
+**structurel** que la livraison initiale aurait laissé passer en silence.
+
+- **`alert.ts` GLISSE — B4 était structurellement incalculable en production.** Le détecteur
+  ré-horodate l'alerte à CHAQUE évaluation d'une condition persistante (`ts=state["now"]`,
+  D-046 : c'est l'identité `trigger|direction` qui fait l'événement, pas le `ts`). Passé tel quel
+  au calculateur, `span_after = now − sweep_ts ≈ 0` en permanence → B4 sous le plancher de durée
+  **à tous les ticks**, et la fenêtre B1 bornée à un instant qui recule sans cesse. Une porte qui
+  répond toujours « non mesurable » ressemble à un marché calme. **L'essai de la livraison le
+  montrait déjà** (« B4 non mesuré 52/52 ») et je l'avais attribué à l'absence de sweep : le
+  chiffre était là, le diagnostic non. L'Engine garde désormais le PREMIER passage de l'événement
+  (`_sweep_event_ts`), et un changement de direction le réinitialise. Mesuré après correctif :
+  B4 = **14,0** à t+2 s d'un sweep persistant, là où il valait `None` pour toujours.
+- **La fenêtre de mesure démarre AU SWEEP.** Sans borne basse, `consommé` se calculait depuis un
+  carnet vieux de 30 s — donc AVANT l'événement : la mesure décrivait une déplétion sans rapport,
+  et un changement de direction la laissait tourner sur le mur PRÉCÉDENT. Corollaire assumé et
+  testé : juste après un flip, B1 n'est **pas encore calculable** — on n'a pas vu le nouveau mur
+  se faire attaquer, et le dire vaut mieux que le deviner.
+- **Un trou d'observation n'est pas une observation.** Coupure de flux : deux snapshots adjacents
+  dans le tampon peuvent être séparés de trente secondes de cécité, et le « rechargement »
+  constaté de part et d'autre n'a jamais été vu — il est INFÉRÉ. Même faute que « hors profondeur
+  ≠ taille nulle » (D-055). Garde `ORDERFLOW_MAX_BOOK_GAP_S` (2 s = 8 échantillons à 4 Hz).
+  Essai : cécité de 9 s après le sweep → `B1 : trou d'observation de 9s dans le carnet (> 2s) —
+  déplétion non observée`, et le tampon ne bouge pas pendant la coupure (rien de non-FRESH n'entre).
+- **Interaction découverte en route** : la borne au sweep retire souvent le trou de la fenêtre —
+  le seul cas où la cécité compte vraiment est celle qui survient **après** le début de
+  l'événement. C'est aussi le cas réel (sweep, puis le feed meurt pendant le rechargement). Ma
+  première scène d'essai ne testait donc pas ce que je croyais ; refaite.
+- **Données de test rendues réalistes** : sept tests de D-055 espaçaient leurs carnets de 5 à
+  10 s, ce qui EST une coupure pour un feed à 4 Hz — le nouveau garde les refusait à juste titre.
+  Espacement ramené à 0,25–0,5 s ; les ratios testés n'en dépendaient pas. Deux tests de pont
+  plaçaient leur déplétion AVANT le sweep : replacée après, sinon ils testaient une fenêtre que
+  le correctif exclut désormais par construction.
+- **Vérif /devil** : +9 tests dégradés (fenêtre bornée au sweep, flip de direction, côté du mur
+  suivant la direction, trou d'observation ×2, cadence normale non pénalisée, tampon pendant la
+  coupure, carnet du futur, horodatage d'événement stable en intégration) → **725 passed**, ruff
+  clean. Essai sur l'Engine réel : les trois scènes se comportent comme décrit, motifs à l'appui.
+- **Limite honnête de l'essai** : au-delà de t+2 s, B4 retombe à `None` avec le motif « aucun
+  volume avant le sweep » — c'est mon tape SYNTHÉTIQUE qui glisse avec `now`, pas un défaut : un
+  vrai tape est une fenêtre glissante qui contient encore les prints d'avant l'événement.
+
 - **Reste ouvert** : la bascule elle-même. Elle se fera quand l'ombre aura montré assez d'accords
   — et le désaccord de la scène B est précisément le genre de cas à examiner avant, pas après.
 

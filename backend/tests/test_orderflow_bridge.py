@@ -49,17 +49,19 @@ def _book(size=300):
 def test_BID_SWEEP_cherche_le_mur_du_cote_BID_a_l_extreme_BAS():
     """Un bid balayé : le mur attaqué est un mur ACHETEUR, au plus-bas de la fenêtre. Le chercher
     à l'ask mesurerait la défense de l'autre camp — un contresens complet."""
-    hist = [{"ts": T0 - 3, **_book(400)}, {"ts": T0 - 1, **_book(120)}, {"ts": T0, **_book(350)}]
+    # La déplétion doit être POSTÉRIEURE au sweep : depuis D-056 /devil, la fenêtre de mesure
+    # démarre à l'événement (un carnet d'avant décrirait la déplétion précédente).
+    hist = [{"ts": T0 - 4, **_book(400)}, {"ts": T0 - 3, **_book(120)}, {"ts": T0 - 2, **_book(350)}]
     s = snapshot_for_lsr(_Schema(tape=_prints(), book=_book()), hist, now=T0,
-                         sweep_ts=T0 - 2, sweep_direction="BID_SWEEP")
+                         sweep_ts=T0 - 5, sweep_direction="BID_SWEEP")
     assert s.wall_refill_ratio is not None            # mesuré côté bid
     assert not any("mur" in m for m in s.missing)
 
 
 def test_ASK_SWEEP_cherche_le_mur_du_cote_ASK():
-    hist = [{"ts": T0 - 3, **_book(400)}, {"ts": T0 - 1, **_book(120)}, {"ts": T0, **_book(350)}]
+    hist = [{"ts": T0 - 4, **_book(400)}, {"ts": T0 - 3, **_book(120)}, {"ts": T0 - 2, **_book(350)}]
     s = snapshot_for_lsr(_Schema(tape=_prints(), book=_book()), hist, now=T0,
-                         sweep_ts=T0 - 2, sweep_direction="ASK_SWEEP")
+                         sweep_ts=T0 - 5, sweep_direction="ASK_SWEEP")
     assert s.wall_refill_ratio is not None
 
 

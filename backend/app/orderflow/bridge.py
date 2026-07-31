@@ -87,7 +87,15 @@ def snapshot_for_lsr(schema: Any, book_history: list, *, now: float,
     prints = tape if isinstance(tape, list) else []
     wall_price, wall_side = _wall(prints, sweep_direction)
     sweep = {"ts": sweep_ts} if _finite(sweep_ts) else None
-    return compute_snapshot(now=now, prints=prints, books=book_history, bars=bars,
+    # La fenêtre de carnets DÉMARRE AU SWEEP (/devil). Sans cette borne, `consommé` se calcule
+    # depuis un carnet vieux de 30 s — donc AVANT l'événement : la mesure décrit une déplétion
+    # sans rapport avec ce sweep-ci, et un changement de direction la laisse tourner sur le mur
+    # PRÉCÉDENT. Corollaire assumé : juste après un flip, B1 n'est pas encore calculable — on n'a
+    # pas encore vu le nouveau mur se faire attaquer, et le dire vaut mieux que le deviner.
+    books = ([b for b in book_history
+              if isinstance(b, dict) and _finite(b.get("ts")) and b["ts"] >= sweep_ts]
+             if _finite(sweep_ts) else book_history)
+    return compute_snapshot(now=now, prints=prints, books=books, bars=bars,
                             sweep=sweep, tick=config.PRICE_TICK,
                             wall_price=wall_price, wall_side=wall_side)
 

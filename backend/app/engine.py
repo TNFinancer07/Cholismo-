@@ -243,6 +243,13 @@ class Engine:
         # rechargement d'un mur est par nature une mesure DANS LE TEMPS. Tampon borné — sans
         # plafond, six heures à 4 Hz garderaient 86 400 carnets en mémoire.
         self._book_history: list[dict] = []
+        # Horodatage STABLE de l'événement sweep courant (D-056 /devil). `alert.ts` est régénéré
+        # à CHAQUE évaluation d'une condition persistante (D-046) : le passer au calculateur
+        # rendait `span_after ≈ 0` en permanence, donc **B4 structurellement incalculable**, et
+        # bornait la fenêtre B1 à un instant qui glisse. On garde le PREMIER passage de
+        # l'événement (identité `trigger|direction`, la même qu'au dédoublonnage).
+        self._sweep_event_key: Optional[str] = None
+        self._sweep_event_ts: Optional[float] = None
         # CVD par niveau (D-029) : accumulateur prix -> [buy, sell], seq déjà traité,
         # clé de l'événement du dernier reset, bornes de la fenêtre courante.
         self._cvd_levels: dict[float, list[float]] = {}
@@ -860,9 +867,17 @@ class Engine:
         # preuve qu'on accumule avant d'oser basculer la source de vérité du chemin d'émission.
         # Hors hot path (cadence sweep, ~3 ms mesurés) et sans effet sur la décision en mode
         # "source" — le défaut reste le comportement historique.
+        if alert is not None and alert.direction is not None:
+            event_key = f"{alert.trigger}|{alert.direction}"
+            if event_key != self._sweep_event_key:
+                # Événement NEUF (y compris un simple changement de direction) : la mesure
+                # redémarre ici. Continuer sur l'ancienne fenêtre décrirait le mur précédent.
+                self._sweep_event_key, self._sweep_event_ts = event_key, now
+        else:
+            self._sweep_event_key, self._sweep_event_ts = None, None
         snapshot = snapshot_for_lsr(
             self.schema, self._book_history, now=now,
-            sweep_ts=alert.ts if alert else None,
+            sweep_ts=self._sweep_event_ts,
             sweep_direction=alert.direction if alert else None)
         self._extras["orderflow_shadow"] = orderflow_shadow(self.schema, snapshot)
         if not sw.triggered:

@@ -275,3 +275,7 @@ LSR_B1_REFILL_MIN = float(os.getenv("LSR_B1_REFILL_MIN", "0.5"))
 # Historique de carnet L2 gardé par l'Engine pour B1 (le schéma ne porte que le carnet COURANT ;
 # la heatmap, elle, accumule côté frontend). 120 snapshots ≈ 30 s à 4 Hz.
 BOOK_HISTORY_MAX = int(os.getenv("BOOK_HISTORY_MAX", "120"))
+# Écart MAXIMAL toléré entre deux observations de carnet pour mesurer un rechargement de mur.
+# Au-delà, la déplétion n'a pas été observée : elle est INFÉRÉE à travers un trou de cécité
+# (coupure de flux). Un trou n'est pas une observation (/devil D-056). 8 échantillons à 4 Hz.
+ORDERFLOW_MAX_BOOK_GAP_S = float(os.getenv("ORDERFLOW_MAX_BOOK_GAP_S", "2.0"))
