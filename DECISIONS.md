@@ -2869,6 +2869,80 @@ entrée de `sources` sans `fields`. Les trois sont corrigées et couvertes.
   jusqu'ici parce que les panneaux lisent via `MetaValue`/optional chaining, mais le même durcissement
   leur reste applicable si un jour un panneau indexe en profondeur.
 
+## D-055 · Order Flow in-house — Niveau 2 CALCUL
+`backend/app/orderflow/calculator.py` : un flux BRUT (carnet L2/MBO + Time & Sales) → un
+`OrderFlowSnapshot` portant les quatre portes B1-B4, le profil de volume et l'ATR 5/14.
+
+**Le module MESURE, il ne décide pas.** Aucun seuil, aucun verdict, aucun ordre (§2.1) : la
+comparaison reste au moteur (`evaluate_lsr`). Séparer la mesure de la décision permet de
+recalibrer un seuil sans toucher à un calcul, et de tester un calcul sans simuler une décision.
+
+**Ce qu'il remplace.** Les portes étaient jusqu'ici des PROXYS fournis par la source
+(`absorption` booléen, `aggressor_ratio` déjà agrégé) — `lsr_engine` les nomme d'ailleurs
+« B1-like »/« B2-like » pour cette raison. Elles sont désormais calculées CHEZ NOUS depuis les
+ticks : vérifiables, indépendantes du fournisseur. **Le câblage du moteur sur ces valeurs est une
+tranche SÉPARÉE** : brancher une mesure neuve sur le chemin d'émission live sans l'avoir observée
+serait imprudent (et « une feature par commit »).
+
+**Deux réutilisations plutôt que deux implémentations.** Le profil de volume est **délégué** à
+`app/volume_profile.py` (D-041) — deux VPOC dans le même terminal finiraient par se contredire ;
+l'essai vérifie l'identité stricte avec un appel direct au moteur D-041. Le tick, la VA 70 % et le
+ratio LVN viennent de la config existante, pas d'un second jeu de constantes.
+
+**Formules — `v1 provisional` assumé (§11).** Le doc LSR NOMME les portes, il n'en donne pas les
+formules, et aucun `/reference/` ne fait AUTORITÉ ici. Chacune est donc une première passe,
+isolée et documentée pour être discutée :
+- **B1 `wall_refill_ratio`** = rechargé / consommé sur un niveau DÉSIGNÉ. Jamais écrêté à 1 : un
+  mur reconstruit plus gros qu'il n'a été mangé est une défense agressive, pas une anomalie.
+- **B2 `tape_aggressor_buy_fraction`** = volume acheteur / volume total, **pondéré par le volume**
+  et non par le nombre de prints (un print de 100 lots ne pèse pas comme un de 1 lot — compter les
+  prints donnerait 0,10 là où le flux est acheteur à 92 %).
+- **B3 `rejection_delta_ratio`** = delta net des prints POSTÉRIEURS à l'extrême, normalisé par le
+  volume total, borné [−1, 1]. L'extrême retenu est celui d'où le prix s'est le plus éloigné —
+  sinon le signe serait arbitraire dès qu'il y a un haut ET un bas.
+- **B4 `post_sweep_aggression_ratio`** = débit après le sweep / débit avant (volume par seconde de
+  part et d'autre). C'est une VITESSE : 100 lots en 1 s ne se lit pas comme 100 lots en 30 s. Les
+  débits se mesurent sur les deux moitiés de la FENÊTRE, pas sur l'écart entre prints — qu'un seul
+  print ancien suffirait à fausser.
+- **ATR** = moyenne des `n` derniers True Range (`max(H−L, |H−C_prev|, |L−C_prev|)`, donc les gaps
+  comptent). Moyenne simple et non lissage de Wilder : le lissage exige de rejouer tout
+  l'historique pour être reproductible ; sur fenêtre bornée, la moyenne simple est déterministe et
+  vérifiable à la main.
+
+**Fail-closed porte par porte (§3)** : chaque grandeur vaut `None` **avec son motif** dans
+`missing`. Aucune valeur par défaut — ni 0, ni 1, ni 0,5. Quatre `None` muets ne diraient pas
+POURQUOI ; c'est le motif qui rend l'absence exploitable.
+
+- **Le piège central : « hors profondeur publiée » ≠ « taille nulle ».** Un carnet tronqué à 3
+  niveaux ne dit RIEN du 8e. Ma première règle (« dans la plage publiée → 0 ») ratait justement le
+  cas qui compte : le mur EST souvent le meilleur bid, sa disparition rétrécit la plage, donc le
+  niveau retombait « hors plage » et le retrait du mur devenait invisible. La règle correcte est
+  **côté-dépendante** : au-dessus du meilleur bid = vide RÉEL, sous le dernier niveau publié =
+  INCONNU. Trouvé par le test, corrigé, testé dans les deux sens.
+- **Aucune déplétion → B1 non calculable**, jamais 1,0 : affirmer « le mur a tenu » quand il n'a
+  jamais été mis à l'épreuve serait inventer une défense.
+- **Barre corrompue → ATR non calculé** : sauter une barre au milieu recollerait deux barres non
+  adjacentes et fabriquerait un True Range qui n'a jamais existé.
+- **B3 exige la même couverture de côté que B2** — trouvé par la matrice de dégradation de
+  l'essai, pas par un test écrit d'avance : sur un tape sans côté agresseur, le delta vaut
+  mécaniquement 0, et ce 0 se lisait comme « rejet neutre OBSERVÉ » alors que rien n'était observé.
+- **Mes erreurs de test, corrigées** : quatre attentes fausses (prints datés hors de la fenêtre
+  d'analyse, arithmétique B4 supposant une autre définition de la fenêtre, sémantique B3 — le
+  calcul avait raison, mon `None` attendu avait tort). Notées ici parce qu'un test faux qui passe
+  est pire qu'un test absent.
+- **Vérif** : 41 tests unitaires (portes ×4 avec chaque chemin fail-closed, profil, ATR, bornes,
+  pureté, immuabilité) — **673 passed**, ruff clean. **Essai de validation INDÉPENDANTE** (le
+  module n'est pas testé avec ses propres formules) : B2 recalculé naïvement sur 400 tirages →
+  écart max **0,00e+00** ; B3 borné et de signe conforme sur 388 échantillons ; B4 exact ; profil
+  **identique** au moteur D-041 appelé directement ; ATR 5/14 exacts vs TR calculés à la main ;
+  scénario de sweep réaliste (mur 200 → 30 → 170, réintégration acheteuse) → B1 0,82 · B2 0,706 ·
+  B3 +0,706 · B4 10,69× · VPOC 4999,0, et matrice de dégradation prouvant que chaque porte tombe
+  SEULE avec son motif.
+- **Collision de vocabulaire signalée** : B1-B4 désignent AUSSI des panneaux de l'UI (B1 États
+  S1·S2, B2 Bridge, B3 Sync, B4 Signal unifié). Les lettres restent de la documentation ; les
+  identifiants du code portent le sens (`wall_refill_ratio`…), et snake_case côté Python là où le
+  doc LSR écrit `wallRefillRatio` — la correspondance est dans la docstring du module.
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.

@@ -240,3 +240,17 @@ SENTIMENT_EXTREME_PCT = float(os.getenv("SENTIMENT_EXTREME_PCT", "75"))
 # Un flux obèse est un flux empoisonné (doctrine D-050) : au-delà, le lot ENTIER est refusé —
 # tronquer masquerait des instruments sans le dire.
 SENTIMENT_MAX_ROWS = int(os.getenv("SENTIMENT_MAX_ROWS", "24"))
+
+# --- Order Flow in-house — Niveau 2 CALCUL (D-055) ---
+# Fenêtre d'analyse des portes B1-B4. v1 provisional (PLACEHOLDER §11 : le doc LSR nomme les
+# portes, il n'en donne PAS les formules — celles-ci sont documentées dans le module et isolées).
+ORDERFLOW_WINDOW_S = float(os.getenv("ORDERFLOW_WINDOW_S", "30"))
+# Part MINIMALE du volume dont le côté agresseur est connu : sous ce seuil, B2 n'est pas calculé.
+# Un tape dont on ignore le côté de la moitié du volume ne produit pas un ratio, il produit un
+# mensonge (§3).
+ORDERFLOW_MIN_SIDE_COVERAGE = float(os.getenv("ORDERFLOW_MIN_SIDE_COVERAGE", "0.8"))
+ORDERFLOW_ATR_FAST = int(os.getenv("ORDERFLOW_ATR_FAST", "5"))
+ORDERFLOW_ATR_SLOW = int(os.getenv("ORDERFLOW_ATR_SLOW", "14"))
+# Bornes d'entrée (doctrine D-050 : un flux obèse est un flux empoisonné).
+ORDERFLOW_MAX_PRINTS = int(os.getenv("ORDERFLOW_MAX_PRINTS", "20000"))
+ORDERFLOW_MAX_BOOKS = int(os.getenv("ORDERFLOW_MAX_BOOKS", "2000"))
