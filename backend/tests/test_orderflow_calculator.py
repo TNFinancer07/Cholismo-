@@ -48,8 +48,8 @@ def test_B2_pondere_par_le_VOLUME_pas_par_le_NOMBRE_de_prints():
 def test_B2_nominal_et_bornes():
     assert _snap(prints=[_print(1, 5000.0, 70, "BUY"),
                          _print(2, 5000.0, 30, "SELL")]).tape_aggressor_buy_fraction == 0.7
-    assert _snap(prints=[_print(1, 5000.0, 10, "BUY")]).tape_aggressor_buy_fraction == 1.0
-    assert _snap(prints=[_print(1, 5000.0, 10, "SELL")]).tape_aggressor_buy_fraction == 0.0
+    assert _snap(prints=[_print(1, 5000.0, 50, "BUY")]).tape_aggressor_buy_fraction == 1.0
+    assert _snap(prints=[_print(1, 5000.0, 50, "SELL")]).tape_aggressor_buy_fraction == 0.0
 
 
 def test_B2_couverture_de_cote_INSUFFISANTE_rend_None():
@@ -66,14 +66,14 @@ def test_B2_prints_HORS_FENETRE_exclus():
     # AVANT T0 est dehors — c'est le sens du test, et la raison pour laquelle le print gardé est
     # daté +29 (ma première version datait les deux hors fenêtre et ne prouvait rien).
     old = _print(-10, 5000.0, 1000, "SELL")                  # avant le début de la fenêtre
-    s = _snap(prints=[old, _print(29, 5000.0, 10, "BUY")])
+    s = _snap(prints=[old, _print(29, 5000.0, 50, "BUY")])
     assert s.tape_aggressor_buy_fraction == 1.0          # le vieux volume ne pollue pas
     assert s.prints_used == 1
 
 
 def test_B2_print_du_FUTUR_ecarte():
     """Désync d'horloge source (leçon D-048/D-050) : un print postérieur à `now` est un fantôme."""
-    s = _snap(prints=[_print(+60, 5000.0, 999, "SELL"), _print(29, 5000.0, 10, "BUY")])
+    s = _snap(prints=[_print(+60, 5000.0, 999, "SELL"), _print(29, 5000.0, 50, "BUY")])
     assert s.tape_aggressor_buy_fraction == 1.0 and s.prints_dropped == 1
 
 
@@ -378,3 +378,93 @@ def test_snapshot_est_IMMUABLE():
     s = _snap()
     with pytest.raises(Exception):
         s.wall_refill_ratio = 1.0            # type: ignore[misc]
+
+
+# =============================================================================================
+# /devil (Loop 4) — cinq façons de faire mentir le calculateur
+# =============================================================================================
+
+def test_devil_carnet_CROISE_invalide_la_mesure_du_mur():
+    """Bid ≥ ask : le carnet est corrompu (pathologie réelle, déjà détectée ailleurs sous
+    CROSSED_BOOK). Mesurer un rechargement de mur dessus produirait un nombre plausible à partir
+    d'une donnée fausse — la pire des sorties."""
+    croise = [{"ts": T0 + t, "bids": [[5000.25, size]], "asks": [[5000.00, 40]]}
+              for t, size in ((0, 100), (5, 20), (10, 80))]
+    s = _snap(books=croise, wall_price=5000.25, wall_side="BID")
+    assert s.wall_refill_ratio is None
+    assert any("B1" in m and "crois" in m.lower() for m in s.missing)
+
+
+def test_devil_un_seul_snapshot_SAIN_parmi_des_croises_ne_suffit_pas():
+    books = [{"ts": T0, "bids": [[4999.75, 100]], "asks": [[5000.25, 40]]},          # sain
+             {"ts": T0 + 5, "bids": [[5000.50, 20]], "asks": [[5000.00, 40]]}]       # croisé
+    assert _snap(books=books, wall_price=4999.75,
+                 wall_side="BID").wall_refill_ratio is None
+
+
+def test_devil_volume_DERISOIRE_n_est_pas_une_mesure():
+    """« 100 % acheteur » sur un seul lot n'est pas un flux acheteur : c'est du bruit présenté
+    comme une mesure. Sous le volume minimal, B2 et B3 ne sont pas calculés."""
+    s = _snap(prints=[_print(1, 5000.0, 1, "BUY")])
+    assert s.tape_aggressor_buy_fraction is None
+    assert s.rejection_delta_ratio is None
+    assert any("volume" in m for m in s.missing)
+
+
+def test_devil_volume_juste_au_dessus_du_plancher_est_mesure():
+    n = config.ORDERFLOW_MIN_VOLUME
+    s = _snap(prints=[_print(1, 4999.0, n, "SELL"), _print(2, 5000.0, n, "BUY")])
+    assert s.tape_aggressor_buy_fraction == 0.5
+
+
+def test_devil_valeurs_GEANTES_ne_produisent_jamais_NaN_ni_inf():
+    """Des tailles à 1e308 débordent en `inf`, et inf/inf = NaN : une porte publierait alors
+    « nan » comme s'il s'agissait d'un ratio. Toute grandeur non finie est retirée."""
+    huge = [_print(1, 5000.0, 1e308, "BUY"), _print(2, 4999.0, 1e308, "SELL"),
+            _print(3, 5000.0, 1e308, "BUY")]
+    s = _snap(prints=huge, sweep={"ts": T0 + 15})
+    for value in (s.tape_aggressor_buy_fraction, s.rejection_delta_ratio,
+                  s.post_sweep_aggression_ratio, s.wall_refill_ratio):
+        assert value is None or math.isfinite(value)
+
+
+def test_devil_volume_qui_DEBORDE_ne_produit_AUCUNE_mesure():
+    """Le filet de finitude sur le RÉSULTAT ne suffit pas : quand le volume total déborde en
+    `inf`, `delta / inf` vaut 0,0 — fini, donc publié, et lu comme « rejet neutre observé ».
+    C'est un zéro fabriqué par débordement. Trouvé en relisant la sortie de l'essai."""
+    huge = [_print(1, 5000.0, 1e308, "BUY"), _print(2, 4999.0, 1e308, "SELL"),
+            _print(3, 5000.0, 1e308, "BUY"), _print(4, 5001.0, 1e308, "SELL")]
+    s = _snap(prints=huge, sweep={"ts": T0 + 20})
+    assert s.tape_aggressor_buy_fraction is None
+    assert s.rejection_delta_ratio is None
+    assert s.post_sweep_aggression_ratio is None
+    assert any("non fini" in m for m in s.missing)
+
+
+def test_devil_carnet_a_tailles_geantes_ne_publie_pas_inf():
+    books = [_book(0, [[4999.75, 1e308]], [[5000.25, 1]]),
+             _book(5, [[4999.75, 1.0]], [[5000.25, 1]]),
+             _book(10, [[4999.75, 1e308]], [[5000.25, 1]])]
+    r = _snap(books=books, wall_price=4999.75, wall_side="BID").wall_refill_ratio
+    assert r is None or math.isfinite(r)
+
+
+def test_devil_B3_double_touche_la_jambe_part_de_la_DERNIERE():
+    """Double creux : le rejet commence quand le prix quitte l'extrême POUR DE BON. Partir de la
+    première touche ferait compter la vente du second creux comme du rejet acheteur."""
+    prints = [_print(1, 5000.0, 10, "SELL"),
+              _print(2, 4999.0, 10, "SELL"),      # 1re touche du bas
+              _print(3, 4999.5, 10, "BUY"),
+              _print(4, 4999.0, 40, "SELL"),      # 2e touche du bas — vente
+              _print(5, 5000.0, 30, "BUY")]       # LE rejet
+    s = _snap(prints=prints)
+    assert s.rejection_delta_ratio == pytest.approx(30 / 100)   # seule la vraie jambe compte
+
+
+def test_devil_fenetre_ABSURDE_rend_un_snapshot_MOTIVE_pas_un_silence():
+    """`window_s` à 0 ou non fini (config cassée) viderait la fenêtre et rendrait quatre `None`
+    sans cause visible : un snapshot muet ressemble à un marché calme."""
+    for bad in (0.0, -5.0, math.nan, math.inf):
+        s = _snap(window_s=bad, prints=[_print(1, 5000.0, 100, "BUY")])
+        assert s.tape_aggressor_buy_fraction is None
+        assert any("fenêtre" in m for m in s.missing), bad

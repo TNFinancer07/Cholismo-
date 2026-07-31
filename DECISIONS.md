@@ -2938,6 +2938,35 @@ POURQUOI ; c'est le motif qui rend l'absence exploitable.
   scénario de sweep réaliste (mur 200 → 30 → 170, réintégration acheteuse) → B1 0,82 · B2 0,706 ·
   B3 +0,706 · B4 10,69× · VPOC 4999,0, et matrice de dégradation prouvant que chaque porte tombe
   SEULE avec son motif.
+### /devil (Loop 4) — six façons de faire mentir le calculateur
+- **Carnet CROISÉ (bid ≥ ask) → B1 refusée.** Un carnet croisé est corrompu (pathologie réelle,
+  déjà détectée ailleurs sous `CROSSED_BOOK`). Mesurer un rechargement de mur dessus produirait un
+  nombre plausible à partir d'une donnée fausse. Les snapshots croisés sont écartés, et leur
+  nombre est DIT dans `missing` — un carnet cassé qui disparaît en silence est un carnet perdu.
+- **Volume dérisoire → B2/B3 non mesurées.** « 100 % acheteur » sur un lot n'est pas un flux
+  acheteur, c'est du bruit présenté comme une mesure. Plancher `ORDERFLOW_MIN_VOLUME` (v1
+  provisional, à calibrer par instrument : MES ≠ ES). Trois tests antérieurs utilisaient 10 lots
+  et sont remontés au-dessus du plancher — leur intention (bornes, fenêtre, futur) est intacte.
+- **Débordement de taille — la faille en DEUX temps.** Des tailles à 1e308 débordent en `inf`.
+  Premier correctif : filet de finitude sur le RÉSULTAT de chaque porte. **Insuffisant, et c'est
+  la relecture de la sortie d'essai qui l'a montré** : quand le TOTAL déborde, `known/total` vaut
+  `nan` (donc passe le test de couverture) et `delta/total` vaut **0,0** — fini, donc publié, et
+  lu comme « rejet neutre observé ». Un zéro fabriqué par débordement. Garde ajoutée en AMONT, sur
+  les volumes agrégés de B2/B3/B4.
+- **B3 : la jambe de rejet part de la DERNIÈRE touche de l'extrême**, pas de la première. Sur un
+  double creux, partir de la première ferait compter la vente du second creux comme du rejet
+  acheteur (+0,000 au lieu de +0,300 — mesuré).
+- **Fenêtre d'analyse absurde (0, négative, non finie) → snapshot MOTIVÉ.** Une fenêtre vide
+  rendait quatre `None` sans cause visible, et un snapshot muet ressemble à un marché calme.
+- **Erreur de méthode corrigée en route** : après le changement de règle B3, mon recalcul naïf de
+  référence utilisait encore la première touche — l'essai affichait « signe conforme 356/381 » et
+  j'ai failli le lire comme une régression du module. Référence réalignée → **381/381**. Une
+  référence de validation périmée est aussi dangereuse qu'un test faux.
+- **Vérif /devil** : +9 tests (carnet croisé ×2, plancher de volume ×2, débordement ×3, double
+  creux, fenêtre absurde) → **682 passed**, ruff clean. Essai relancé : B2 exact sur 393
+  comparaisons, B3 **381/381**, profil toujours identique au moteur D-041, et matrice d'attaques
+  où chaque ligne refuse de mesurer avec son motif.
+
 - **Collision de vocabulaire signalée** : B1-B4 désignent AUSSI des panneaux de l'UI (B1 États
   S1·S2, B2 Bridge, B3 Sync, B4 Signal unifié). Les lettres restent de la documentation ; les
   identifiants du code portent le sens (`wall_refill_ratio`…), et snake_case côté Python là où le

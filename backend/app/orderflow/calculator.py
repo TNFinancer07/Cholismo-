@@ -61,6 +61,18 @@ def _finite(x: Any) -> bool:
     return isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x)
 
 
+def _publishable(value: Optional[float], label: str, missing: list[str]) -> Optional[float]:
+    """Dernier filet avant publication (/devil) : des tailles à 1e308 débordent en `inf`, et
+    `inf / inf` vaut `nan`. Une porte publierait alors « nan » comme s'il s'agissait d'un ratio —
+    exactement le chiffre-qui-a-l'air-d'une-mesure que tout le module refuse."""
+    if value is None:
+        return None
+    if not _finite(value):
+        missing.append(f"{label}: résultat non fini (débordement de taille) — mesure retirée")
+        return None
+    return float(value)
+
+
 @dataclass(frozen=True)
 class OrderFlowSnapshot:
     """Mesures d'order flow à un instant donné. Immuable : un snapshot circule entre couches et
@@ -146,12 +158,31 @@ def _level_size(book: Any, price: float, side: str, tick: float) -> Optional[flo
 
 # --- portes ------------------------------------------------------------------------------------
 
+def _crossed(book: Any) -> bool:
+    """Meilleur bid ≥ meilleur ask : le carnet est CORROMPU (pathologie réelle, détectée ailleurs
+    sous `CROSSED_BOOK`). Mesurer un rechargement de mur dessus produirait un nombre plausible à
+    partir d'une donnée fausse."""
+    if not isinstance(book, dict):
+        return False
+    def _best(key, pick):
+        rows = book.get(key)
+        prices = [float(r[0]) for r in rows
+                  if isinstance(rows, list) and isinstance(r, (list, tuple)) and len(r) >= 2
+                  and _finite(r[0])] if isinstance(rows, list) else []
+        return pick(prices) if prices else None
+    bid, ask = _best("bids", max), _best("asks", min)
+    return bid is not None and ask is not None and bid >= ask
+
+
 def _b1_wall_refill(books: Sequence[Any], price: Optional[float], side: Optional[str],
                     tick: float, missing: list[str]) -> Optional[float]:
     if price is None or side not in ("BID", "ASK") or not _finite(price):
         missing.append("B1: aucun niveau de mur désigné")
         return None
-    sizes = [s for s in (_level_size(b, price, side, tick) for b in books) if s is not None]
+    sane = [b for b in books if not _crossed(b)]
+    if len(sane) < len(books):
+        missing.append(f"B1: {len(books) - len(sane)} snapshot(s) de carnet CROISÉ écarté(s)")
+    sizes = [s for s in (_level_size(b, price, side, tick) for b in sane) if s is not None]
     if len(sizes) < 2:
         missing.append("B1: moins de deux observations du niveau (ou niveau hors profondeur)")
         return None
@@ -164,11 +195,18 @@ def _b1_wall_refill(books: Sequence[Any], price: Optional[float], side: Optional
     return max(0.0, refilled) / consumed
 
 
-def _b2_aggressor_fraction(prints: Sequence[tuple], min_coverage: float,
+def _b2_aggressor_fraction(prints: Sequence[tuple], min_coverage: float, min_volume: float,
                            missing: list[str]) -> Optional[float]:
     total = sum(p[2] for p in prints)
-    if total <= 0:
-        missing.append("B2: aucun volume exploitable dans la fenêtre")
+    if not _finite(total):
+        # Le total a débordé : `known/total` vaudrait `nan` et passerait le test de couverture,
+        # puis `delta/total` vaudrait 0,0 — fini, donc publiable, et lu comme une mesure neutre.
+        missing.append("B2: volume total non fini (débordement) — aucune mesure")
+        return None
+    if total < min_volume:
+        # « 100 % acheteur » sur un lot n'est pas un flux acheteur : c'est du bruit présenté
+        # comme une mesure (/devil). Le plancher est v1 provisional, à calibrer par instrument.
+        missing.append(f"B2: volume {total:g} sous le plancher de mesure ({min_volume:g})")
         return None
     known = sum(p[2] for p in prints if p[3] != "UNKNOWN")
     if known / total < min_coverage:
@@ -179,7 +217,7 @@ def _b2_aggressor_fraction(prints: Sequence[tuple], min_coverage: float,
     return buy / known
 
 
-def _b3_rejection_delta(prints: Sequence[tuple], min_coverage: float,
+def _b3_rejection_delta(prints: Sequence[tuple], min_coverage: float, min_volume: float,
                         missing: list[str]) -> Optional[float]:
     """Delta postérieur à l'extrême, normalisé. L'extrême retenu est celui qui a le plus de
     chemin parcouru depuis lui — sinon un plus-haut et un plus-bas simultanés rendraient le signe
@@ -188,8 +226,12 @@ def _b3_rejection_delta(prints: Sequence[tuple], min_coverage: float,
     Exige la MÊME couverture de côté que B2 : sans côté agresseur, le delta vaut mécaniquement 0,
     et ce 0 se lirait comme « rejet neutre observé » alors que rien n'a été observé."""
     total = sum(p[2] for p in prints)
-    if total <= 0 or len(prints) < 2:
-        missing.append("B3: volume ou nombre de prints insuffisant")
+    if not _finite(total):
+        missing.append("B3: volume total non fini (débordement) — aucune mesure")
+        return None
+    if total < min_volume or len(prints) < 2:
+        missing.append(f"B3: volume {total:g} sous le plancher de mesure ({min_volume:g}) "
+                       f"ou moins de deux prints")
         return None
     known = sum(p[2] for p in prints if p[3] != "UNKNOWN")
     if known / total < min_coverage:
@@ -197,7 +239,11 @@ def _b3_rejection_delta(prints: Sequence[tuple], min_coverage: float,
                        f"(minimum {min_coverage:.0%}) — delta non mesurable")
         return None
     prices = [p[1] for p in prints]
-    low_i, high_i = prices.index(min(prices)), prices.index(max(prices))
+    # DERNIÈRE touche de l'extrême, pas la première (/devil) : sur un double creux, partir de la
+    # première ferait compter la vente du second creux comme du rejet acheteur. Le rejet commence
+    # quand le prix quitte l'extrême POUR DE BON.
+    low_i = len(prices) - 1 - prices[::-1].index(min(prices))
+    high_i = len(prices) - 1 - prices[::-1].index(max(prices))
     if min(prices) == max(prices):
         missing.append("B3: prix plat — aucun extrême distinguable")
         return None
@@ -230,8 +276,11 @@ def _b4_post_sweep(prints: Sequence[tuple], sweep: Any, now: float, floor_ts: fl
     if span_before <= 0 or span_after <= 0:
         missing.append("B4: fenêtre avant ou après de durée nulle")
         return None
-    rate_before = sum(p[2] for p in before) / span_before
-    rate_after = sum(p[2] for p in after) / span_after
+    vol_before, vol_after = sum(p[2] for p in before), sum(p[2] for p in after)
+    if not (_finite(vol_before) and _finite(vol_after)):
+        missing.append("B4: volume non fini (débordement) — aucune mesure")
+        return None
+    rate_before, rate_after = vol_before / span_before, vol_after / span_after
     if rate_before <= 0:
         # Diviser par un débit nul donnerait « ∞ » ou un nombre géant présenté comme une mesure.
         missing.append("B4: aucun volume avant le sweep — accélération non mesurable")
@@ -282,6 +331,7 @@ def compute_snapshot(*, now: Any, prints: Any = (), books: Any = (), bars: Any =
                      window_s: float = None,                          # type: ignore[assignment]
                      atr_fast: int = None, atr_slow: int = None,      # type: ignore[assignment]
                      min_side_coverage: float = None,                 # type: ignore[assignment]
+                     min_volume: float = None,                        # type: ignore[assignment]
                      ) -> OrderFlowSnapshot:
     """Calcule un `OrderFlowSnapshot`. Ne lève JAMAIS : toute entrée inexploitable dégrade la
     grandeur concernée en `None` motivé, sans toucher aux autres (§3)."""
@@ -293,6 +343,11 @@ def compute_snapshot(*, now: Any, prints: Any = (), books: Any = (), bars: Any =
                 else config.ORDERFLOW_MIN_SIDE_COVERAGE)
     missing: list[str] = []
 
+    if not _finite(window_s) or window_s <= 0:
+        # Config cassée : une fenêtre vide rendrait quatre `None` sans cause visible, et un
+        # snapshot muet ressemble à un marché calme (/devil).
+        return OrderFlowSnapshot(now=float(now) if _finite(now) else float("nan"), window_s=0.0,
+                                 missing=("fenêtre d'analyse invalide: aucun calcul",))
     if not _finite(now):
         # Horloge douteuse : tout est suspect, rien n'est calculé (même règle que le driver D-052).
         return OrderFlowSnapshot(now=float("nan"), window_s=window_s,
@@ -330,15 +385,20 @@ def compute_snapshot(*, now: Any, prints: Any = (), books: Any = (), bars: Any =
     else:
         missing.append("VP: aucun print exploitable dans la fenêtre")
 
+    min_volume = (min_volume if min_volume is not None else config.ORDERFLOW_MIN_VOLUME)
     return OrderFlowSnapshot(
         now=now, window_s=window_s,
-        wall_refill_ratio=_b1_wall_refill(books_in_window, wall_price, wall_side, tick, missing),
-        tape_aggressor_buy_fraction=_b2_aggressor_fraction(kept, coverage, missing),
-        rejection_delta_ratio=_b3_rejection_delta(kept, coverage, missing),
-        post_sweep_aggression_ratio=_b4_post_sweep(kept, sweep, now, floor_ts, missing),
+        wall_refill_ratio=_publishable(
+            _b1_wall_refill(books_in_window, wall_price, wall_side, tick, missing), "B1", missing),
+        tape_aggressor_buy_fraction=_publishable(
+            _b2_aggressor_fraction(kept, coverage, min_volume, missing), "B2", missing),
+        rejection_delta_ratio=_publishable(
+            _b3_rejection_delta(kept, coverage, min_volume, missing), "B3", missing),
+        post_sweep_aggression_ratio=_publishable(
+            _b4_post_sweep(kept, sweep, now, floor_ts, missing), "B4", missing),
         volume_profile=profile,
-        atr_fast=_atr(bars, atr_fast, missing),
-        atr_slow=_atr(bars, atr_slow, missing),
+        atr_fast=_publishable(_atr(bars, atr_fast, missing), f"ATR({atr_fast})", missing),
+        atr_slow=_publishable(_atr(bars, atr_slow, missing), f"ATR({atr_slow})", missing),
         prints_used=len(kept), prints_dropped=dropped,
         missing=tuple(missing),
     )

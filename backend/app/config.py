@@ -254,3 +254,7 @@ ORDERFLOW_ATR_SLOW = int(os.getenv("ORDERFLOW_ATR_SLOW", "14"))
 # Bornes d'entrée (doctrine D-050 : un flux obèse est un flux empoisonné).
 ORDERFLOW_MAX_PRINTS = int(os.getenv("ORDERFLOW_MAX_PRINTS", "20000"))
 ORDERFLOW_MAX_BOOKS = int(os.getenv("ORDERFLOW_MAX_BOOKS", "2000"))
+# Volume MINIMAL dans la fenêtre sous lequel B2/B3 ne sont pas des mesures : « 100 % acheteur »
+# sur un lot n'est pas un flux acheteur, c'est du bruit présenté comme une mesure (/devil D-055).
+# v1 provisional — à calibrer avec l'instrument (MES ≠ ES).
+ORDERFLOW_MIN_VOLUME = float(os.getenv("ORDERFLOW_MIN_VOLUME", "20"))
