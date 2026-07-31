@@ -453,6 +453,33 @@ export interface LongShortValue {
   extreme_pct: number
 }
 
+// --- yield_curve → panneau YLD (courbe des taux & différentiels, D-053) [lent] ---
+
+export interface YieldTenor {
+  code: string
+  label: string
+  value_pct: number
+  /** Variation en points de base. `null` = pas de mesure — jamais 0, qui signifie « inchangé ». */
+  change_bp: number | null
+}
+
+export interface YieldSpread {
+  code: string
+  label: string
+  /** Écart en POINTS DE BASE, signé. Dérivé des ténors : jamais alimenté séparément. */
+  value_bp: number
+  long: string
+  short: string
+  /** `null` hors pente : « inversé » n'a pas de sens sur un différentiel inter-pays. */
+  inverted: boolean | null
+}
+
+export interface YieldCurveValue {
+  tenors: YieldTenor[]
+  /** Un spread n'existe QUE si ses deux pattes sont présentes (sinon il disparaît, §3). */
+  spreads: YieldSpread[]
+}
+
 export interface ContextSchema {
   session_identity: SessionIdentity
   s1_state: S1State
@@ -466,6 +493,7 @@ export interface ContextSchema {
   macro_calendar: MetaField<MacroCalendarValue>
   macro_risk: MetaField<MacroRiskValue>
   long_short_ratio: MetaField<LongShortValue>
+  yield_curve: MetaField<YieldCurveValue>
 }
 
 // --- hors-schéma : extras opérationnels poussés sur le canal rapide ---

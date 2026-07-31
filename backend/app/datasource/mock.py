@@ -39,6 +39,7 @@ SOURCES = {
     "rms_engine": ["rms"],
     "econ_feed": ["econ_calendar", "macro_releases"],   # schedule systémique (D-027) + releases (D-040)
     "sentiment_feed": ["long_short"],                  # positionnement Long/Short agrégé (D-053)
+    "rates_feed": ["yields"],                          # taux bruts US/DE (D-053)
 }
 
 
@@ -264,6 +265,29 @@ class MockDataSource(MarketDataSource):
         # une ligne ou renvoie un short à 0. Le moteur doit écarter SEUL (jamais une jauge inventée).
         await self._emit(state, "sentiment_feed", "long_short",
                          self._gen_long_short(base, vol, patho), patho)
+
+        # --- Taux bruts US/DE (D-053). Le mock reste sale (§4) : une patte peut manquer ou
+        # arriver en NaN — le moteur doit alors faire DISPARAÎTRE les spreads qui en dépendent,
+        # jamais afficher un différentiel calculé sur un trou.
+        await self._emit(state, "rates_feed", "yields", self._gen_yields(base, vol, patho), patho)
+
+    def _gen_yields(self, base: dict, vol: float, patho: dict) -> dict:
+        """Courbe US/DE synthétique : les taux dérivent autour de `real_rates`, la pente US
+        oscille autour de l'inversion — le régime que l'opérateur doit voir basculer."""
+        rng = self._rng
+        anchor = base.get("real_rates", 2.0)
+        tenors = {
+            "US02Y": round(self._drift("y_us02", anchor + 2.2, vol, 0.06), 3),
+            "US10Y": round(self._drift("y_us10", anchor + 2.0, vol, 0.05), 3),
+            "DE02Y": round(self._drift("y_de02", anchor + 0.1, vol, 0.05), 3),
+            "DE10Y": round(self._drift("y_de10", anchor + 0.3, vol, 0.04), 3),
+        }
+        changes = {code: round(rng.gauss(0, 3.5), 1) for code in tenors}
+        if rng.random() < patho["drop_p"] * 2:                    # patte manquante
+            del tenors[rng.choice(list(tenors))]
+        elif rng.random() < patho["nan_p"] + 0.02:                # patte non finie
+            tenors[rng.choice(list(tenors))] = math.nan
+        return {"tenors": tenors, "changes_bp": changes}
 
     def _gen_long_short(self, base: dict, vol: float, patho: dict) -> dict:
         """SSI synthétique : le positionnement dérive lentement, borné [2, 98] %."""

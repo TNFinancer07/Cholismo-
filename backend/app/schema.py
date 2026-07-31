@@ -417,6 +417,11 @@ class ContextSchema(BaseModel):
     # imbalanced}]}. Canal LENT (le positionnement bouge en heures, pas en ticks). Lecture
     # seule (§2.1) : le terminal montre la donnée, il n'en déduit aucun signal contrarien.
     long_short_ratio: MetaField = Field(default_factory=MetaField)
+    # Courbe des taux et différentiels (D-053) — panneau YLD. value: {tenors: [{code, label,
+    # value_pct, change_bp}], spreads: [{code, label, value_bp, long, short, inverted}]}. Canal
+    # LENT. Les spreads sont DÉRIVÉS des ténors (source unique) — jamais alimentés à part, sinon
+    # le différentiel pourrait contredire les taux affichés juste au-dessus.
+    yield_curve: MetaField = Field(default_factory=MetaField)
 
 
 FAST_BLOCKS = ("session_identity", "s1_state", "bridge_variables", "sync_state",
@@ -424,4 +429,5 @@ FAST_BLOCKS = ("session_identity", "s1_state", "bridge_variables", "sync_state",
 # ⚠ Tout bloc ajouté ici DOIT l'être aussi dans `frontend/src/lib/sse.ts` (FAST_BLOCKS /
 # SLOW_BLOCKS) : sans son écouteur, l'event part du backend et le frontend le jette EN SILENCE,
 # panneau fail-closed sans cause visible (leçon D-051).
-SLOW_BLOCKS = ("s2_state", "econ_calendar", "vol_surface", "macro_calendar", "long_short_ratio")
+SLOW_BLOCKS = ("s2_state", "econ_calendar", "vol_surface", "macro_calendar", "long_short_ratio",
+               "yield_curve")

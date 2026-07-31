@@ -2694,6 +2694,71 @@ tests ont d'abord été prouvés ROUGES sur le driver d'avant (relance ciblée s
   14 attendues —, `stop()` depuis un callback) → **593 passed**, ruff clean, essai réel relancé
   **5 fois de suite sans blocage** (avant : ~1 sur 2).
 
+## D-053 · SENT & YLD — positionnement Long/Short et courbe des taux
+Deux panneaux demandés (`LsrSentimentPanel`, `YieldDifferentialsPanel`). **Ils ne pouvaient pas
+exister seuls** : CLAUDE §1 interdit un panneau non traçable à un champ du schéma, or ni le ratio
+Long/Short ni les taux bruts n'existaient — et il n'y a **aucun fetcher de taux** dans le dépôt
+(le seul fetcher est celui du calendrier macro D-050 ; `cascade.real_rates` est un niveau
+composite unique, pas une courbe). Livré en **tranches verticales** : bloc de schéma +
+alimentation + panneau, chacune traçable.
+
+**Collision d'acronyme tranchée.** Dans ce terminal, « LSR » désigne le moteur **Liquidity Sweep
+Reversal** (`lsr_engine`, `lsr_driver`, logs « LSR manifest émis »). Le fichier garde le nom
+demandé `LsrSentimentPanel.tsx`, mais le mnémonique opérateur est **SENT** : surcharger LSR avec
+« Long/Short Ratio » dans la même UI serait un piège de lecture en séance.
+
+### Tranche 1 — `long_short_ratio` (canal LENT) → panneau SENT
+- **Aucun signal dérivé** (§2.1) : le module normalise, il ne conclut pas. Pas de lecture
+  contrarienne, pas de pondération — ce serait de la logique métier inventée (§11).
+- **Refus assumés** (`app/sentiment.py`, pur — zéro horloge, zéro I/O) : somme ≠ 100 % (la venue a
+  perdu une catégorie — afficher la jauge reviendrait à **inventer la part manquante**), doublon
+  contradictoire (la 1re gagne, l'écart est compté), symbole vide, valeur non finie ou hors
+  bornes. **Rien d'exploitable → `None` → bloc ABSENT**, jamais un objet vide qui se lit
+  « connecté ». Flux obèse refusé EN ENTIER (doctrine D-050 : tronquer masquerait des
+  instruments sans le dire).
+- **Short à 0** : la ligne SURVIT (les pourcentages sont une donnée réelle), le ratio est retiré —
+  jamais « ∞ » ni un nombre géant qui a l'air d'une mesure.
+- **`dropped` affiché** : une ligne écartée par le moteur se VOIT à l'écran. Une donnée perdue en
+  silence est un mensonge par omission.
+- **§3 dans la jauge** : LONG à gauche / SHORT à droite, pourcentages ÉCRITS, libellés, flèches
+  ▲/▼ sur la variation, badge texte DÉSÉQUILIBRE, libellé ARIA complet. La lecture ne dépend
+  jamais de la seule couleur.
+
+### Tranche 2 — `yield_curve` (canal LENT) → panneau YLD
+- **Un spread ne se calcule jamais à partir d'un trou.** Un ténor absent/non fini fait disparaître
+  *tous* les spreads qui en dépendent — et seulement ceux-là. Un différentiel affiché sur une patte
+  manquante serait un chiffre inventé **qui a l'air d'une mesure** : la pire forme de mensonge dans
+  un terminal. L'UI le dit franchement (« AUCUN DIFFÉRENTIEL CALCULABLE ») au lieu d'un blanc.
+- **Spreads DÉRIVÉS, jamais alimentés** : les recevoir d'une source indépendante ouvrirait la
+  porte à un différentiel qui contredit les taux affichés juste au-dessus. Source unique.
+- **`inverted` seulement sur une PENTE** (deux ténors de la même courbe). Un différentiel
+  transatlantique négatif n'est pas une « inversion » — l'étiquette serait un contresens. Et
+  l'inversion est marquée comme un FAIT, pas comme une prévision de récession (§2.1).
+- **Bornes de plausibilité [−5 %, +25 %]** : un taux à 900 % est une erreur d'unité, pas un régime.
+  La borne écarte l'absurde **sans écarter l'inhabituel** — un Bund à −0,55 % est réel et passe.
+- **0 bp ≠ absence** : « inchangé » est une information, l'absence de mesure n'en est pas une →
+  tiret, jamais un zéro.
+- Ténors : US02Y, US10Y, DE02Y, DE10Y. Spreads : pente US 10a−2a et différentiel US−DE 10a (le
+  driver du couple EUR/USD, domaine Youssef).
+
+- **Alimentation = le mock, et c'est explicite.** Les deux blocs sont nourris par `MockDataSource`
+  (§4 : couture unique, mock volontairement SALE — doublon, catégorie perdue, patte de courbe
+  manquante ou NaN injectés). **Aucun fetcher réseau n'a été inventé** : sans source, URL ni
+  contrat choisis, le construire aurait été de la spéculation. La couture est prête — un
+  `RatesProvider` façon D-050 (worker async + cache + `get_state` pur) se branche à la place du
+  mock sans toucher aux panneaux. C'est la tranche suivante, à ouvrir quand la source est décidée.
+- **Persistance des layouts bumpée v13** : sans ça, les espaces déjà persistés n'auraient JAMAIS
+  affiché les nouveaux panneaux — une feature livrée morte (précédent v12/D-041).
+- **Vérif** : 15 + 16 tests unitaires backend, 6 d'intégration (dont « aucun spread ne survit sans
+  ses deux pattes » sur le flux réel), 15 + 14 tests RTL. **630 passed**, ruff clean, tsc + vite
+  build verts, 75 tests Vitest (4 fichiers). Essai navigateur sur l'app réelle : blocs reçus sur le canal lent,
+  panneaux rendus (pente INVERSÉE −23,5 bp, différentiel +169,1 bp), **aucun débordement**.
+- **Défaut PRÉ-EXISTANT trouvé au passage, hors périmètre** : avec une projection REST tronquée
+  (ce que renvoie un backend qui redémarre), `CalibrationPanel` et `DecisionBlotter` **lèvent**
+  (`q.progress_pct` / `decisions.length` non gardés) au lieu de fail-closer. Reproduit en
+  interceptant `/calibration` et `/decisions` avec `{}`. Antérieur à D-053 (code d'Étape 5,
+  commit 9180ded) — à traiter en `/bugfix`, pas dans un commit de feature.
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.
