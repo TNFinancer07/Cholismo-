@@ -2,9 +2,9 @@
  *  par bloc : event name = nom du bloc. `decision_log_dirty` déclenche un refresh des
  *  projections Zone D (le log lui-même reste event-sourced côté serveur). */
 import { api, API_BASE } from './api'
+import { asBlotterRows, asCalibration, asOrchestrator, asScenario, asSources } from './projections'
 import { useManifest } from '@/store/manifest'
 import { useTerminal } from '@/store/terminal'
-import type { BlotterRow, Calibration, OrchestratorPayload } from '@/types/schema'
 
 // Tout bloc publié sur le canal fast par le backend DOIT figurer ici — un event non écouté est
 // silencieusement perdu (le panneau fail-close alors comme si la donnée n'existait pas).
@@ -19,15 +19,31 @@ async function refreshProjections() {
     const [decisions, calibration, orchestrator] = await Promise.all([
       api.decisions(), api.calibration(), api.orchestrator(),
     ])
+    // Chaque projection est VÉRIFIÉE avant d'entrer dans le store (le cast ne vérifiait rien à
+    // l'exécution — cause racine du bug). Une projection inexploitable ne remplace pas la
+    // précédente : on n'écrase pas une donnée saine par du vide, et on n'affiche pas non plus
+    // une forme fausse que les panneaux prendraient pour vraie (§3).
+    const rows = asBlotterRows(decisions)
+    const cal = asCalibration(calibration)
+    const orch = asOrchestrator(orchestrator)
+    const broken = rows === null || cal === null || orch === null
+    if (broken) {
+      console.warn('[cholismo] projection REST inexploitable — dernière valeur conservée',
+        { decisions: rows !== null, calibration: cal !== null, orchestrator: orch !== null })
+    }
     store.set({
-      decisions: decisions.decisions as unknown as BlotterRow[],
-      calibration: calibration as Calibration,
-      orchestrator: orchestrator as OrchestratorPayload,
+      projectionsBroken: broken,
+      ...(rows !== null ? { decisions: rows } : {}),
+      ...(cal !== null ? { calibration: cal } : {}),
+      ...(orch !== null ? { orchestrator: orch } : {}),
     })
   } catch {
     /* le badge de canal muet couvre déjà l'indisponibilité */
   }
 }
+
+/** Exposé pour le test de régression : le garde d'entrée se teste sans EventSource. */
+export const refreshProjectionsForTest = refreshProjections
 
 export async function refreshSelfcheck() {
   const store = useTerminal.getState()
@@ -41,7 +57,15 @@ export async function refreshScenario() {
   const store = useTerminal.getState()
   try {
     const [scenario, sources] = await Promise.all([api.scenario(), api.sources()])
-    store.set({ scenario: scenario as never, sources })
+    // Même garde que les autres projections : `scenario as never` laissait passer n'importe
+    // quoi, et le panneau MOCK levait sur `scenario.available.map` (le `?.` protège du null,
+    // pas d'un objet partiel truthy).
+    const sc = asScenario(scenario)
+    const src = asSources(sources)
+    store.set({
+      ...(sc !== null ? { scenario: sc } : {}),
+      ...(src !== null ? { sources: src } : {}),
+    })
   } catch { /* idem */ }
 }
 

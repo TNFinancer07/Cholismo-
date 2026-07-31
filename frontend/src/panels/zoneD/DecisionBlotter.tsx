@@ -47,7 +47,16 @@ function OutcomeCell({ row }: { row: BlotterRow }) {
 }
 
 export function DecisionBlotter() {
-  const decisions = useTerminal((s) => s.decisions)
+  const rawDecisions = useTerminal((s) => s.decisions)
+  // Le store PROMET un tableau ; une projection tronquée y poussait `undefined` et
+  // `decisions.length` levait — le Decision Log entier disparaissait (bug D-053). On distingue
+  // « log vide » (fait) de « projection inexploitable » (panne) : confondre les deux ferait
+  // croire à un journal vide alors qu'il ne l'est pas.
+  // Cassé = forme invalide OU projection rejetée à la frontière. Les lignes déjà reçues restent
+  // VRAIES (le log est append-only) : on ne les efface pas ; c'est le « log vide » qui mentirait.
+  const rejected = useTerminal((s) => s.projectionsBroken)
+  const decisions = Array.isArray(rawDecisions) ? rawDecisions : []
+  const broken = !Array.isArray(rawDecisions) || (rejected && decisions.length === 0)
   const fileRef = useRef<HTMLInputElement>(null)
   const [importMsg, setImportMsg] = useState<string | null>(null)
 
@@ -88,7 +97,12 @@ export function DecisionBlotter() {
           </tr>
         </thead>
         <tbody>
-          {decisions.length === 0 && (
+          {broken && (
+            <tr><td colSpan={9} className="py-2 text-center text-absent" data-testid="blotter-unavailable">
+              PROJECTION INDISPONIBLE — réponse incomplète du serveur (le log, lui, reste intact)
+            </td></tr>
+          )}
+          {!broken && decisions.length === 0 && (
             <tr><td colSpan={9} className="py-2 text-center text-term-faint">
               aucun event — le log est vide (et restera immuable une fois écrit)
             </td></tr>

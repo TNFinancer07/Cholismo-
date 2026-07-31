@@ -7,6 +7,7 @@ import { Panel } from '@/components/ui/panel'
 import { api } from '@/lib/api'
 import { refreshScenario } from '@/lib/sse'
 import { cn } from '@/lib/utils'
+import { asScenario } from '@/lib/projections'
 import { useTerminal } from '@/store/terminal'
 
 const SLIDER_SPEC: Record<string, { min: number; max: number; step: number }> = {
@@ -18,7 +19,9 @@ const SLIDER_SPEC: Record<string, { min: number; max: number; step: number }> = 
 }
 
 export function ScenarioPanel() {
-  const scenario = useTerminal((s) => s.scenario)
+  // `scenario?.available` protège du null mais PAS d'un objet partiel truthy : `{}.available.map`
+  // lève (même défaut que C4/Zone D, bug D-053). La garde porte sur ce qu'on indexe vraiment.
+  const scenario = useTerminal((s) => asScenario(s.scenario))
   const sources = useTerminal((s) => s.sources)
   const [sliders, setSliders] = useState<Record<string, number>>({})
 
@@ -69,16 +72,20 @@ export function ScenarioPanel() {
           sources amont — couper pour vérifier STALE → ABSENT (TASKS 2.4)
         </div>
         <div className="flex flex-wrap gap-1">
+          {/* `info` vient d'une projection REST : une entrée partielle (sans `fields`) faisait
+              lever `.join()` — troisième occurrence du même défaut (bug D-053, trouvée par le
+              test de régression). On rend ce qu'on a, sans rien inventer. */}
           {sources && Object.entries(sources).map(([name, info]) => (
             <button key={name}
               className={cn('inline-flex items-center gap-1 border px-1.5 py-0.5 text-xxs',
-                info.up ? 'border-risk-green/50 text-risk-green' : 'border-risk-red text-risk-red')}
-              title={`champs : ${info.fields.join(', ')}`}
+                info?.up ? 'border-risk-green/50 text-risk-green' : 'border-risk-red text-risk-red')}
+              title={Array.isArray(info?.fields) ? `champs : ${info.fields.join(', ')}`
+                : 'champs inconnus — projection incomplète'}
               onClick={async () => {
-                await api.toggleSource(name, !info.up).catch(() => undefined)
+                await api.toggleSource(name, !info?.up).catch(() => undefined)
                 await refreshScenario()
               }}>
-              {info.up ? <Power size={9} aria-hidden /> : <PowerOff size={9} aria-hidden />}
+              {info?.up ? <Power size={9} aria-hidden /> : <PowerOff size={9} aria-hidden />}
               {name}
             </button>
           ))}

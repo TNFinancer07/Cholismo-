@@ -2819,6 +2819,56 @@ demandé `LsrSentimentPanel.tsx`, mais le mnémonique opérateur est **SENT** : 
   interceptant `/calibration` et `/decisions` avec `{}`. Antérieur à D-053 (code d'Étape 5,
   commit 9180ded) — à traiter en `/bugfix`, pas dans un commit de feature.
 
+## D-054 · Projection REST tronquée — un cast n'est pas une vérification
+Bug trouvé pendant D-053 (`/devil`), corrigé par `/bugfix` dans un commit séparé — un défaut
+pré-existant n'a rien à faire dans un commit de feature.
+
+**Repro** : un backend qui redémarre répond **200 avec un corps partiel**. Reproduit en
+interceptant `/calibration`, `/decisions`, `/orchestrator`, `/scenario`, `/sources` avec `{}`.
+Symptômes : `Cannot read properties of undefined (reading 'progress_pct')` et `(reading 'length')`
+→ **C4 et le Decision Log disparaissaient de l'écran, sans un mot**.
+
+**Cause racine — pas le symptôme.** Les panneaux n'étaient pas fautifs : `refreshProjections`
+**castait** les corps de réponse (`as Calibration`, `as unknown as BlotterRow[]`, `as never`) avant
+de les pousser dans le store. Un cast TypeScript est **effacé à l'exécution** : il ne vérifie rien,
+il ne fait que faire taire le compilateur. Le store se retrouvait donc à violer son propre type, et
+le premier consommateur qui faisait confiance au type levait. Corriger les panneaux seuls aurait
+laissé la porte ouverte à tous les futurs consommateurs.
+
+**Correctif à la frontière** (`app/lib/projections.ts`) : chaque projection est vérifiée sur
+**exactement ce que les consommateurs indexent** (`quantitative`/`behavioral`/`sharpe` pour C4,
+`decisions` tableau pour Zone D, `sources` pour l'orchestrateur, `current`/`available` pour MOCK).
+Ce n'est pas une validation de schéma complète : c'est un contrat d'usage, testable et minimal.
+- Une projection inexploitable **n'entre pas** dans le store (§3 : absente, jamais reconstituée).
+- Elle **n'écrase pas** non plus la dernière projection saine : une réponse cassée ne doit pas
+  faire clignoter des jauges valides vers « chargement… ».
+- Un `console.warn` nomme précisément laquelle des trois est cassée.
+
+**« Chargement… » éternel = échec silencieux.** Une fois la frontière fermée, C4 restait bloqué sur
+« chargement… » tant que le serveur répondait mal — le crash était corrigé, la panne toujours
+invisible. Un drapeau `projectionsBroken` distingue **attendre** (rien reçu) de **être en panne**
+(reçu et rejeté) : C4 affiche alors `PROJECTION INDISPONIBLE — réponse incomplète du serveur`.
+Même règle que pour le canal lent (D-053 `/polish`).
+
+**Zone D : ne jamais confondre « log vide » et « projection cassée ».** Afficher « aucun event — le
+log est vide » sur une projection défaillante ferait croire à un journal vide alors qu'il ne l'est
+pas. Les lignes **déjà reçues restent affichées** — le log est append-only, elles restent VRAIES ;
+seule leur exhaustivité est douteuse.
+
+**Prévention (Loop 2 §6) — deux autres occurrences du même défaut.** `scenario?.available.map()`
+protège du `null` mais pas d'un objet partiel truthy : le panneau MOCK levait pareil. Et le test de
+régression en a révélé une **troisième**, que je n'avais pas vue : `info.fields.join()` sur une
+entrée de `sources` sans `fields`. Les trois sont corrigées et couvertes.
+
+- **Vérif** : 17 nouveaux tests (frontière ×6, C4 ×8, Zone D ×6, MOCK ×5) — **112 tests Vitest**,
+  632 backend, tsc + vite build verts. Repro d'origine rejoué au navigateur : **0 erreur page**,
+  15 panneaux toujours rendus, navigation clavier intacte, C4 affichant `PROJECTION INDISPONIBLE`,
+  et cas nominal (sans interception) inchangé.
+- **Leçon transverse** : partout où une donnée externe entre dans le store par un `as`, le type
+  ment. Les blocs SSE passent par `applyBlock` et sont tout aussi castés — ils n'ont pas explosé
+  jusqu'ici parce que les panneaux lisent via `MetaValue`/optional chaining, mais le même durcissement
+  leur reste applicable si un jour un panneau indexe en profondeur.
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.

@@ -6,6 +6,7 @@ import { Lock, Unlock } from 'lucide-react'
 import { Panel } from '@/components/ui/panel'
 import { Badge } from '@/components/ui/badge'
 import { fmtNum } from '@/lib/format'
+import { asCalibration } from '@/lib/projections'
 import { cn } from '@/lib/utils'
 import { useTerminal } from '@/store/terminal'
 
@@ -29,10 +30,25 @@ function Gauge({ label, pct, valid, detail }: {
 }
 
 export function CalibrationPanel() {
-  const cal = useTerminal((s) => s.calibration)
+  const raw = useTerminal((s) => s.calibration)
+  // Le serveur a répondu, mais avec un corps inexploitable : « chargement… » serait un mensonge
+  // éternel. Attendre et être en panne ne se disent pas pareil (même règle qu'au canal lent).
+  const broken = useTerminal((s) => s.projectionsBroken)
+  // `if (!cal)` ne couvrait que l'absence TOTALE : un corps partiel (`{}`) est truthy, et
+  // `cal.quantitative.progress_pct` levait — le panneau disparaissait sans un mot (bug D-053).
+  // Même garde qu'à la frontière : une projection incomplète est une projection ABSENTE.
+  const cal = asCalibration(raw)
   if (!cal) {
     return <Panel code="C4" title="Calibration" block="projections event store">
-      <p className="text-term-faint">chargement…</p>
+      {raw === null && !broken ? (
+        <p className="text-term-faint">chargement…</p>
+      ) : (
+        // Distinguer « pas encore chargé » de « reçu mais inexploitable » : le second est une
+        // panne à signaler, pas une attente. Aucune jauge fabriquée à 0 % (§3).
+        <p className="text-absent" data-testid="c4-unavailable">
+          PROJECTION INDISPONIBLE — réponse incomplète du serveur
+        </p>
+      )}
     </Panel>
   }
   const q = cal.quantitative

@@ -58,6 +58,9 @@ interface TerminalStore {
   scenario: ScenarioInfo | null
   sources: Record<string, { up: boolean; fields: string[] }> | null
   selfcheckPresent: boolean
+  /** Le serveur répond, mais avec une projection REST inexploitable (corps tronqué). Distinct de
+   *  « pas encore chargé » : sinon un « chargement… » éternel masque une panne réelle. */
+  projectionsBroken: boolean
 
   // historiques de rendu (sparklines) — buffer client des valeurs du
   // schéma reçues par SSE ; traçable au schéma, rien d'inventé, jamais persisté
@@ -107,6 +110,7 @@ export const useTerminal = create<TerminalStore>((set) => ({
   scenario: null,
   sources: null,
   selfcheckPresent: false,
+  projectionsBroken: false,
 
   history: {},
 
