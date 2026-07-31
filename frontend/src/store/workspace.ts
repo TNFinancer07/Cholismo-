@@ -6,7 +6,7 @@ import { create } from 'zustand'
 import { useTerminal } from './terminal'
 
 /** Identifiants canoniques des panneaux disponibles (couverts par panels/registry). */
-export const PANEL_IDS = ['A1', 'A2', 'A3', 'EC', 'MCAL', 'S2P', 'MOCK', 'B1', 'B2', 'B3', 'B4',
+export const PANEL_IDS = ['A1', 'A2', 'A3', 'EC', 'MCAL', 'S2P', 'SENT', 'MOCK', 'B1', 'B2', 'B3', 'B4',
   'S1S', 'OB', 'TP', 'CVD', 'HM', 'FP', 'CDS', 'VP', 'OMON', 'VTS', 'IA', 'C1', 'C2', 'C4', 'C5',
   'MODE'] as const
 export type PanelId = (typeof PANEL_IDS)[number]
@@ -26,16 +26,16 @@ function builtins(): Workspace[] {
     { id: 'micro', name: 'MICRO · S1', builtin: true, showBlotter: true,
       columns: [['S1S', 'B2', 'IA', 'FP'], ['B4', 'OB', 'CVD', 'VP', 'CDS', 'B1'], ['TP', 'HM', 'EC', 'B3', 'C1', 'C2', 'MOCK']] },
     { id: 'macro', name: 'MACRO · S2', builtin: true, showBlotter: false,
-      columns: [['A1', 'A3', 'EC', 'VTS'], ['S2P', 'A2', 'OMON'], ['B4', 'B3', 'MOCK']] },
+      columns: [['A1', 'A3', 'SENT', 'EC', 'VTS'], ['S2P', 'A2', 'OMON'], ['B4', 'B3', 'MOCK']] },
     { id: 'discipline', name: 'DISCIPLINE', builtin: true, showBlotter: true,
       columns: [['C5', 'C1', 'C2'], ['B4', 'C4'], ['MODE', 'MOCK']] },
   ]
 }
 
-// v12 : ajout du panneau VP (Volume Profile, D-041) à l'espace MICRO — bump de clé : les layouts
-// persistés antérieurs repartent des intégrés (les PERSO se recréent ; pas de migration
-// silencieuse d'un panneau invisible).
-const STORAGE_KEY = () => `cholismo.workspaces.${useTerminal.getState().operator}.v12`
+// v13 : ajout du panneau SENT (positionnement Long/Short, D-053) à l'espace MACRO — bump de
+// clé : les layouts persistés antérieurs repartent des intégrés (les PERSO se recréent ; pas de
+// migration silencieuse d'un panneau INVISIBLE, ce qui reviendrait à livrer une feature morte).
+const STORAGE_KEY = () => `cholismo.workspaces.${useTerminal.getState().operator}.v13`
 
 interface Persisted { workspaces: Workspace[]; activeId: string }
 

@@ -77,6 +77,7 @@ function useStaticCommands(): Command[] {
       focus('A', 'zone A — cascade macro'), focus('B', 'zone B — Router'),
       focus('C', 'zone C — discipline'), focus('D', 'zone D — decision log'),
       panel('A1', 'A'), panel('A2', 'A'), panel('A3', 'A'), panel('EC', 'A'), panel('MCAL', 'A'),
+      panel('SENT', 'A'),
       panel('B1', 'B'), panel('B2', 'B'), panel('B3', 'B'), panel('B4', 'B'),
       panel('OB', 'B'), panel('TP', 'B'), panel('CVD', 'B'), panel('HM', 'B'),
       panel('FP', 'B'), panel('CDS', 'B'), panel('VP', 'B'), panel('OMON', 'B'), panel('VTS', 'B'), panel('IA', 'B'),
@@ -108,7 +109,7 @@ function useStaticCommands(): Command[] {
       },
       {
         mnemonic: 'HELP', aliases: ['?'], label: 'liste des mnémoniques',
-        run: () => 'A·B·C·D / A1…C4 focus · LIVE/PRE/POST mode · TERM/RECAP/MODELIVE/JOURNAL/BORD/PNL/ROBUST/ORCH/PROMPTS/PARAMS vue · CALME/NEWS/STREAK/VIX/CUSTOM scénario · GO/NOGO · SC · DEFAUT/MICRO/MACRO/DISCIPLINE ou WS1…9 espaces · WS suivant · WSRESET',
+        run: () => 'A·B·C·D / A1…C4 focus · SENT positionnement L/S · LIVE/PRE/POST mode · TERM/RECAP/MODELIVE/JOURNAL/BORD/PNL/ROBUST/ORCH/PROMPTS/PARAMS vue · CALME/NEWS/STREAK/VIX/CUSTOM scénario · GO/NOGO · SC · DEFAUT/MICRO/MACRO/DISCIPLINE ou WS1…9 espaces · WS suivant · WSRESET',
       },
     ]
   }, [])

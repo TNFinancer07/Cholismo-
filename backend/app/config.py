@@ -232,3 +232,11 @@ LSR_DRIVER_MAX_AGE_S = float(os.getenv("LSR_DRIVER_MAX_AGE_S", "2.0"))
 # silence : sans plafond, un driver mort ressemble à un driver calme (/devil D-052). 2 s sur une
 # cadence de 250 ms est déjà pathologique — au-delà, on traite en ÉCHEC (donc l'état n'avance pas).
 LSR_DRIVER_CALLBACK_TIMEOUT_S = float(os.getenv("LSR_DRIVER_CALLBACK_TIMEOUT_S", "2.0"))
+
+# --- Positionnement Long/Short — bloc `long_short_ratio` (D-053) ---
+# Seuil de DÉSÉQUILIBRE affiché : fait observable (« ≥ X % d'un côté »), pas une lecture
+# contrarienne — le terminal montre, l'opérateur décide (§2.1).
+SENTIMENT_EXTREME_PCT = float(os.getenv("SENTIMENT_EXTREME_PCT", "75"))
+# Un flux obèse est un flux empoisonné (doctrine D-050) : au-delà, le lot ENTIER est refusé —
+# tronquer masquerait des instruments sans le dire.
+SENTIMENT_MAX_ROWS = int(os.getenv("SENTIMENT_MAX_ROWS", "24"))

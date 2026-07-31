@@ -10,6 +10,7 @@ import { MacroScorePanel } from '@/panels/zoneA/MacroScorePanel'
 import { PipelinePanel } from '@/panels/zoneA/PipelinePanel'
 import { EconCalendarPanel } from '@/panels/zoneA/EconCalendarPanel'
 import { MacroCalendarPanel } from '@/panels/zoneA/MacroCalendarPanel'
+import { LsrSentimentPanel } from '@/panels/zoneA/LsrSentimentPanel'
 import { StrategiesPanel } from '@/panels/zoneB/StrategiesPanel'
 import { ScenarioPanel } from '@/panels/harness/ScenarioPanel'
 import { S1S2Panel } from '@/panels/zoneB/S1S2Panel'
@@ -45,6 +46,7 @@ export const PANEL_REGISTRY: Record<PanelId, PanelDef> = {
   EC: { id: 'EC', label: 'Calendrier éco · Macro/Géo', component: EconCalendarPanel },
   MCAL: { id: 'MCAL', label: 'Calendrier économique · Releases', component: MacroCalendarPanel },
   S2P: { id: 'S2P', label: 'Pipeline macro Youssef', component: PipelinePanel },
+  SENT: { id: 'SENT', label: 'Positionnement Long/Short', component: LsrSentimentPanel },
   S1S: { id: 'S1S', label: 'Stratégies exécution Sony', component: StrategiesPanel },
   MOCK: { id: 'MOCK', label: 'Scénarios & pathologies', component: ScenarioPanel },
   B1: { id: 'B1', label: 'États S1 · S2', component: S1S2Panel },

@@ -38,6 +38,7 @@ SOURCES = {
                    "cycle_div_delta", "leading_turn", "rr_zscore", "spot_momentum"],
     "rms_engine": ["rms"],
     "econ_feed": ["econ_calendar", "macro_releases"],   # schedule systémique (D-027) + releases (D-040)
+    "sentiment_feed": ["long_short"],                  # positionnement Long/Short agrégé (D-053)
 }
 
 
@@ -257,6 +258,36 @@ class MockDataSource(MarketDataSource):
                 {"name": "SansTs", "impact": "MED", "country": "EU", "currency": "EUR"},
                 {"ts": now + 400, "name": "ImpactInvalide", "impact": "EXTREME", "country": "US", "currency": "USD"}]))
         await self._emit(state, "econ_feed", "macro_releases", emitted_macro, patho)
+
+        # --- Positionnement Long/Short agrégé (D-053) : SSI retail par instrument. Le mock reste
+        # volontairement SALE (§4) — une venue réelle perd des catégories (somme ≠ 100), duplique
+        # une ligne ou renvoie un short à 0. Le moteur doit écarter SEUL (jamais une jauge inventée).
+        await self._emit(state, "sentiment_feed", "long_short",
+                         self._gen_long_short(base, vol, patho), patho)
+
+    def _gen_long_short(self, base: dict, vol: float, patho: dict) -> dict:
+        """SSI synthétique : le positionnement dérive lentement, borné [2, 98] %."""
+        rng = self._rng
+        rows = []
+        for symbol, anchor in (("EURUSD", 58.0), ("ES", 46.0), ("NQ", 52.0), ("XAUUSD", 71.0)):
+            long_pct = max(2.0, min(98.0, self._drift(f"ls_{symbol}", anchor, vol, 1.6)))
+            rows.append({
+                "symbol": symbol,
+                "long_pct": round(long_pct, 1),
+                "short_pct": round(100.0 - long_pct, 1),
+                "delta_24h_pct": round(rng.gauss(0, 2.2), 1),
+                "accounts": int(max(500, rng.gauss(14_000, 3_000))),
+            })
+        if rng.random() < patho.get("contradict_p", 0.0) + 0.04:
+            rows.append(rng.choice([
+                {"symbol": "EURUSD", "long_pct": 30.0, "short_pct": 70.0,   # doublon contradictoire
+                 "delta_24h_pct": 0.0, "accounts": 900},
+                {"symbol": "GBPUSD", "long_pct": 62.0, "short_pct": 21.0,   # catégorie perdue
+                 "delta_24h_pct": 0.0, "accounts": 800},
+                {"symbol": "", "long_pct": 50.0, "short_pct": 50.0,         # symbole vide
+                 "delta_24h_pct": 0.0, "accounts": 700},
+            ]))
+        return {"venue": "retail_ssi_demo", "rows": rows}
 
     @staticmethod
     def _seed_macro(now: float) -> list[dict]:

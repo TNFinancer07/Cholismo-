@@ -4,7 +4,7 @@
 import { create } from 'zustand'
 import type {
   AccountStateBlock, BlotterRow, BridgeVariables, Calibration, ContextSchema, EconCalendar, Extras,
-  LiquiditySweep, MacroCalendarValue, MacroRiskValue, MetaField, OperationalMode, Operator,
+  LiquiditySweep, LongShortValue, MacroCalendarValue, MacroRiskValue, MetaField, OperationalMode, Operator,
   OrchestratorPayload, S1State, S2State, SessionIdentity, SyncState, UnifiedSignalOutput, VolSurface,
 } from '@/types/schema'
 
@@ -38,6 +38,7 @@ interface TerminalStore {
   macro_calendar: MetaField<MacroCalendarValue> | null
   macro_risk: MetaField<MacroRiskValue> | null
   account_state: AccountStateBlock | null
+  long_short_ratio: MetaField<LongShortValue> | null
   extras: Extras | null
 
   // santé des canaux (fail-closed UI : canal muet => BLOQUÉ affiché)
@@ -87,6 +88,7 @@ export const useTerminal = create<TerminalStore>((set) => ({
   macro_calendar: null,
   macro_risk: null,
   account_state: null,
+  long_short_ratio: null,
   sync_state: null,
   unified_signal_output: null,
   extras: null,
@@ -149,6 +151,8 @@ export const useTerminal = create<TerminalStore>((set) => ({
         case 'macro_calendar': return { macro_calendar: payload as MetaField<MacroCalendarValue> }
         case 'macro_risk': return { macro_risk: payload as MetaField<MacroRiskValue> }
         case 'account_state': return { account_state: payload as AccountStateBlock }
+        case 'long_short_ratio':
+          return { long_short_ratio: payload as MetaField<LongShortValue> }
         case 'unified_signal_output': {
           const signal = payload as UnifiedSignalOutput
           return { unified_signal_output: signal, history: push(state.history, 'score', signal.score) }

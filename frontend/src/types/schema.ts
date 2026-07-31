@@ -429,6 +429,30 @@ export interface LiquiditySweep {
   recent: LiquiditySweepAlert[]
 }
 
+// --- long_short_ratio → panneau SENT (positionnement agrégé, D-053) [lent] ---
+// ⚠ « LSR » dans ce terminal = Liquidity Sweep Reversal (moteur). Ici c'est le Long/Short Ratio
+// d'une venue de positionnement : mnémonique opérateur SENT, jamais LSR (collision de lecture).
+
+export interface LongShortInstrument {
+  symbol: string
+  long_pct: number
+  short_pct: number
+  /** long/short. `null` quand plus personne n'est short — jamais « ∞ » ni un nombre géant. */
+  ratio: number | null
+  delta_24h_pct: number | null
+  accounts: number | null
+  /** ≥ seuil d'un côté : FAIT observable, aucune lecture contrarienne déduite (§2.1). */
+  imbalanced: boolean
+}
+
+export interface LongShortValue {
+  venue: string
+  instruments: LongShortInstrument[]
+  /** Lignes écartées par le moteur (somme ≠ 100, doublon, symbole vide) — affiché, pas caché. */
+  dropped: number
+  extreme_pct: number
+}
+
 export interface ContextSchema {
   session_identity: SessionIdentity
   s1_state: S1State
@@ -441,6 +465,7 @@ export interface ContextSchema {
   vol_surface: VolSurface
   macro_calendar: MetaField<MacroCalendarValue>
   macro_risk: MetaField<MacroRiskValue>
+  long_short_ratio: MetaField<LongShortValue>
 }
 
 // --- hors-schéma : extras opérationnels poussés sur le canal rapide ---

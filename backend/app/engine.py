@@ -33,6 +33,7 @@ from .risk_sizer import AccountState, account_view, size_plan
 from .trade_manifest import manifest_from_lsr_plan
 from .heatmap import latest_column
 from .macro_risk import build_macro_calendar, compute_macro_risk
+from .sentiment import build_long_short
 from .macro_score import compute_s2_macro_score
 from .meta import Freshness, MetaField, make_meta
 from .phase0 import Phase0Input, evaluate_phase0
@@ -71,6 +72,7 @@ FIELD_SPEC: dict[str, tuple[str, float, float]] = {
     "rms": ("rms_engine", *_FAST),
     "econ_calendar": ("econ_feed", *_SLOW),  # systemic macro/geo schedule (D-027)
     "macro_releases": ("econ_feed", *_SLOW),  # tradable economic releases (D-040)
+    "long_short": ("sentiment_feed", *_SLOW),  # positionnement Long/Short agrégé (D-053)
     # Surface de volatilité (D-039) — chaîne d'options (Greeks engine, vitesse inconnue §8-B2 →
     # GEX_STALE) + structure de vol VIX (CBOE, cadence lente).
     "options_chain": ("greeks_engine", config.GEX_STALE_SECONDS, config.GEX_STALE_SECONDS * 4),
@@ -707,7 +709,7 @@ class Engine:
              "econ_calendar", "macro_releases", "options_chain", "vol_term_structure",
              "g_momentum", "pi_momentum", "d1", "d2", "d3", "d4", "d5",
              "taylor_ois_delta", "phillips_tips_delta", "beer_z", "carry_net",
-             "cycle_div_delta", "leading_turn", "rr_zscore", "spot_momentum"])
+             "cycle_div_delta", "leading_turn", "rr_zscore", "spot_momentum", "long_short"])
         cascade = Cascade(
             nq_es=await self._meta("nq_es", raws, now),
             vix=await self._meta("vix", raws, now),
@@ -738,10 +740,18 @@ class Engine:
             value=build_macro_calendar(mr.value if isinstance(mr.value, list) else [], now,
                                        config.MACRO_PAST_GRACE_S, config.MACRO_MAX_EVENTS),
             last_update_ts=mr.last_update_ts, source=mr.source, freshness=mr.freshness, flags=mr.flags)
+        # Positionnement Long/Short (D-053) — la FRAÎCHEUR reste celle du brut ; seule la valeur
+        # est normalisée. Un lot inexploitable rend None → le bloc devient ABSENT plutôt que
+        # « connecté mais vide » (§3), et le panneau affiche PAS DE DONNÉES.
+        ls = await self._meta("long_short", raws, now)
+        self.schema.long_short_ratio = MetaField(
+            value=build_long_short(ls.value), last_update_ts=ls.last_update_ts,
+            source=ls.source, freshness=ls.freshness, flags=ls.flags)
         dump = self.schema.model_dump(mode="json")
         broadcaster.publish("slow", "s2_state", dump["s2_state"])
         broadcaster.publish("slow", "econ_calendar", dump["econ_calendar"])
         broadcaster.publish("slow", "vol_surface", dump["vol_surface"])
+        broadcaster.publish("slow", "long_short_ratio", dump["long_short_ratio"])
         broadcaster.publish("slow", "macro_calendar", dump["macro_calendar"])
 
     async def _build_vol_surface(self, raws: dict, now: float) -> VolSurface:
