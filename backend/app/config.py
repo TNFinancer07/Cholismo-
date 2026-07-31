@@ -258,3 +258,6 @@ ORDERFLOW_MAX_BOOKS = int(os.getenv("ORDERFLOW_MAX_BOOKS", "2000"))
 # sur un lot n'est pas un flux acheteur, c'est du bruit présenté comme une mesure (/devil D-055).
 # v1 provisional — à calibrer avec l'instrument (MES ≠ ES).
 ORDERFLOW_MIN_VOLUME = float(os.getenv("ORDERFLOW_MIN_VOLUME", "20"))
+# Durée MINIMALE de part et d'autre du sweep pour que B4 soit un débit : un taux mesuré sur
+# quelques millisecondes est du bruit multiplié par mille (/devil D-055, 2e passe). v1 provisional.
+ORDERFLOW_MIN_SPAN_S = float(os.getenv("ORDERFLOW_MIN_SPAN_S", "1.0"))

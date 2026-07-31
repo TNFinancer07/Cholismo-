@@ -2967,6 +2967,41 @@ POURQUOI ; c'est le motif qui rend l'absence exploitable.
   comparaisons, B3 **381/381**, profil toujours identique au moteur D-041, et matrice d'attaques
   où chaque ligne refuse de mesurer avec son motif.
 
+### /devil (2e passe) — les surfaces que la première n'avait pas regardées
+La première passe attaquait les VALEURS (croisé, plancher, débordement). Celle-ci attaque la
+STRUCTURE des entrées : ordre, doublons, unité de grille, durée.
+
+- **Carnets non triés → B1 mesurait entre les mauvaises bornes.** Les prints étaient triés, pas
+  les snapshots de carnet : `sizes[0]`/`sizes[-1]` étaient le PREMIER et le DERNIER *reçus*, pas
+  le plus ancien et le plus récent. Deux tampons concaténés, ou un feed qui double-livre, et le
+  rechargement se calculait à l'envers. Vérifié : carnets inversés → B1 **0,8235 vs 0,8235**.
+- **Prints dupliqués (rejeu, fenêtres qui se chevauchent) → volumes gonflés.** Dédup sur `seq`,
+  l'identifiant EXPLICITE du flux. **Sans `seq`, on ne déduplique pas** : deux prints identiques
+  sont indiscernables d'un vrai double passage au même prix — ce qui arrive tout le temps —, et
+  dédupliquer « au contenu » effacerait du volume RÉEL. Vérifié : flux rejoué ×2 → volume 510 vs
+  510, B3 +0,7059 vs +0,7059.
+- **Tick de prix invalide → profil ni publié ni « vide ».** `build_volume_profile` rend un objet
+  VIDE (et non `None`) sur un tick absurde ; publié tel quel il se lirait « connecté mais sans
+  volume » — exactement le mensonge refusé en D-053/D-055. Un tick invalide n'a pas de sens
+  physique : il empêche la mesure (profil ET B1), il ne la dégrade pas.
+- **B4 sur quelques millisecondes → refusée.** Un sweep collé à `now` donnait un débit « après »
+  mesuré sur 1 ms : du bruit multiplié par mille, publié comme une accélération. Plancher
+  `ORDERFLOW_MIN_SPAN_S` des DEUX côtés (v1 provisional).
+- **Tous les prints datés du futur → motif ACTIONNABLE.** Erreur de câblage classique (le `now`
+  fourni est en retard sur le flux) : le motif « volume sous le plancher » envoyait chercher au
+  mauvais endroit. Le calculateur nomme désormais la cause probable — l'horloge d'appel.
+- **Mes attentes fausses, encore deux** : `tick=None` est le « non fourni » documenté de l'API
+  (il retombe sur `PRICE_TICK`), pas une valeur invalide ; et j'ai cherché le mot « futur » dans
+  un message qui dit « postérieur à `now` ». Les assertions suivent maintenant le comportement et
+  le message RÉELS, pas ceux que j'imaginais.
+- **Risque résiduel tracé** : `volume_profile` est un `dict` MUTABLE dans un snapshot par ailleurs
+  gelé — un consommateur peut le modifier en place pour tous ceux qui tiennent le même objet. Un
+  `MappingProxyType` le fermerait, mais casserait la sérialisation JSON du futur câblage SSE.
+  Choix assumé : documenté ici plutôt que verrouillé au prix d'un blocage en aval.
+- **Vérif 2e passe** : +7 tests (carnets désordonnés, dédup avec et SANS `seq`, tick invalide ×5,
+  plancher de durée ×2, prints du futur) → **689 passed**, ruff clean, essai relancé avec quatre
+  attaques structurelles, toutes refusées avec motif.
+
 - **Collision de vocabulaire signalée** : B1-B4 désignent AUSSI des panneaux de l'UI (B1 États
   S1·S2, B2 Bridge, B3 Sync, B4 Signal unifié). Les lettres restent de la documentation ; les
   identifiants du code portent le sens (`wall_refill_ratio`…), et snake_case côté Python là où le

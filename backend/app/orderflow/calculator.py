@@ -262,7 +262,7 @@ def _b3_rejection_delta(prints: Sequence[tuple], min_coverage: float, min_volume
 
 
 def _b4_post_sweep(prints: Sequence[tuple], sweep: Any, now: float, floor_ts: float,
-                   missing: list[str]) -> Optional[float]:
+                   min_span: float, missing: list[str]) -> Optional[float]:
     sweep_ts = sweep.get("ts") if isinstance(sweep, dict) else None
     if not _finite(sweep_ts):
         missing.append("B4: aucun sweep horodaté")
@@ -273,8 +273,10 @@ def _b4_post_sweep(prints: Sequence[tuple], sweep: Any, now: float, floor_ts: fl
     before = [p for p in prints if p[0] < sweep_ts]
     after = [p for p in prints if p[0] >= sweep_ts]
     span_before, span_after = sweep_ts - floor_ts, now - sweep_ts
-    if span_before <= 0 or span_after <= 0:
-        missing.append("B4: fenêtre avant ou après de durée nulle")
+    if min(span_before, span_after) < min_span:
+        # Un débit mesuré sur quelques millisecondes est du bruit multiplié par mille.
+        missing.append(f"B4: durée insuffisante de part et d'autre du sweep "
+                       f"({min(span_before, span_after):.3g}s < {min_span:g}s)")
         return None
     vol_before, vol_after = sum(p[2] for p in before), sum(p[2] for p in after)
     if not (_finite(vol_before) and _finite(vol_after)):
@@ -332,6 +334,7 @@ def compute_snapshot(*, now: Any, prints: Any = (), books: Any = (), bars: Any =
                      atr_fast: int = None, atr_slow: int = None,      # type: ignore[assignment]
                      min_side_coverage: float = None,                 # type: ignore[assignment]
                      min_volume: float = None,                        # type: ignore[assignment]
+                     min_span: float = None,                          # type: ignore[assignment]
                      ) -> OrderFlowSnapshot:
     """Calcule un `OrderFlowSnapshot`. Ne lève JAMAIS : toute entrée inexploitable dégrade la
     grandeur concernée en `None` motivé, sans toucher aux autres (§3)."""
@@ -356,19 +359,39 @@ def compute_snapshot(*, now: Any, prints: Any = (), books: Any = (), bars: Any =
     floor_ts = now - window_s
 
     raw_prints = list(prints)[-config.ORDERFLOW_MAX_PRINTS:] if isinstance(prints, (list, tuple)) else []
-    kept, dropped = [], 0
+    kept, dropped, from_future, seen_seq = [], 0, 0, set()
     for p in raw_prints:
         norm = _norm_print(p, now, floor_ts)
         if norm is None:
             dropped += 1
-        else:
-            kept.append(norm)
+            if isinstance(p, dict) and _finite(p.get("ts")) and p["ts"] > now:
+                from_future += 1
+            continue
+        # Dédup sur `seq` UNIQUEMENT (identifiant explicite du flux) : rejeu ou fenêtres qui se
+        # chevauchent. Sans `seq`, deux prints identiques sont indiscernables d'un vrai double
+        # passage au même prix — dédupliquer « au contenu » effacerait du volume RÉEL.
+        seq = p.get("seq")
+        if seq is not None:
+            if seq in seen_seq:
+                dropped += 1
+                continue
+            seen_seq.add(seq)
+        kept.append(norm)
     kept.sort(key=lambda p: p[0])
+    if from_future and not kept:
+        # Erreur de câblage classique : le `now` fourni est en retard sur le flux. Sans ce motif,
+        # « volume sous le plancher » enverrait chercher au mauvais endroit.
+        missing.append(f"tape: {from_future} print(s) postérieur(s) à `now` et AUCUN retenu — "
+                       f"horloge d'appel en retard sur le flux ?")
 
     raw_books = list(books)[-config.ORDERFLOW_MAX_BOOKS:] if isinstance(books, (list, tuple)) else []
-    books_in_window = [b for b in raw_books
-                       if isinstance(b, dict) and _finite(b.get("ts"))
-                       and floor_ts <= b["ts"] <= now]
+    # TRIÉS comme les prints : `sizes[0]`/`sizes[-1]` doivent être le plus ANCIEN et le plus
+    # RÉCENT, pas le premier et le dernier reçus. Deux tampons concaténés suffisaient à mesurer
+    # le rechargement entre les mauvaises bornes (/devil 2e passe).
+    books_in_window = sorted(
+        (b for b in raw_books
+         if isinstance(b, dict) and _finite(b.get("ts")) and floor_ts <= b["ts"] <= now),
+        key=lambda b: b["ts"])
 
     # Profil de volume : DÉLÉGUÉ (D-041) — une seule implémentation du VPOC dans le terminal.
     volume_by_price: dict[float, float] = {}
@@ -378,24 +401,34 @@ def compute_snapshot(*, now: Any, prints: Any = (), books: Any = (), bars: Any =
         if side == "BUY":
             buy_by_price[price] = buy_by_price.get(price, 0.0) + size
     profile = None
-    if volume_by_price:
-        profile = build_volume_profile(volume_by_price, tick, config.VP_VA_PCT,
-                                       config.VP_LVN_RATIO, config.VP_MAX_LEVELS,
-                                       buy_by_price=buy_by_price)
+    if not _finite(tick) or tick <= 0:
+        # `build_volume_profile` rend un objet VIDE (pas `None`) sur un tick absurde ; publié tel
+        # quel il se lirait « connecté mais sans volume ». Un tick invalide n'a pas de sens
+        # physique : il empêche la mesure, il ne la dégrade pas.
+        missing.append(f"VP/B1: tick de prix invalide ({tick!r}) — aucune grille de prix")
+        tick_ok = False
     else:
-        missing.append("VP: aucun print exploitable dans la fenêtre")
+        tick_ok = True
+        if volume_by_price:
+            profile = build_volume_profile(volume_by_price, tick, config.VP_VA_PCT,
+                                           config.VP_LVN_RATIO, config.VP_MAX_LEVELS,
+                                           buy_by_price=buy_by_price)
+        else:
+            missing.append("VP: aucun print exploitable dans la fenêtre")
 
     min_volume = (min_volume if min_volume is not None else config.ORDERFLOW_MIN_VOLUME)
+    min_span = (min_span if min_span is not None else config.ORDERFLOW_MIN_SPAN_S)
     return OrderFlowSnapshot(
         now=now, window_s=window_s,
         wall_refill_ratio=_publishable(
-            _b1_wall_refill(books_in_window, wall_price, wall_side, tick, missing), "B1", missing),
+            _b1_wall_refill(books_in_window, wall_price, wall_side, tick, missing)
+            if tick_ok else None, "B1", missing),
         tape_aggressor_buy_fraction=_publishable(
             _b2_aggressor_fraction(kept, coverage, min_volume, missing), "B2", missing),
         rejection_delta_ratio=_publishable(
             _b3_rejection_delta(kept, coverage, min_volume, missing), "B3", missing),
         post_sweep_aggression_ratio=_publishable(
-            _b4_post_sweep(kept, sweep, now, floor_ts, missing), "B4", missing),
+            _b4_post_sweep(kept, sweep, now, floor_ts, min_span, missing), "B4", missing),
         volume_profile=profile,
         atr_fast=_publishable(_atr(bars, atr_fast, missing), f"ATR({atr_fast})", missing),
         atr_slow=_publishable(_atr(bars, atr_slow, missing), f"ATR({atr_slow})", missing),

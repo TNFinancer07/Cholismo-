@@ -468,3 +468,78 @@ def test_devil_fenetre_ABSURDE_rend_un_snapshot_MOTIVE_pas_un_silence():
         s = _snap(window_s=bad, prints=[_print(1, 5000.0, 100, "BUY")])
         assert s.tape_aggressor_buy_fraction is None
         assert any("fenêtre" in m for m in s.missing), bad
+
+
+# =============================================================================================
+# /devil (2e passe) — ce que la première passe n'avait pas regardé
+# =============================================================================================
+
+def test_devil2_tick_INVALIDE_ne_publie_pas_un_profil_vide_mais_present():
+    """`build_volume_profile` rend un objet VIDE (et non `None`) quand le tick est absurde. Publié
+    tel quel, ce profil se lit « connecté mais sans volume » — exactement le mensonge refusé en
+    D-053. Un tick invalide ne dégrade pas le profil : il l'empêche."""
+    prints = [_print(1, 5000.0, 50, "BUY"), _print(2, 5000.25, 50, "SELL")]
+    # `None` n'est PAS dans la liste : c'est le « non fourni » documenté de l'API, qui retombe
+    # sur `config.PRICE_TICK`. L'y mettre testerait le contraire de ce qu'on veut.
+    for bad in (0.0, -0.25, math.nan, math.inf, "0.25"):
+        s = _snap(prints=prints, tick=bad)
+        assert s.volume_profile is None, bad
+        assert any("tick" in m for m in s.missing), bad
+
+
+def test_devil2_carnets_DESORDONNES_sont_remis_en_ordre():
+    """Les prints étaient triés, pas les carnets : `sizes[0]` et `sizes[-1]` étaient donc la
+    PREMIÈRE et la DERNIÈRE reçues, pas la plus ancienne et la plus récente. Deux tampons
+    concaténés (ou un feed qui double-livre) suffisaient à mesurer entre les mauvaises bornes."""
+    ordonne = [_book(0, [[4999.75, 100]], []), _book(5, [[4999.75, 20]], []),
+               _book(10, [[4999.75, 80]], [])]
+    melange = [ordonne[2], ordonne[0], ordonne[1]]
+    a = _snap(books=ordonne, wall_price=4999.75, wall_side="BID").wall_refill_ratio
+    b = _snap(books=melange, wall_price=4999.75, wall_side="BID").wall_refill_ratio
+    assert a == pytest.approx(0.75) and b == pytest.approx(a)
+
+
+def test_devil2_prints_DUPLIQUES_ne_comptent_pas_deux_fois():
+    """Rejeu de flux ou fenêtres qui se chevauchent : le même print livré deux fois gonfle les
+    volumes (donc B3, B4 et le profil). Dédup sur `seq` — l'identifiant EXPLICITE du flux."""
+    p1 = {**_print(1, 5000.0, 60, "BUY"), "seq": 101}
+    p2 = {**_print(2, 4999.0, 40, "SELL"), "seq": 102}
+    simple = _snap(prints=[p1, p2])
+    double = _snap(prints=[p1, p2, dict(p1), dict(p2)])
+    assert double.prints_used == simple.prints_used == 2
+    assert double.volume_profile["total_volume"] == pytest.approx(100)
+
+
+def test_devil2_prints_identiques_SANS_seq_sont_CONSERVES():
+    """Sans identifiant, deux prints identiques sont indiscernables d'un vrai double passage au
+    même prix — ce qui arrive tout le temps. Dédupliquer « au contenu » effacerait du volume RÉEL."""
+    p = _print(1, 5000.0, 60, "BUY")
+    s = _snap(prints=[dict(p), dict(p)])
+    assert s.prints_used == 2 and s.volume_profile["total_volume"] == pytest.approx(120)
+
+
+def test_devil2_B4_refuse_une_fenetre_de_quelques_MILLISECONDES():
+    """Un débit mesuré sur 1 ms n'est pas un débit : c'est du bruit multiplié par mille. Sous le
+    plancher de durée, la porte n'est pas calculée."""
+    prints = [_print(-5, 5000.0, 100, "SELL"), _print(-0.0005, 5000.0, 30, "BUY")]
+    s = _snap(now=T0, prints=prints, sweep={"ts": T0 - 0.001})
+    assert s.post_sweep_aggression_ratio is None
+    assert any("B4" in m and "durée" in m for m in s.missing)
+
+
+def test_devil2_B4_reste_calculee_au_dessus_du_plancher_de_duree():
+    span = config.ORDERFLOW_MIN_SPAN_S
+    prints = [_print(-3 * span, 5000.0, 100, "SELL"), _print(-span / 2, 5000.0, 100, "BUY")]
+    s = _snap(now=T0, window_s=6 * span, prints=prints, sweep={"ts": T0 - span})
+    assert s.post_sweep_aggression_ratio is not None
+
+
+def test_devil2_TOUS_les_prints_dates_du_futur_dit_POURQUOI():
+    """Erreur de câblage classique : le `now` passé au calculateur est en retard sur le flux. Le
+    motif « volume sous le plancher » enverrait chercher au mauvais endroit."""
+    s = _snap(prints=[_print(+10, 5000.0, 100, "BUY"), _print(+20, 5000.0, 100, "SELL")],
+              now=T0)
+    assert s.prints_dropped == 2 and s.prints_used == 0
+    # Le motif dit « postérieur(s) à `now` » — plus précis que « futur », et il NOMME la cause
+    # probable (l'horloge d'appel). L'assertion suit le message réel, pas celui que j'imaginais.
+    assert any("postérieur" in m and "horloge" in m for m in s.missing)
