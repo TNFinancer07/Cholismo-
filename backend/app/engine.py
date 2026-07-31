@@ -250,6 +250,11 @@ class Engine:
         # l'événement (identité `trigger|direction`, la même qu'au dédoublonnage).
         self._sweep_event_key: Optional[str] = None
         self._sweep_event_ts: Optional[float] = None
+        # Comparaison ombre (D-056) : elle vit dans SON attribut, pas dans `_extras` — ce dernier
+        # est RECONSTRUIT à chaque tick rapide (4 Hz) alors que l'ombre s'écrit sur la cadence
+        # sweep (1 Hz). Écrite directement dans `_extras`, elle n'était visible que 25 % des
+        # ticks (mesuré) : un consommateur la verrait clignoter, donc « non mesurée » (/polish).
+        self._orderflow_shadow: dict = {}
         # CVD par niveau (D-029) : accumulateur prix -> [buy, sell], seq déjà traité,
         # clé de l'événement du dernier reset, bornes de la fenêtre courante.
         self._cvd_levels: dict[float, list[float]] = {}
@@ -678,7 +683,9 @@ class Engine:
 
         self._extras = {"rms": rms_value, "rms_meta": rms_meta.model_dump(mode="json"),
                         "streak": streak, "streak_acked": streak_acked,
-                        "scenario": {"name": scenario["name"], "label": scenario["label"]}}
+                        "scenario": {"name": scenario["name"], "label": scenario["label"]},
+                        # Recomposée ici, à l'endroit UNIQUE où `_extras` se construit.
+                        "orderflow_shadow": self._orderflow_shadow}
 
         if redis_up:
             await self.state.beat()
@@ -879,7 +886,8 @@ class Engine:
             self.schema, self._book_history, now=now,
             sweep_ts=self._sweep_event_ts,
             sweep_direction=alert.direction if alert else None)
-        self._extras["orderflow_shadow"] = orderflow_shadow(self.schema, snapshot)
+        self._orderflow_shadow = orderflow_shadow(self.schema, snapshot)
+        self._extras["orderflow_shadow"] = self._orderflow_shadow
         if not sw.triggered:
             # Condition levée → le PROCHAIN sweep est un événement NEUF (même sémantique que
             # `_sweep_last_key`, D-028). Sans ce reset, un trigger|direction identique plus tard

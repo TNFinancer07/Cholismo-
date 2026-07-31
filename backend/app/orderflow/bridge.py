@@ -134,7 +134,20 @@ def orderflow_shadow(schema: Any, snapshot: OrderFlowSnapshot) -> dict:
                     else value <= 1.0 - config.LSR_B2_FLIP)
 
         v2_src, v2_ih = _b2_verdict(ratio), _b2_verdict(flip)
+        # Ligne LISIBLE en tête : un dict de valeurs brutes n'est pas un message. Ce qu'un humain
+        # doit lire d'abord, c'est le verdict — d'accord, en désaccord (et sur QUOI), ou pas
+        # mesurable. Les nombres restent en dessous pour qui veut vérifier (/polish).
+        ecarts = [nom for nom, a, b in (("B1", v1_src, v1_ih), ("B2", v2_src, v2_ih))
+                  if a is not None and b is not None and a != b]
+        indispo = [nom for nom, val in (("B1", v1_ih), ("B2", v2_ih)) if val is None]
+        if ecarts:
+            resume = f"DÉSACCORD {' et '.join(ecarts)} — proxy et mesure maison ne concluent pas pareil"
+        elif indispo:
+            resume = f"mesure maison non mesurable ({', '.join(indispo)})"
+        else:
+            resume = "accord : les deux sources concluent pareil"
         return {
+            "resume": resume,
             "source": config.LSR_ORDERFLOW_SOURCE,
             "b1": {"source": absorption, "inhouse": refill,
                    "verdict_source": v1_src, "verdict_inhouse": v1_ih,
@@ -150,4 +163,5 @@ def orderflow_shadow(schema: Any, snapshot: OrderFlowSnapshot) -> dict:
             "missing": list(snapshot.missing),
         }
     except Exception:                                  # noqa: BLE001 — observation, pas décision
-        return {"source": config.LSR_ORDERFLOW_SOURCE, "error": "comparaison indisponible"}
+        return {"resume": "comparaison non mesurable (erreur d'observation)",
+                "source": config.LSR_ORDERFLOW_SOURCE}

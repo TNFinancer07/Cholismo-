@@ -3124,6 +3124,23 @@ Deux axes demandés : sweeps chaotiques et coupure de flux. Le premier a révél
   volume avant le sweep » — c'est mon tape SYNTHÉTIQUE qui glisse avec `now`, pas un défaut : un
   vrai tape est une fenêtre glissante qui contient encore les prints d'avant l'événement.
 
+### /polish (Loop 5) — une ombre qui clignote ne prouve rien
+- **L'ombre n'était visible que 25 % du temps (mesuré).** `_assemble_fast` RECONSTRUIT `extras`
+  à 4 Hz ; la boucle sweep y écrivait à 1 Hz. Trois ticks sur quatre, la comparaison disparaissait
+  — et un champ qui va et vient se lit exactement comme « non mesurée », le mensonge que tout ce
+  terminal refuse. Or l'ombre est précisément ce qui doit ACCUMULER de la preuve avant la
+  bascule : intermittente, elle n'en accumule aucune. Elle vit désormais dans son propre attribut,
+  recomposée à l'endroit UNIQUE où `extras` se construit. Re-mesuré : **40/40 ticks, 100 %**.
+- **Une ligne LISIBLE en tête.** Un dict de valeurs brutes n'est pas un message. `resume` dit le
+  verdict d'abord — « accord : les deux sources concluent pareil » / « **DÉSACCORD B1** — proxy et
+  mesure maison ne concluent pas pareil » / « mesure maison non mesurable (B1, B2) » — les nombres
+  restent en dessous pour qui veut vérifier.
+- **Coût du câblage mesuré** : **0,21 ms** par tick sweep (snapshot + ombre), 0,46 ms au pire, sur
+  la cadence 1 Hz et hors hot path (§2.8/§7). Le tampon de carnets se stabilise à ~13 entrées sur
+  ce banc. Rien à optimiser.
+- **Vérif /polish** : +2 tests (persistance de l'ombre à travers six ticks rapides ; ligne lisible
+  dans les trois cas) → **727 passed**, ruff clean.
+
 - **Reste ouvert** : la bascule elle-même. Elle se fera quand l'ombre aura montré assez d'accords
   — et le désaccord de la scène B est précisément le genre de cas à examiner avant, pas après.
 

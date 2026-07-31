@@ -213,3 +213,69 @@ def test_C1_l_horodatage_d_evenement_NE_GLISSE_PAS_avec_les_re_evaluations():
         finally:
             await state.close()
     asyncio.run(scenario())
+
+
+# =============================================================================================
+# D. /polish — l'ombre doit être LISIBLE et PERSISTANTE
+# =============================================================================================
+
+@pytest.mark.skipif(not _engine_available(), reason="Redis indisponible — intégration sautée")
+def test_D1_l_ombre_SURVIT_a_la_reconstruction_des_extras():
+    """`_assemble_fast` reconstruit `extras` à 4 Hz, la boucle sweep y écrit à 1 Hz : l'ombre
+    n'était visible que 25 % des ticks (mesuré). Un consommateur la verrait CLIGNOTER —
+    indistinguable de « non mesurée », exactement ce que ce terminal refuse."""
+    import asyncio
+    import time
+
+    from app.datasource.mock import MockDataSource
+    from app.engine import Engine
+    from app.redis_state import RedisState
+    from app.schema import LiquiditySweep, LiquiditySweepAlert
+
+    async def scenario():
+        state = RedisState()
+        try:
+            await state.set_scenario({"name": "calme", "force_session": "OVERLAP_NY"})
+            engine = Engine(MockDataSource(), state)
+            base = time.time()
+            engine.schema.liquidity_sweep = LiquiditySweep(
+                assessable=True, triggered=True, reason="t",
+                alert=LiquiditySweepAlert(ts=base, kind="LIQUIDITY_SWEEP",
+                                          direction="BID_SWEEP", trigger="T", detail="t"))
+            engine._maybe_emit_lsr(base)                     # la boucle sweep écrit l'ombre
+            assert "orderflow_shadow" in engine._extras
+            for k in range(6):                               # six ticks rapides ensuite
+                await engine.ds.tick_fast(state)
+                await engine._assemble_fast(base + 0.25 * (k + 1))
+                assert "orderflow_shadow" in engine._extras, f"effacée au tick {k}"
+        finally:
+            await state.close()
+    asyncio.run(scenario())
+
+
+def test_D2_l_ombre_porte_une_LIGNE_LISIBLE_pas_seulement_des_nombres():
+    """Un dict de valeurs brutes n'est pas un message. La première chose qu'un humain doit lire,
+    c'est le VERDICT : d'accord, en désaccord (et sur quoi), ou pas mesurable."""
+    from app.orderflow import OrderFlowSnapshot
+    from app.orderflow.bridge import orderflow_shadow
+
+    class _S:
+        class s1_state:
+            class order_flow:
+                absorption = _Meta(True)
+                aggressor_ratio = _Meta(0.85)
+        class liquidity_sweep:
+            triggered = True
+            class alert:
+                direction = "BID_SWEEP"
+
+    accord = orderflow_shadow(_S(), OrderFlowSnapshot(
+        now=T0, window_s=30.0, wall_refill_ratio=0.9, tape_aggressor_buy_fraction=0.85))
+    assert "accord" in accord["resume"].lower() and "B" not in accord["resume"].split()[0]
+
+    desaccord = orderflow_shadow(_S(), OrderFlowSnapshot(
+        now=T0, window_s=30.0, wall_refill_ratio=0.1, tape_aggressor_buy_fraction=0.85))
+    assert "DÉSACCORD" in desaccord["resume"] and "B1" in desaccord["resume"]
+
+    muet = orderflow_shadow(_S(), OrderFlowSnapshot(now=T0, window_s=30.0))
+    assert "non mesur" in muet["resume"].lower()
