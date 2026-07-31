@@ -33,7 +33,13 @@ function Delta({ value }: { value: number | null }) {
 }
 
 function Row({ inst }: { inst: LongShortInstrument }) {
+  // Géométrie EXACTE : les deux largeurs viennent de la donnée, et rien n'est écrit DANS les
+  // bandes. /devil : les pourcentages étaient placés à l'intérieur, et leur largeur minimale
+  // déformait la jauge — mesuré à 93,7 % de long pour une donnée à 100 % (une bande de 0 %
+  // occupait 6,3 % de la largeur). Une jauge quantitative qui ment sur l'extrême ment là où
+  // elle sert. Les chiffres vivent maintenant À CÔTÉ : §3 préservé, géométrie honnête.
   const longSide = Math.max(0, Math.min(100, inst.long_pct))
+  const shortSide = Math.max(0, Math.min(100, 100 - longSide))
   return (
     <li className="border-b border-term-border/50 py-1 last:border-b-0" data-testid={`ls-row-${inst.symbol}`}>
       <div className="flex items-baseline justify-between gap-2">
@@ -57,29 +63,31 @@ function Row({ inst }: { inst: LongShortInstrument }) {
           <Delta value={inst.delta_24h_pct} />
         </span>
       </div>
-      {/* Jauge : LONG à gauche, SHORT à droite. Les deux libellés sont TOUJOURS écrits —
-          la lecture ne dépend jamais de la seule couleur (§3). */}
-      <div className="mt-0.5 flex h-3.5 w-full overflow-hidden rounded-sm border border-term-border"
-        role="img"
-        aria-label={`${inst.symbol} : ${fmtNum(inst.long_pct, 1)} % long, ${fmtNum(inst.short_pct, 1)} % short`}>
-        <div className="flex items-center justify-start bg-risk-green/25 px-1"
-          style={{ width: `${longSide}%` }} data-testid={`ls-bar-long-${inst.symbol}`}>
-          <span className="whitespace-nowrap text-xxs font-bold tabular-nums text-risk-green">
-            {fmtNum(inst.long_pct, 1)}
-          </span>
+      {/* Chiffres HORS de la jauge : toujours lisibles quelle que soit la géométrie (§3), et
+          la jauge reste une mesure exacte. LONG à gauche, SHORT à droite (position + libellé). */}
+      <div className="mt-0.5 flex items-center gap-1.5">
+        <span className="w-16 shrink-0 whitespace-nowrap text-xxs font-bold tabular-nums text-risk-green"
+          data-testid={`ls-pct-long-${inst.symbol}`}>
+          LONG {fmtNum(inst.long_pct, 1)}
+        </span>
+        <div className="flex h-3 min-w-0 flex-1 overflow-hidden rounded-sm border border-term-border"
+          role="img"
+          aria-label={`${inst.symbol} : ${fmtNum(inst.long_pct, 1)} % long, ${fmtNum(inst.short_pct, 1)} % short`}>
+          <div className="bg-risk-green/40" style={{ width: `${longSide}%` }}
+            data-testid={`ls-bar-long-${inst.symbol}`} />
+          <div className="bg-risk-red/40" style={{ width: `${shortSide}%` }}
+            data-testid={`ls-bar-short-${inst.symbol}`} />
         </div>
-        <div className="flex flex-1 items-center justify-end bg-risk-red/25 px-1"
-          data-testid={`ls-bar-short-${inst.symbol}`}>
-          <span className="whitespace-nowrap text-xxs font-bold tabular-nums text-risk-red">
-            {fmtNum(inst.short_pct, 1)}
-          </span>
+        <span className="w-16 shrink-0 whitespace-nowrap text-right text-xxs font-bold tabular-nums text-risk-red"
+          data-testid={`ls-pct-short-${inst.symbol}`}>
+          {fmtNum(inst.short_pct, 1)} SHORT
+        </span>
+      </div>
+      {inst.accounts !== null && (
+        <div className="text-right text-xxs text-term-faint">
+          {inst.accounts.toLocaleString('fr-FR')} comptes
         </div>
-      </div>
-      <div className="flex justify-between text-xxs uppercase tracking-wide text-term-faint">
-        <span>long</span>
-        <span>{inst.accounts === null ? '' : `${inst.accounts.toLocaleString('fr-FR')} comptes`}</span>
-        <span>short</span>
-      </div>
+      )}
     </li>
   )
 }
@@ -91,7 +99,15 @@ export function LsrSentimentPanel() {
 
   return (
     <Panel code="SENT" title="Positionnement Long/Short" block="long_short_ratio" accent="youssef"
-      right={value ? <span className="text-xxs text-term-faint">{value.venue}</span> : undefined}>
+      right={(
+        // Pedigree TOUJOURS visible (/devil) : la venue permet de trancher une donnée douteuse,
+        // et les drapeaux de pathologie (retard, désync) n'apparaissaient qu'en STALE — un bloc
+        // FRESH mais horodaté de travers avait donc l'air impeccable.
+        <span className="flex items-center gap-1">
+          {meta && <FlagIcons meta={meta} />}
+          {value && <span className="text-xxs text-term-faint" data-testid="ls-venue">{value.venue}</span>}
+        </span>
+      )}>
       {!value || value.instruments.length === 0 ? (
         // Fail-closed (§3) : aucune jauge à moitié inventée, un message franc.
         <div className="flex h-full flex-col items-center justify-center gap-1 text-absent absent-pulse"
@@ -103,9 +119,9 @@ export function LsrSentimentPanel() {
       ) : (
         <>
           {meta?.freshness === 'STALE' && (
-            <div className="mb-1 flex items-center gap-1 border border-stale/50 px-1 py-0.5 text-xxs text-stale"
+            <div className="mb-1 border border-stale/50 px-1 py-0.5 text-xxs text-stale"
               data-testid="ls-stale">
-              PÉRIMÉ {fmtAge(age)} — positionnement figé <FlagIcons meta={meta} />
+              PÉRIMÉ {fmtAge(age)} — positionnement figé
             </div>
           )}
           <ul className={cn(meta?.freshness === 'STALE' && 'opacity-60')}>

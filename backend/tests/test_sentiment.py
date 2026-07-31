@@ -40,8 +40,11 @@ def test_desequilibre_marque_au_dela_du_seuil():
     over = config.SENTIMENT_EXTREME_PCT + 1.0
     out = build_long_short(_raw([_row(long_pct=over, short_pct=100.0 - over),
                                  _row(symbol="ES", long_pct=55.0, short_pct=45.0)]))
-    assert out["instruments"][0]["imbalanced"] is True
-    assert out["instruments"][1]["imbalanced"] is False
+    # Repérage par SYMBOLE, pas par position : l'ordre d'affichage est trié (/devil), et un test
+    # qui dépend de la position casserait au moindre changement de tri sans rien prouver de plus.
+    by_symbol = {i["symbol"]: i for i in out["instruments"]}
+    assert by_symbol["EURUSD"]["imbalanced"] is True
+    assert by_symbol["ES"]["imbalanced"] is False
 
 
 def test_desequilibre_cote_SHORT_aussi():
@@ -98,6 +101,25 @@ def test_doublon_de_symbole_ecarte():
     out = build_long_short(_raw([_row(), _row(long_pct=20.0, short_pct=80.0)]))
     assert len(out["instruments"]) == 1 and out["instruments"][0]["long_pct"] == 60.0
     assert out["dropped"] == 1
+
+
+def test_ordre_des_lignes_DETERMINISTE_quel_que_soit_le_flux():
+    """/devil : une venue qui réordonne ses lignes à chaque rafraîchissement ferait SAUTER les
+    instruments d'un tick à l'autre — impossible de verrouiller l'œil sur une ligne en séance.
+    L'ordre d'affichage ne doit dépendre que du contenu, jamais de l'ordre d'arrivée."""
+    forward = build_long_short(_raw([_row(symbol="EURUSD"), _row(symbol="ES"), _row(symbol="NQ")]))
+    shuffled = build_long_short(_raw([_row(symbol="NQ"), _row(symbol="EURUSD"), _row(symbol="ES")]))
+    assert [i["symbol"] for i in forward["instruments"]] == \
+           [i["symbol"] for i in shuffled["instruments"]]
+    assert [i["symbol"] for i in forward["instruments"]] == ["ES", "EURUSD", "NQ"]
+
+
+def test_le_doublon_ecarte_reste_le_SECOND_arrive_meme_apres_tri():
+    """Le tri est un choix d'AFFICHAGE : il ne doit pas changer QUELLE ligne gagne. La première
+    arrivée reste la bonne, sinon un doublon pourrait renverser la valeur retenue."""
+    out = build_long_short(_raw([_row(long_pct=60.0, short_pct=40.0),
+                                 _row(long_pct=20.0, short_pct=80.0)]))
+    assert out["instruments"][0]["long_pct"] == 60.0 and out["dropped"] == 1
 
 
 # --- structure & flux obèse -------------------------------------------------------------------

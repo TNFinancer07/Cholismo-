@@ -84,6 +84,18 @@ describe('différentiels', () => {
   })
 })
 
+describe('pedigree de la donnée (/devil)', () => {
+  it('affiche la SOURCE des taux : une erreur d\'unité ne se tranche pas sans elle', () => {
+    mount()
+    expect(screen.getByTestId('yld-source')).toHaveTextContent('rates_feed')
+  })
+
+  it('montre les drapeaux de pathologie même sur un bloc FRESH', () => {
+    mount({}, { flags: ['CLOCK_DESYNC'] })
+    expect(screen.getByLabelText(/Désynchronisation/)).toBeInTheDocument()
+  })
+})
+
 describe('fail-closed (§3)', () => {
   it('dit explicitement qu\'aucun différentiel n\'est calculable au lieu d\'un blanc', () => {
     mount({ spreads: [] })

@@ -215,6 +215,15 @@ if (import.meta.env.DEV && typeof window !== 'undefined') {
   ;(window as unknown as { __setAccount?: (a: unknown) => void }).__setAccount = (a) => {
     useTerminal.getState().set({ account_state: a as never })
   }
+  // /devil D-053 : force `long_short_ratio` / `yield_curve` — les positions extrêmes (100/0,
+  // 98/2) et les courbes à une patte sont rares en démo, et c'est là que la GÉOMÉTRIE d'une
+  // jauge peut mentir (une bande de 0 % qui reste visible n'est visible qu'en vrai navigateur).
+  ;(window as unknown as { __setLongShort?: (v: unknown) => void }).__setLongShort = (v) => {
+    useTerminal.getState().set({ long_short_ratio: v as never })
+  }
+  ;(window as unknown as { __setYields?: (v: unknown) => void }).__setYields = (v) => {
+    useTerminal.getState().set({ yield_curve: v as never })
+  }
   // D-045 : lit la vue active — permet aux essais de PROUVER qu'aucune touche ne fuit vers les
   // raccourcis globaux pendant qu'une alerte TradeManifest est affichée (V ne change pas la vue).
   ;(window as unknown as { __terminalView?: () => string }).__terminalView = () =>

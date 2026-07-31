@@ -30,10 +30,10 @@ beforeEach(() => useTerminal.getState().set({ long_short_ratio: null }))
 describe('jauge', () => {
   it('montre les deux côtés en TEXTE, pas seulement en couleur (§3)', () => {
     block()
-    expect(screen.getByTestId('ls-bar-long-EURUSD')).toHaveTextContent('60,0')
-    expect(screen.getByTestId('ls-bar-short-EURUSD')).toHaveTextContent('40,0')
-    expect(screen.getByText('long')).toBeInTheDocument()
-    expect(screen.getByText('short')).toBeInTheDocument()
+    // Depuis le /devil, les chiffres sont HORS des bandes (la géométrie ne porte plus de texte) :
+    // la propriété testée est la même, l'ancrage change.
+    expect(screen.getByTestId('ls-pct-long-EURUSD')).toHaveTextContent('LONG 60,0')
+    expect(screen.getByTestId('ls-pct-short-EURUSD')).toHaveTextContent('40,0 SHORT')
   })
 
   it('donne à la barre LONG une largeur égale au pourcentage', () => {
@@ -47,13 +47,54 @@ describe('jauge', () => {
   })
 })
 
+describe('géométrie de la jauge (/devil)', () => {
+  // Mesuré en navigateur AVANT correctif : à 100/0 la jauge affichait 93,7 % de long — la
+  // largeur minimale des libellés placés DANS les bandes déformait la géométrie. Une bande de
+  // 0 % visible est un mensonge quantitatif, dans le régime exact où le panneau sert.
+  it('donne à chaque bande une largeur EXACTEMENT égale à sa part', () => {
+    block({ instruments: [inst({ long_pct: 60, short_pct: 40 })] })
+    expect(screen.getByTestId('ls-bar-long-EURUSD')).toHaveStyle({ width: '60%' })
+    expect(screen.getByTestId('ls-bar-short-EURUSD')).toHaveStyle({ width: '40%' })
+  })
+
+  it('rend une bande de 0 % STRICTEMENT invisible', () => {
+    block({ instruments: [inst({ long_pct: 100, short_pct: 0, ratio: null })] })
+    expect(screen.getByTestId('ls-bar-long-EURUSD')).toHaveStyle({ width: '100%' })
+    expect(screen.getByTestId('ls-bar-short-EURUSD')).toHaveStyle({ width: '0%' })
+  })
+
+  it('ne met AUCUN texte dans les bandes : la géométrie ne doit rien porter', () => {
+    block({ instruments: [inst({ long_pct: 98, short_pct: 2, ratio: 49 })] })
+    expect(screen.getByTestId('ls-bar-long-EURUSD').textContent).toBe('')
+    expect(screen.getByTestId('ls-bar-short-EURUSD').textContent).toBe('')
+  })
+
+  it('garde les pourcentages LISIBLES hors de la jauge (§3 préservé)', () => {
+    block({ instruments: [inst({ long_pct: 98, short_pct: 2, ratio: 49 })] })
+    expect(screen.getByTestId('ls-pct-long-EURUSD')).toHaveTextContent('98,0')
+    expect(screen.getByTestId('ls-pct-short-EURUSD')).toHaveTextContent('2,0')
+  })
+})
+
+describe('pedigree de la donnée (/devil)', () => {
+  it('montre les drapeaux de pathologie même sur un bloc FRESH', () => {
+    block({}, { flags: ['LATE_FEED'] })
+    expect(screen.getByLabelText('Flux en retard')).toBeInTheDocument()
+  })
+
+  it('affiche la venue : sans elle, impossible de trancher une donnée douteuse', () => {
+    block({ venue: 'retail_ssi' })
+    expect(screen.getByTestId('ls-venue')).toHaveTextContent('retail_ssi')
+  })
+})
+
 describe('honnêteté des valeurs', () => {
   it('affiche N/D quand le ratio est indéterminable, jamais « ∞ »', () => {
     block({ instruments: [inst({ long_pct: 100, short_pct: 0, ratio: null })] })
     expect(screen.getByTestId('ls-ratio-EURUSD')).toHaveTextContent('N/D')
     expect(screen.queryByText('∞')).toBeNull()
     // …mais les pourcentages, eux, restent affichés : ce SONT des données réelles.
-    expect(screen.getByTestId('ls-bar-long-EURUSD')).toHaveTextContent('100,0')
+    expect(screen.getByTestId('ls-pct-long-EURUSD')).toHaveTextContent('100,0')
   })
 
   it('remplace une variation 24 h absente par un tiret, pas par 0', () => {

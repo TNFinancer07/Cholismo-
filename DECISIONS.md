@@ -2753,6 +2753,43 @@ demandé `LsrSentimentPanel.tsx`, mais le mnémonique opérateur est **SENT** : 
   ses deux pattes » sur le flux réel), 15 + 14 tests RTL. **630 passed**, ruff clean, tsc + vite
   build verts, 75 tests Vitest (4 fichiers). Essai navigateur sur l'app réelle : blocs reçus sur le canal lent,
   panneaux rendus (pente INVERSÉE −23,5 bp, différentiel +169,1 bp), **aucun débordement**.
+### /devil (Loop 4) — la jauge mentait sur l'extrême
+- **Géométrie faussée par ses propres libellés (mesuré, pas supposé).** Les pourcentages étaient
+  écrits DANS les bandes de la jauge ; la largeur minimale du texte imposait un plancher à chaque
+  côté. Mesure au navigateur : pour une donnée à **100 / 0**, la jauge affichait **93,7 %** de
+  long — une bande rouge représentant **0 %** occupait 6,3 % de la largeur. À 98/2, 93,7 % encore.
+  Une jauge quantitative qui déforme l'extrême ment exactement là où elle sert (c'est le
+  positionnement extrême qu'on regarde). Correctif : **la géométrie ne porte plus aucun texte**,
+  les deux largeurs viennent directement de la donnée, les chiffres vivent à côté (§3 préservé :
+  ils restent toujours écrits). Re-mesuré : **100,0 / 98,0 / 90,0 / 50,0 — écart 0,0 pt** sur les
+  quatre cas. Défaut INVISIBLE en test unitaire : jsdom ne calcule pas de layout, seul le vrai
+  navigateur pouvait le voir (même leçon que D-051).
+- **Ordre d'affichage instable.** Les lignes suivaient l'ordre du flux : une venue qui réordonne
+  ses instruments à chaque rafraîchissement les ferait SAUTER d'un tick à l'autre, impossible de
+  verrouiller l'œil sur une ligne en séance. Tri déterministe par symbole, appliqué **après** la
+  déduplication : il change l'affichage, jamais quelle ligne gagne.
+- **Pedigree invisible.** Les drapeaux de pathologie (`LATE_FEED`, `CLOCK_DESYNC`) n'étaient
+  rendus que dans le bandeau STALE : un bloc **FRESH mais horodaté de travers avait l'air
+  impeccable**. Ils sont désormais dans l'entête des deux panneaux, quelle que soit la fraîcheur.
+  YLD n'affichait par ailleurs **aucune source** — ajoutée.
+- **Risque RÉSIDUEL assumé et tracé : l'erreur d'unité fractionnaire.** Un flux qui envoie
+  `0.0405` (fraction) au lieu de `4.05` (%) passe toutes les bornes de plausibilité et s'affiche
+  « 0,041 % · pente −0,2 bp » — plausible et faux d'un facteur 100. **Indécidable depuis la donnée
+  seule** : un monde de taux quasi nuls a réellement existé, et un badge « unité douteuse » posé
+  sur une vraie courbe ZIRP serait lui-même un mensonge. Mitigations retenues : contrat d'unité
+  explicite dans le schéma (`value_pct` = pourcent), conversion confinée au provider (un seul
+  endroit), et **source affichée** pour que l'opérateur puisse trancher. Vérifié à l'écran.
+- **Clignotement du différentiel : comportement VOULU, mesuré.** Le mock retire une patte de
+  courbe avec une probabilité `drop_p × 2` — 2 % des ticks lents en scénario calme (≈ 1 fois
+  toutes les 12 min), 30 % en `vix_spike` (≈ toutes les 45 s). Le panneau bascule alors sur
+  « AUCUN DIFFÉRENTIEL CALCULABLE ». C'est la vérité du flux : afficher la dernière valeur connue
+  pour « stabiliser » l'affichage masquerait un feed cassé — précisément l'inverse de §3.
+- **Vérif /devil** : +8 tests RTL (géométrie exacte, bande de 0 % strictement invisible, aucun
+  texte dans les bandes, chiffres lisibles hors jauge, drapeaux en FRESH, venue, source) et
+  +2 backend (ordre déterministe, le tri ne renverse pas la déduplication) → **632 passed**,
+  ruff clean, **83 tests Vitest**, tsc + vite build verts. Deux hooks DEV (`__setLongShort`,
+  `__setYields`) ajoutés pour forcer les positions extrêmes, invisibles en démo.
+
 - **Défaut PRÉ-EXISTANT trouvé au passage, hors périmètre** : avec une projection REST tronquée
   (ce que renvoie un backend qui redémarre), `CalibrationPanel` et `DecisionBlotter` **lèvent**
   (`q.progress_pct` / `decisions.length` non gardés) au lieu de fail-closer. Reproduit en

@@ -89,11 +89,21 @@ export function YieldDifferentialsPanel() {
   }
 
   return (
-    <Panel code="YLD" title="Taux & différentiels" block="yield_curve" accent="youssef">
+    <Panel code="YLD" title="Taux & différentiels" block="yield_curve" accent="youssef"
+      right={(
+        // Pedigree TOUJOURS visible (/devil) : une erreur d'UNITÉ côté source (taux en fraction
+        // au lieu de pourcent) est indécidable depuis la donnée seule — sans le nom de la
+        // source, l'opérateur n'a aucun moyen de trancher. Les drapeaux n'apparaissaient qu'en
+        // STALE : un bloc FRESH horodaté de travers avait l'air impeccable.
+        <span className="flex items-center gap-1">
+          {meta && <FlagIcons meta={meta} />}
+          <span className="text-xxs text-term-faint" data-testid="yld-source">{meta?.source || '?'}</span>
+        </span>
+      )}>
       {meta?.freshness === 'STALE' && (
-        <div className="mb-1 flex items-center gap-1 border border-stale/50 px-1 py-0.5 text-xxs text-stale"
+        <div className="mb-1 border border-stale/50 px-1 py-0.5 text-xxs text-stale"
           data-testid="yld-stale">
-          PÉRIMÉ {fmtAge(age)} — courbe figée <FlagIcons meta={meta} />
+          PÉRIMÉ {fmtAge(age)} — courbe figée
         </div>
       )}
       <div className={cn(meta?.freshness === 'STALE' && 'opacity-60')}>

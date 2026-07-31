@@ -96,6 +96,11 @@ def build_long_short(raw: Any, *, extreme_pct: Optional[float] = None,
 
     if not instruments:
         return None
+    # Ordre d'affichage DÉTERMINISTE (/devil) : une venue qui réordonne ses lignes à chaque
+    # rafraîchissement ferait sauter les instruments d'un tick à l'autre — impossible de
+    # verrouiller l'œil sur une ligne en séance. Le tri n'intervient qu'APRÈS la déduplication :
+    # il change l'affichage, jamais quelle ligne gagne (la première arrivée reste la bonne).
+    instruments.sort(key=lambda i: i["symbol"])
     venue = raw.get("venue")
     return {
         "venue": venue.strip() if isinstance(venue, str) and venue.strip() else "?",
