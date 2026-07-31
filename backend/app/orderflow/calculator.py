@@ -57,6 +57,16 @@ from .. import config
 from ..volume_profile import build_volume_profile
 
 
+# Vocabulaire des motifs de `missing`. Il est ÉNUMÉRABLE volontairement : c'est la seule surface
+# du module lisible par un humain, et un consommateur (log, futur panneau) doit pouvoir la
+# filtrer sans deviner. Format unique : « CODE : texte » (espace avant le deux-points, §5).
+MOTIF_CODES = ("B1", "B2", "B3", "B4", "VP", "ATR", "TAPE", "FENÊTRE", "HORLOGE")
+
+
+def _motif(code: str, text: str) -> str:
+    return f"{code} : {text}"
+
+
 def _finite(x: Any) -> bool:
     return isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x)
 
@@ -68,7 +78,7 @@ def _publishable(value: Optional[float], label: str, missing: list[str]) -> Opti
     if value is None:
         return None
     if not _finite(value):
-        missing.append(f"{label}: résultat non fini (débordement de taille) — mesure retirée")
+        missing.append(_motif(label, "résultat non fini (débordement de taille) — mesure retirée"))
         return None
     return float(value)
 
@@ -89,6 +99,10 @@ class OrderFlowSnapshot:
     volume_profile: Optional[dict] = None                # délégué à D-041
     atr_fast: Optional[float] = None
     atr_slow: Optional[float] = None
+    # Les périodes VOYAGENT avec la mesure : les alias `atr_5`/`atr_14` sont ergonomiques mais
+    # mentiraient si la config changeait. Le lecteur doit pouvoir savoir ce que vaut le nombre.
+    atr_fast_period: int = 0
+    atr_slow_period: int = 0
     # --- honnêteté ---
     prints_used: int = 0
     prints_dropped: int = 0
@@ -177,19 +191,19 @@ def _crossed(book: Any) -> bool:
 def _b1_wall_refill(books: Sequence[Any], price: Optional[float], side: Optional[str],
                     tick: float, missing: list[str]) -> Optional[float]:
     if price is None or side not in ("BID", "ASK") or not _finite(price):
-        missing.append("B1: aucun niveau de mur désigné")
+        missing.append(_motif("B1", "aucun niveau de mur désigné"))
         return None
     sane = [b for b in books if not _crossed(b)]
     if len(sane) < len(books):
-        missing.append(f"B1: {len(books) - len(sane)} snapshot(s) de carnet CROISÉ écarté(s)")
+        missing.append(_motif("B1", f"{len(books) - len(sane)} snapshot(s) de carnet CROISÉ écarté(s)"))
     sizes = [s for s in (_level_size(b, price, side, tick) for b in sane) if s is not None]
     if len(sizes) < 2:
-        missing.append("B1: moins de deux observations du niveau (ou niveau hors profondeur)")
+        missing.append(_motif("B1", "moins de deux observations du niveau (ou niveau hors profondeur)"))
         return None
     consumed = sizes[0] - min(sizes)
     if consumed <= 0:
         # Le mur n'a jamais été entamé : le ratio est une division par zéro, pas un 1,0.
-        missing.append("B1: aucune déplétion observée — défense non éprouvée")
+        missing.append(_motif("B1", "aucune déplétion observée — défense non éprouvée"))
         return None
     refilled = sizes[-1] - min(sizes)
     return max(0.0, refilled) / consumed
@@ -201,17 +215,17 @@ def _b2_aggressor_fraction(prints: Sequence[tuple], min_coverage: float, min_vol
     if not _finite(total):
         # Le total a débordé : `known/total` vaudrait `nan` et passerait le test de couverture,
         # puis `delta/total` vaudrait 0,0 — fini, donc publiable, et lu comme une mesure neutre.
-        missing.append("B2: volume total non fini (débordement) — aucune mesure")
+        missing.append(_motif("B2", "volume total non fini (débordement) — aucune mesure"))
         return None
     if total < min_volume:
         # « 100 % acheteur » sur un lot n'est pas un flux acheteur : c'est du bruit présenté
         # comme une mesure (/devil). Le plancher est v1 provisional, à calibrer par instrument.
-        missing.append(f"B2: volume {total:g} sous le plancher de mesure ({min_volume:g})")
+        missing.append(_motif("B2", f"volume {total:g} sous le plancher de mesure ({min_volume:g})"))
         return None
     known = sum(p[2] for p in prints if p[3] != "UNKNOWN")
     if known / total < min_coverage:
-        missing.append(f"B2: côté agresseur connu sur {known / total:.0%} du volume "
-                       f"(minimum {min_coverage:.0%})")
+        missing.append(_motif("B2", f"côté agresseur connu sur {known / total:.0%} du volume "
+                                    f"(minimum {min_coverage:.0%})"))
         return None
     buy = sum(p[2] for p in prints if p[3] == "BUY")
     return buy / known
@@ -227,16 +241,16 @@ def _b3_rejection_delta(prints: Sequence[tuple], min_coverage: float, min_volume
     et ce 0 se lirait comme « rejet neutre observé » alors que rien n'a été observé."""
     total = sum(p[2] for p in prints)
     if not _finite(total):
-        missing.append("B3: volume total non fini (débordement) — aucune mesure")
+        missing.append(_motif("B3", "volume total non fini (débordement) — aucune mesure"))
         return None
     if total < min_volume or len(prints) < 2:
-        missing.append(f"B3: volume {total:g} sous le plancher de mesure ({min_volume:g}) "
-                       f"ou moins de deux prints")
+        missing.append(_motif("B3", f"volume {total:g} sous le plancher de mesure "
+                                    f"({min_volume:g}) ou moins de deux prints"))
         return None
     known = sum(p[2] for p in prints if p[3] != "UNKNOWN")
     if known / total < min_coverage:
-        missing.append(f"B3: côté agresseur connu sur {known / total:.0%} du volume "
-                       f"(minimum {min_coverage:.0%}) — delta non mesurable")
+        missing.append(_motif("B3", f"côté agresseur connu sur {known / total:.0%} du volume "
+                                    f"(minimum {min_coverage:.0%}) — delta non mesurable"))
         return None
     prices = [p[1] for p in prints]
     # DERNIÈRE touche de l'extrême, pas la première (/devil) : sur un double creux, partir de la
@@ -245,7 +259,7 @@ def _b3_rejection_delta(prints: Sequence[tuple], min_coverage: float, min_volume
     low_i = len(prices) - 1 - prices[::-1].index(min(prices))
     high_i = len(prices) - 1 - prices[::-1].index(max(prices))
     if min(prices) == max(prices):
-        missing.append("B3: prix plat — aucun extrême distinguable")
+        missing.append(_motif("B3", "prix plat — aucun extrême distinguable"))
         return None
     last = prices[-1]
     # Rejet du BAS si le prix est remonté depuis le plus-bas plus qu'il n'est descendu du plus-haut.
@@ -253,7 +267,7 @@ def _b3_rejection_delta(prints: Sequence[tuple], min_coverage: float, min_volume
     extreme_i, sign = (low_i, 1.0) if up_from_low >= down_from_high else (high_i, -1.0)
     leg = prints[extreme_i + 1:]
     if not leg:
-        missing.append("B3: l'extrême est le dernier print — aucune jambe de rejet observée")
+        missing.append(_motif("B3", "l'extrême est le dernier print — aucune jambe de rejet observée"))
         return None
     delta = sum(p[2] if p[3] == "BUY" else -p[2] if p[3] == "SELL" else 0.0 for p in leg)
     ratio = delta / total
@@ -265,27 +279,27 @@ def _b4_post_sweep(prints: Sequence[tuple], sweep: Any, now: float, floor_ts: fl
                    min_span: float, missing: list[str]) -> Optional[float]:
     sweep_ts = sweep.get("ts") if isinstance(sweep, dict) else None
     if not _finite(sweep_ts):
-        missing.append("B4: aucun sweep horodaté")
+        missing.append(_motif("B4", "aucun sweep horodaté"))
         return None
     if not (floor_ts <= sweep_ts <= now):
-        missing.append("B4: sweep hors de la fenêtre d'analyse")
+        missing.append(_motif("B4", "sweep hors de la fenêtre d'analyse"))
         return None
     before = [p for p in prints if p[0] < sweep_ts]
     after = [p for p in prints if p[0] >= sweep_ts]
     span_before, span_after = sweep_ts - floor_ts, now - sweep_ts
     if min(span_before, span_after) < min_span:
         # Un débit mesuré sur quelques millisecondes est du bruit multiplié par mille.
-        missing.append(f"B4: durée insuffisante de part et d'autre du sweep "
-                       f"({min(span_before, span_after):.3g}s < {min_span:g}s)")
+        missing.append(_motif("B4", f"durée insuffisante de part et d'autre du sweep "
+                                    f"({min(span_before, span_after):.3g}s < {min_span:g}s)"))
         return None
     vol_before, vol_after = sum(p[2] for p in before), sum(p[2] for p in after)
     if not (_finite(vol_before) and _finite(vol_after)):
-        missing.append("B4: volume non fini (débordement) — aucune mesure")
+        missing.append(_motif("B4", "volume non fini (débordement) — aucune mesure"))
         return None
     rate_before, rate_after = vol_before / span_before, vol_after / span_after
     if rate_before <= 0:
         # Diviser par un débit nul donnerait « ∞ » ou un nombre géant présenté comme une mesure.
-        missing.append("B4: aucun volume avant le sweep — accélération non mesurable")
+        missing.append(_motif("B4", "aucun volume avant le sweep — accélération non mesurable"))
         return None
     return rate_after / rate_before
 
@@ -305,17 +319,17 @@ def _atr(bars: Sequence[Any], period: int, missing: list[str]) -> Optional[float
     rows: list[tuple[float, float, float]] = []
     for b in bars if isinstance(bars, (list, tuple)) else []:
         if not isinstance(b, dict):
-            missing.append(f"ATR({period}): barre inexploitable — série interrompue")
+            missing.append(_motif("ATR", f"période {period} — barre inexploitable, série interrompue"))
             return None
         h, low, c = b.get("high"), b.get("low"), b.get("close")
         if not (_finite(h) and _finite(low) and _finite(c)) or h < low:
             # Une barre corrompue casse la série : la sauter recollerait deux barres non
             # adjacentes et fabriquerait un True Range qui n'a jamais existé.
-            missing.append(f"ATR({period}): barre corrompue — série interrompue")
+            missing.append(_motif("ATR", f"période {period} — barre corrompue, série interrompue"))
             return None
         rows.append((float(h), float(low), float(c)))
     if len(rows) < period + 1:
-        missing.append(f"ATR({period}): {len(rows)} barres pour {period + 1} requises")
+        missing.append(_motif("ATR", f"période {period} — {len(rows)} barres pour {period + 1} requises"))
         return None
     trs = []
     for i in range(1, len(rows)):
@@ -350,11 +364,11 @@ def compute_snapshot(*, now: Any, prints: Any = (), books: Any = (), bars: Any =
         # Config cassée : une fenêtre vide rendrait quatre `None` sans cause visible, et un
         # snapshot muet ressemble à un marché calme (/devil).
         return OrderFlowSnapshot(now=float(now) if _finite(now) else float("nan"), window_s=0.0,
-                                 missing=("fenêtre d'analyse invalide: aucun calcul",))
+                                 missing=(_motif("FENÊTRE", "durée d'analyse invalide — aucun calcul"),))
     if not _finite(now):
         # Horloge douteuse : tout est suspect, rien n'est calculé (même règle que le driver D-052).
         return OrderFlowSnapshot(now=float("nan"), window_s=window_s,
-                                 missing=("horloge non finie: aucun calcul",))
+                                 missing=(_motif("HORLOGE", "`now` non fini — aucun calcul"),))
     now = float(now)
     floor_ts = now - window_s
 
@@ -381,8 +395,8 @@ def compute_snapshot(*, now: Any, prints: Any = (), books: Any = (), bars: Any =
     if from_future and not kept:
         # Erreur de câblage classique : le `now` fourni est en retard sur le flux. Sans ce motif,
         # « volume sous le plancher » enverrait chercher au mauvais endroit.
-        missing.append(f"tape: {from_future} print(s) postérieur(s) à `now` et AUCUN retenu — "
-                       f"horloge d'appel en retard sur le flux ?")
+        missing.append(_motif("TAPE", f"{from_future} print(s) postérieur(s) à `now` et AUCUN "
+                                       f"retenu — horloge d'appel en retard sur le flux ?"))
 
     raw_books = list(books)[-config.ORDERFLOW_MAX_BOOKS:] if isinstance(books, (list, tuple)) else []
     # TRIÉS comme les prints : `sizes[0]`/`sizes[-1]` doivent être le plus ANCIEN et le plus
@@ -405,7 +419,7 @@ def compute_snapshot(*, now: Any, prints: Any = (), books: Any = (), bars: Any =
         # `build_volume_profile` rend un objet VIDE (pas `None`) sur un tick absurde ; publié tel
         # quel il se lirait « connecté mais sans volume ». Un tick invalide n'a pas de sens
         # physique : il empêche la mesure, il ne la dégrade pas.
-        missing.append(f"VP/B1: tick de prix invalide ({tick!r}) — aucune grille de prix")
+        missing.append(_motif("VP", f"tick de prix invalide ({tick!r}) — aucune grille de prix, B1 incluse"))
         tick_ok = False
     else:
         tick_ok = True
@@ -414,7 +428,7 @@ def compute_snapshot(*, now: Any, prints: Any = (), books: Any = (), bars: Any =
                                            config.VP_LVN_RATIO, config.VP_MAX_LEVELS,
                                            buy_by_price=buy_by_price)
         else:
-            missing.append("VP: aucun print exploitable dans la fenêtre")
+            missing.append(_motif("VP", "aucun print exploitable dans la fenêtre"))
 
     min_volume = (min_volume if min_volume is not None else config.ORDERFLOW_MIN_VOLUME)
     min_span = (min_span if min_span is not None else config.ORDERFLOW_MIN_SPAN_S)
@@ -430,8 +444,9 @@ def compute_snapshot(*, now: Any, prints: Any = (), books: Any = (), bars: Any =
         post_sweep_aggression_ratio=_publishable(
             _b4_post_sweep(kept, sweep, now, floor_ts, min_span, missing), "B4", missing),
         volume_profile=profile,
-        atr_fast=_publishable(_atr(bars, atr_fast, missing), f"ATR({atr_fast})", missing),
-        atr_slow=_publishable(_atr(bars, atr_slow, missing), f"ATR({atr_slow})", missing),
+        atr_fast_period=atr_fast, atr_slow_period=atr_slow,
+        atr_fast=_publishable(_atr(bars, atr_fast, missing), "ATR", missing),
+        atr_slow=_publishable(_atr(bars, atr_slow, missing), "ATR", missing),
         prints_used=len(kept), prints_dropped=dropped,
         missing=tuple(missing),
     )

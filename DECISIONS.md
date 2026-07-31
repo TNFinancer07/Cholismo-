@@ -3002,6 +3002,27 @@ STRUCTURE des entrées : ordre, doublons, unité de grille, durée.
   plancher de durée ×2, prints du futur) → **689 passed**, ruff clean, essai relancé avec quatre
   attaques structurelles, toutes refusées avec motif.
 
+### /polish (Loop 5) — les trois surfaces réelles d'un module sans UI
+- **Latence MESURÉE, pas supposée.** Charge réaliste (1 500 prints, 120 carnets sur 30 s) :
+  **3,2 ms/appel**, soit **1,6 %** du budget hot path (§7). Session dense (6 000 prints) : 12,2 ms
+  (6,1 %). **Borne maximale du module** (20 000 prints, 2 000 carnets) : 56,3 ms, soit **28 %** du
+  budget — chiffre écrit ici parce qu'il fixe le coût d'un gros tampon pour le futur câblage :
+  garder 20 000 prints n'est pas gratuit. Rien optimisé : à charge réelle, il n'y a rien à gagner.
+- **Les motifs SONT l'interface humaine de ce module** — c'est là que porte le polish. Format
+  unique **« CODE : texte »** (espace avant le deux-points, §5) et **vocabulaire FERMÉ**
+  (`MOTIF_CODES` : B1, B2, B3, B4, VP, ATR, TAPE, FENÊTRE, HORLOGE), énumérable pour qu'un log ou
+  un futur panneau puisse filtrer sans deviner. Avant, six formats cohabitaient (`B1:`, `VP/B1:`,
+  `ATR(5):`, `tape:`, `fenêtre d'analyse invalide:`). Un test vérifie que le vocabulaire reste
+  fermé — sans quoi il dériverait au premier ajout.
+- **Les périodes d'ATR voyagent avec la mesure.** `atr_5`/`atr_14` sont des alias ergonomiques
+  qui MENTIRAIENT si la config passait la période à 7. Le snapshot porte désormais
+  `atr_fast_period`/`atr_slow_period` : le lecteur sait ce que vaut le nombre.
+- **API du paquet directement importable** : `from app.orderflow import compute_snapshot,
+  OrderFlowSnapshot, MOTIF_CODES` — un consommateur n'a pas à connaître le chemin interne.
+- **Vérif /polish** : +2 tests (API du paquet, périodes ATR) et 2 assertions renforcées
+  (vocabulaire fermé, format greppable) → **691 passed**, ruff clean. Motifs relus tels qu'un
+  humain les verra sur une dégradation complète : sept lignes, un code chacune, aucune ambiguïté.
+
 - **Collision de vocabulaire signalée** : B1-B4 désignent AUSSI des panneaux de l'UI (B1 États
   S1·S2, B2 Bridge, B3 Sync, B4 Signal unifié). Les lettres restent de la documentation ; les
   identifiants du code portent le sens (`wall_refill_ratio`…), et snake_case côté Python là où le

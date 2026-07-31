@@ -13,7 +13,7 @@ import math
 import pytest
 
 from app import config
-from app.orderflow.calculator import OrderFlowSnapshot, compute_snapshot
+from app.orderflow.calculator import MOTIF_CODES, OrderFlowSnapshot, compute_snapshot
 
 T0 = 1_700_000_000.0
 TICK = 0.25
@@ -339,9 +339,11 @@ def test_snapshot_VIDE_ne_leve_pas_et_dit_ce_qui_manque():
             s.rejection_delta_ratio, s.post_sweep_aggression_ratio) == (None, None, None, None)
     assert s.volume_profile is None and s.atr_5 is None and s.atr_14 is None
     # `missing` est la valeur ajoutée : sans lui, quatre `None` ne disent pas POURQUOI.
-    codes = {m.split(":")[0] for m in s.missing}
-    assert {"B1", "B2", "B3", "B4"} <= codes
-    assert any(m.startswith("ATR(") for m in s.missing)   # le motif porte la période demandée
+    codes = {m.split(" : ")[0] for m in s.missing}
+    assert {"B1", "B2", "B3", "B4", "ATR"} <= codes
+    assert codes <= set(MOTIF_CODES)                      # vocabulaire FERMÉ, donc filtrable
+    assert all(" : " in m for m in s.missing)             # format unique, greppable
+    assert any("période" in m for m in s.missing)         # la période ATR demandée est dite
 
 
 def test_entrees_inexploitables_ne_LEVENT_jamais():
@@ -467,7 +469,7 @@ def test_devil_fenetre_ABSURDE_rend_un_snapshot_MOTIVE_pas_un_silence():
     for bad in (0.0, -5.0, math.nan, math.inf):
         s = _snap(window_s=bad, prints=[_print(1, 5000.0, 100, "BUY")])
         assert s.tape_aggressor_buy_fraction is None
-        assert any("fenêtre" in m for m in s.missing), bad
+        assert any(m.startswith("FENÊTRE : ") for m in s.missing), bad
 
 
 # =============================================================================================
@@ -543,3 +545,19 @@ def test_devil2_TOUS_les_prints_dates_du_futur_dit_POURQUOI():
     # Le motif dit « postérieur(s) à `now` » — plus précis que « futur », et il NOMME la cause
     # probable (l'horloge d'appel). L'assertion suit le message réel, pas celui que j'imaginais.
     assert any("postérieur" in m and "horloge" in m for m in s.missing)
+
+
+def test_polish_api_du_paquet_est_directement_importable():
+    """Un consommateur n'a pas à connaître le chemin interne du module (/polish)."""
+    from app.orderflow import MOTIF_CODES as codes
+    from app.orderflow import OrderFlowSnapshot as snap_cls
+    from app.orderflow import compute_snapshot as fn
+    assert fn is compute_snapshot and snap_cls is OrderFlowSnapshot and codes == MOTIF_CODES
+
+
+def test_polish_les_PERIODES_ATR_voyagent_avec_la_mesure():
+    """`atr_5` serait un mensonge si la config passait la période à 7 : le snapshot dit ce que
+    vaut le nombre."""
+    s = _snap(bars=_bars(20), atr_fast=7, atr_slow=9)
+    assert (s.atr_fast_period, s.atr_slow_period) == (7, 9)
+    assert s.atr_5 == s.atr_fast                             # alias ergonomique, valeur honnête
