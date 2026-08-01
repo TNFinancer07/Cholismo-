@@ -79,6 +79,24 @@ class SeriesTable:
     def rows(self) -> int:
         return len(self.periods)
 
+    @property
+    def resume(self) -> str:
+        """L'état du tableau en UNE ligne. Un dict de valeurs brutes n'est pas un message
+        (leçon D-056) : ce qu'un humain doit lire d'abord, c'est « il en manque une, et voilà
+        laquelle » — le détail reste en dessous pour qui veut vérifier."""
+        lues, rates = len(self.columns), len(self.failed)
+        if not rates:
+            return f"{lues} série{'s' if lues > 1 else ''} · {self.rows} périodes · aucune en échec"
+        noms = list(self.failed)
+        visibles = ", ".join(noms[:3])
+        if len(noms) > 3:
+            visibles += f" et {len(noms) - 3} autres"
+        return (f"{lues + rates} demandées · {lues} lue{'s' if lues > 1 else ''} · "
+                f"{rates} EN ÉCHEC : {visibles}")
+
+    def __str__(self) -> str:
+        return self.resume
+
 
 class HttpSeriesClient:
     """Socle d'un connecteur. Les sous-classes fournissent `LABEL`, `PROVIDER`, `PARSER` et
@@ -216,6 +234,8 @@ class HttpSeriesClient:
         # laissait un tableau amputé qui se lit comme un tableau complet, et le motif n'était
         # récupérable qu'en rappelant `to_columns` — donc en REFAISANT tous les appels. C'est
         # exactement le défaut reproché aux scripts d'origine ; il était ici aussi.
+        # `resume` EN TÊTE : c'est la première chose qu'on voit en imprimant `attrs`.
+        frame.attrs["resume"] = table.resume
         frame.attrs["failed"] = dict(table.failed)
         frame.attrs["coverage"] = dict(table.coverage)
         frame.attrs["requested"] = tuple(series)

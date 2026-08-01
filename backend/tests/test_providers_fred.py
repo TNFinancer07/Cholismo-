@@ -445,3 +445,30 @@ def test_AUDIT_une_vraie_coupure_reseau_reste_injoignable():
     exact."""
     client, _ = _client(payload=OSError("connection reset"))
     assert "injoignable" in client.fetch("UNRATE").error
+
+
+def test_POLISH_le_tableau_dit_son_etat_en_UNE_LIGNE_lisible():
+    """Un dict de valeurs brutes n'est pas un message (leçon D-056). Ce qu'on doit lire
+    d'abord, c'est « il en manque une, et voilà laquelle »."""
+    table = _multi(casse={"GDPC1"}).to_columns(["UNRATE", "GDPC1"])
+    assert table.resume == "2 demandées · 1 lue · 1 EN ÉCHEC : GDPC1"
+    assert "EN ÉCHEC" in str(table)
+
+
+def test_POLISH_un_tableau_complet_le_dit_aussi_positivement():
+    table = _multi().to_columns(["UNRATE", "GDPC1"])
+    assert table.resume == "2 séries · 3 périodes · aucune en échec"
+
+
+def test_POLISH_la_liste_des_echecs_est_BORNEE_mais_le_compte_est_exact():
+    """Vingt noms sur une ligne ne se lisent pas ; le compte, lui, ne ment jamais."""
+    payloads = {f"S{i}": DEUX["UNRATE"] for i in range(8)}
+    table = _multi(payloads, casse=set(payloads)).to_columns(list(payloads))
+    assert table.resume.startswith("8 demandées · 0 lue · 8 EN ÉCHEC : ")
+    assert "et 5 autres" in table.resume
+
+
+def test_POLISH_le_resume_est_EN_TETE_des_metadonnees_du_DataFrame():
+    frame = _multi(casse={"GDPC1"}).to_dataframe(["UNRATE", "GDPC1"])
+    assert list(frame.attrs)[0] == "resume"
+    assert "EN ÉCHEC" in frame.attrs["resume"]

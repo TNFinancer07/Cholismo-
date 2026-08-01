@@ -3471,6 +3471,19 @@ ré-énoncé le constat sur le bon couple, **plus grave** : dans le script, une 
 l'audit le citaient comme contre-exemple. Le coût (2,6 M jetons) est disproportionné au regard
 des deux corrections ; ce qui l'a rentabilisé, c'est la couche de réfutation, pas la recherche.
 
+### /polish après l'audit — vérifier ce que j'avais affirmé, puis rendre l'état LISIBLE
+- **Une affirmation vérifiée après coup.** J'avais écrit que la trace « voyage avec le tableau ».
+  Mesuré : `attrs` survit à la sélection de colonnes, `copy()`, `head()`, `dropna()` et `concat`
+  (pandas 3.0.5). L'affirmation tient — mais elle ne tenait que parce que je l'ai vérifiée, pas
+  parce que je l'avais conçue ainsi.
+- **`attrs` brut n'est pas un message** (même leçon que l'ombre order flow, D-056). Un opérateur
+  voyait `shape = (2, 2)` après avoir demandé 3 séries, et un dict à déchiffrer. `SeriesTable`
+  porte maintenant `resume` — « 3 demandées · 2 lues · 1 EN ÉCHEC : BOOM » — placé **en tête**
+  d'`attrs`, et rendu par `str(table)`. La liste des noms est bornée à trois, le compte jamais.
+- **Latence re-mesurée** après toutes les évolutions : **0,49 ms** en médiane sur les 76 lignes
+  du registre, inchangé. Rien à optimiser.
+- **Vérif** : +4 tests → **977 passed**, ruff clean, `tsc` + `vite build` OK, 112 Vitest verts.
+
 ### Reste ouvert (sans blocage)
 Six lignes de catalogue à relever (3 clés SDMX en une session, la clé du Bund€i qui débloque
 aussi `rdiff`), quatre connecteurs sur sept n'ont pas encore leur client d'interrogation
