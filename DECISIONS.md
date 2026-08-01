@@ -3359,6 +3359,46 @@ motif sans fuite de clé.
   modules connecteurs, pas un coût par appel, et ce chemin est un diagnostic, pas le hot path.
 - **Vérif /polish** : +8 tests → **930 passed**, ruff clean. Vue rendue à l'écran, les deux modes.
 
+### Six séries de diagnostic + assemblage tabulaire (demande opérateur, script `fredapi`)
+Un script personnel de Youssef proposait une cartographie FRED par dimension. Recoupée au
+registre : **22 séries communes sur 28**, 6 ajouts, 10 absences, 0 vrai désaccord de dimension.
+- **Le recoupement a servi à trancher, pas à choisir un camp.** Les 10 absences comprennent
+  `pmi_us` (0.30), `lei` (0.20) et `sahm` (0.15) — **0,65 du poids de D1**. Basculer sur la
+  cartographie du script rendrait D1 non pas dégradé mais **incalculable** (la cascade refuse de
+  renormaliser sur les composantes présentes, D-057). D'où : on ajoute, on ne remplace pas.
+- **Les 6 ajouts entrent comme DIAGNOSTICS**, jamais comme intrants : `payems`,
+  `fed_target_upper`, `sofr`, `walcl`, `cpi`, `core_cpi`. Aucune n'apparaît dans les deux
+  artefacts, donc aucune n'alimente une formule.
+- **Nouveau champ `role` (FORMULE / DIAGNOSTIC), et un test qui le rend contraignant** : une
+  ligne de diagnostic ne peut apparaître dans aucun poids. Sans ça, rien n'empêchait une ligne
+  « de contexte » de se retrouver pondérée — comptant une information que la spec ne prévoit
+  pas, ou la comptant deux fois. L'occasion a servi à **rendre explicites 9 lignes déjà
+  diagnostiques en prose** (`igoas`, `stlfsi`, `move`, `gdpnow`, `dtwexbgs`, `bopgstb`, `reer`,
+  `t5yie`, `credit_impulse`) : les artefacts disaient « second rang », « ligne supprimable »,
+  « contrôle de cohérence » — c'est désormais lisible par le code. **15 diagnostics au total.**
+- **Le piège CPI est armé** : « core PCE — c'est la cible OFFICIELLE de la Fed, **pas le CPI** ».
+  `cpi`/`core_cpi` entrent, et un test vérifie qu'ils ne servent aucun arbitrage — le π de
+  `taylor_now` reste `pcepilfe`.
+- **`to_columns` (pur) sous `to_dataframe` (pandas)**. Toute la logique est en Python pur et
+  testée sans pandas ; `to_dataframe` n'est qu'un habillage. Trois règles, chacune corrigeant
+  une manière de mentir observée dans le script d'origine :
+  1. **une série en échec n'est jamais une colonne vide** — elle sort du tableau avec son motif,
+     sinon réseau mort et donnée pas encore publiée deviennent indistinguables (§3) ;
+  2. **aucun remplissage** — pas de `ffill`, pas d'interpolation : une valeur reportée est une
+     valeur inventée, et un z-score calculé dessus n'est pas un z-score. Vérifié par un test qui
+     inspecte l'**AST** (la docstring, elle, a le droit de nommer ce qu'elle interdit) ;
+  3. **la couverture est rendue** — mêler quotidien/mensuel/trimestriel donne un tableau très
+     creux ; ce n'est pas un défaut, mais le lire sans le savoir en est un.
+- **L'index garde la période telle que publiée.** `datetime_index=True` est **opt-in** parce
+  qu'il invente de la précision (« 2026 » deviendrait le 1ᵉʳ janvier) : c'est l'appelant qui
+  l'accepte, jamais le défaut.
+- **pandas reste hors du terminal** : `requirements-dev.txt` seulement. Le chemin d'exécution
+  n'a pas à porter une pile numérique de plusieurs dizaines de Mo pour une commodité
+  d'exploration ; l'absence produit un message actionnable, pas un `ImportError` nu.
+- **Vérif** : +21 tests → **950 passed**, ruff clean. Essai réel sur le chemin `urllib` avec un
+  faux FRED : 12 colonnes / 3 périodes pour D1, `nrou` en 503 sorti du tableau avec son motif,
+  et le creux structurel visible colonne par colonne.
+
 ### Reste ouvert (sans blocage)
 Six lignes de catalogue à relever (3 clés SDMX en une session, la clé du Bund€i qui débloque
 aussi `rdiff`), quatre connecteurs sur sept n'ont pas encore leur client d'interrogation

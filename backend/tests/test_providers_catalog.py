@@ -267,3 +267,55 @@ def test_module_PURE_aucune_lecture_d_horloge():
     src = inspect.getsource(cat)
     for banned in ("time.time", "datetime", "perf_counter", "monotonic"):
         assert banned not in src, banned
+
+
+# =============================================================================================
+# Rôle : intrant de formule ou diagnostic (D-057)
+# =============================================================================================
+
+
+def test_une_ligne_DIAGNOSTIC_n_entre_dans_AUCUN_poids_de_formule():
+    """Le garde central de la distinction. Une ligne de diagnostic éclaire l'opérateur ; elle ne
+    doit jamais se retrouver pondérée dans un score — sinon elle compte deux fois, ou compte
+    tout court alors que la spec ne la prévoit pas."""
+    noms_ponderes = set(cat.D1_WEIGHTS) | set(cat.LONG_HORIZON_WEIGHTS)
+    for spec in cat.CATALOG:
+        if spec.role is cat.Role.DIAGNOSTIC:
+            assert spec.key not in noms_ponderes, spec.key
+
+
+def test_les_six_series_ajoutees_sont_des_DIAGNOSTICS_pas_des_intrants():
+    """Aucune des six n'apparaît dans les deux artefacts : elles enrichissent la lecture, elles
+    ne modifient aucune formule."""
+    for key in ("payems", "fed_target_upper", "sofr", "walcl", "cpi", "core_cpi"):
+        spec = cat.BY_KEY[key]
+        assert spec.role is cat.Role.DIAGNOSTIC, key
+        assert spec.arbitrages == (), key          # ne sert aucun arbitrage
+        assert spec.provider is cat.Provider.FRED and spec.confidence is cat.Confidence.C1
+
+
+def test_le_CPI_ne_remplace_PAS_le_core_PCE_comme_pi_de_taylor():
+    """« Core PCE — c'est la cible OFFICIELLE de la Fed, pas le CPI. » Le CPI entre au registre
+    comme diagnostic ; le π de `taylor_now` reste `pcepilfe`, et lui seul sert l'Arb 1."""
+    assert 1 in cat.BY_KEY["pcepilfe"].arbitrages
+    assert cat.BY_KEY["cpi"].arbitrages == () and cat.BY_KEY["core_cpi"].arbitrages == ()
+    assert "pas le CPI" in cat.BY_KEY["pcepilfe"].note
+
+
+def test_les_lignes_de_SECOND_RANG_deja_presentes_sont_marquees_comme_telles():
+    """Les artefacts le disaient en prose (« redondants avec HY et NFCI — à garder pour le
+    diagnostic, pas dans la formule du régime », « ligne supprimable », « contrôle de
+    cohérence »). C'est désormais une propriété lisible par le code."""
+    for key in ("igoas", "stlfsi", "move", "gdpnow", "dtwexbgs", "bopgstb", "reer", "t5yie"):
+        assert cat.BY_KEY[key].role is cat.Role.DIAGNOSTIC, key
+
+
+def test_les_composants_ponderes_de_D1_restent_des_INTRANTS():
+    for key in ("pmi_us", "pmi_ez", "output_gap_us", "lei", "sahm", "ip"):
+        assert cat.BY_KEY[key].role is cat.Role.FORMULE, key
+
+
+def test_les_diagnostics_restent_collectables():
+    """Diagnostic ne veut pas dire déclassé : ces lignes se collectent comme les autres."""
+    for key in ("payems", "sofr", "walcl", "cpi"):
+        assert cat.fetch_block_reason(key) is None, key

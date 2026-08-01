@@ -53,6 +53,10 @@ def _row(spec: cat.SeriesSpec) -> str:
     reason = cat.fetch_block_reason(spec.key)
     if reason is None:
         right = spec.identifier or "—"
+        if spec.role is cat.Role.DIAGNOSTIC:
+            # Une ligne de diagnostic n'est pas une ligne au rabais : elle se collecte comme les
+            # autres. Mais elle ne pondère RIEN, et ça doit se voir sans ouvrir le registre.
+            right = f"diagnostic · {right}"
         if not _interrogeable(spec):
             # Le glyphe ne suffit jamais : on dit CE QU'IL MANQUE. Et le manque passe DEVANT
             # l'identifiant — sinon la troncature mange précisément la partie actionnable,
@@ -87,13 +91,15 @@ def render(now: float, view: str = "dimensions") -> str:
     bloquees = [s for s in cat.CATALOG
                 if s.kind is cat.Kind.OBSERVED and s.confidence is cat.Confidence.C3]
     parametres = [s for s in cat.CATALOG if s.kind is cat.Kind.PARAMETER]
+    diagnostics = [s for s in cat.CATALOG if s.role is cat.Role.DIAGNOSTIC]
 
     out = [
         "CHOLISMO · registre des séries macro de Youssef — D1–D5 × Arb 1–6 (D-057)",
         f"{total} lignes · {collectables} collectables · {interrogeables} INTERROGEABLES "
-        "aujourd'hui (connecteur écrit)",
+        "aujourd'hui (connecteur écrit) · 0 € / mois",
         f"{len(a_relever)} identifiants à relever · {len(bloquees)} sources bloquées · "
-        f"{len(parametres)} paramètres à calibrer · 0 € / mois",
+        f"{len(parametres)} paramètres à calibrer · {len(diagnostics)} diagnostics "
+        "(ne pondèrent rien)",
         f"  {GLYPHS['ok']} interrogeable   {GLYPHS['attente']} collectable, connecteur à "
         f"écrire   {GLYPHS['catalogue']} identifiant à relever   {GLYPHS['bloque']} bloqué   "
         f"{GLYPHS['calcul']} calculé ou paramètre",

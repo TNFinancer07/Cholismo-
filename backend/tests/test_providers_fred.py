@@ -250,3 +250,138 @@ def test_l_annulation_libere_la_BOUCLE_tout_de_suite_mais_pas_le_THREAD():
         return libere_en
 
     assert asyncio.run(scenario()) < 0.5
+
+
+# =============================================================================================
+# Assemblage tabulaire — `to_columns` (pur) et `to_dataframe` (pandas, optionnel)
+# =============================================================================================
+
+DEUX = {
+    "UNRATE": json.dumps({"observations": [{"date": "2026-05-01", "value": "4.1"},
+                                           {"date": "2026-06-01", "value": "4.2"}]}),
+    "GDPC1": json.dumps({"observations": [{"date": "2026-04-01", "value": "23000"}]}),
+    "DFF": json.dumps({"observations": [{"date": "2026-06-01", "value": "."}]}),   # que des trous
+}
+
+
+def _multi(payloads=DEUX, casse=()):
+    def fetcher(url: str) -> str:
+        sid = url.split("series_id=")[1].split("&")[0]
+        if sid in casse:
+            raise OSError("connection reset")
+        return payloads[sid]
+    return fred.FredClient(api_key="K", fetcher=fetcher)
+
+
+def test_to_columns_aligne_les_series_sur_l_union_des_PERIODES():
+    table = _multi().to_columns(["UNRATE", "GDPC1"])
+    assert table.periods == ("2026-04-01", "2026-05-01", "2026-06-01")
+    assert table.columns["UNRATE"] == (None, 4.1, 4.2)
+    assert table.columns["GDPC1"] == (23000.0, None, None)
+
+
+def test_une_serie_en_ECHEC_n_est_JAMAIS_une_colonne_de_NaN():
+    """Le défaut central du script d'origine : un échec réseau et une observation absente
+    devenaient indistinguables. Ici l'échec sort du tableau et porte son motif (§3)."""
+    table = _multi(casse={"GDPC1"}).to_columns(["UNRATE", "GDPC1"])
+    assert "GDPC1" not in table.columns
+    assert "GDPC1" in table.failed and "injoignable" in table.failed["GDPC1"]
+    assert "UNRATE" in table.columns                      # les autres passent quand même
+
+
+def test_la_COUVERTURE_est_rendue_car_un_tableau_mixte_est_creux_par_nature():
+    """Mêler du quotidien, du mensuel et du trimestriel produit un tableau très majoritairement
+    vide. Ce n'est pas un défaut — mais le lire sans le savoir en est un."""
+    table = _multi().to_columns(["UNRATE", "GDPC1"])
+    assert table.coverage == {"UNRATE": 2, "GDPC1": 1}
+    assert table.rows == 3
+
+
+def test_une_serie_LISIBLE_mais_SANS_aucune_valeur_est_un_echec_explicite():
+    """`DFF` ne renvoie que des trous : la série est lisible, mais il n'y a rien dedans. Une
+    colonne entièrement vide se lirait comme « pas encore publié »."""
+    table = _multi().to_columns(["UNRATE", "DFF"])
+    assert "DFF" not in table.columns and "DFF" in table.failed
+
+
+def test_to_columns_ne_REMPLIT_jamais_les_trous():
+    """Aucun `ffill` : une valeur reportée est une valeur inventée, et un z-score calculé sur
+    une série interpolée n'est pas un z-score. Le remplissage, s'il a lieu, est une décision
+    de l'appelant — jamais un défaut de la couche d'accès (§3)."""
+    import ast
+    import inspect
+    # Sur le CODE, pas sur la prose : la docstring nomme volontiers ce qu'elle interdit.
+    arbre = ast.parse(inspect.getsource(fred))
+    appels = {n.attr for n in ast.walk(arbre) if isinstance(n, ast.Attribute)}
+    appels |= {n.id for n in ast.walk(arbre) if isinstance(n, ast.Name)}
+    for interdit in ("ffill", "fillna", "bfill", "interpolate", "pad", "reindex", "asfreq"):
+        assert interdit not in appels, interdit
+
+
+def test_to_columns_par_les_CLES_METIER_du_registre():
+    table = _multi({"VIXCLS": DEUX["UNRATE"]}).to_columns(["vixcls"], catalog=True)
+    assert "vixcls" in table.columns                       # colonne nommée par la clé métier
+    assert table.coverage["vixcls"] == 2
+
+
+def test_to_columns_applique_le_portillon_du_registre():
+    with pytest.raises(cx.SeriesBlocked):
+        _multi().to_columns(["oecd_cli"], catalog=True)
+
+
+def test_to_columns_vide_ne_ment_pas():
+    table = _multi(casse={"UNRATE", "GDPC1"}).to_columns(["UNRATE", "GDPC1"])
+    assert table.columns == {} and table.periods == () and table.rows == 0
+    assert set(table.failed) == {"UNRATE", "GDPC1"}
+
+
+def test_to_dataframe_rend_un_DataFrame_indexe_par_la_PERIODE():
+    pd = pytest.importorskip("pandas")
+    frame = _multi().to_dataframe(["UNRATE", "GDPC1"])
+    assert isinstance(frame, pd.DataFrame)
+    assert list(frame.index) == ["2026-04-01", "2026-05-01", "2026-06-01"]
+    assert list(frame.columns) == ["UNRATE", "GDPC1"]
+    assert frame.loc["2026-06-01", "UNRATE"] == 4.2
+    assert pd.isna(frame.loc["2026-04-01", "UNRATE"])
+
+
+def test_to_dataframe_garde_la_periode_TELLE_QUELLE_par_defaut():
+    """« 2026-Q2 » ne devient pas un jour : la source ne publie pas ce jour-là. L'index
+    horodaté existe, mais il est OPT-IN — c'est l'appelant qui accepte la précision inventée."""
+    pytest.importorskip("pandas")
+    trimestre = json.dumps({"observations": [{"date": "2026", "value": "1.0"}]})
+    frame = _multi({"X": trimestre}).to_dataframe(["X"])
+    assert list(frame.index) == ["2026"]
+
+
+def test_to_dataframe_index_horodate_est_OPT_IN():
+    pd = pytest.importorskip("pandas")
+    frame = _multi().to_dataframe(["UNRATE"], datetime_index=True)
+    assert isinstance(frame.index, pd.DatetimeIndex)
+
+
+def test_to_dataframe_expose_les_ECHECS_sans_les_noyer_dans_le_tableau():
+    pytest.importorskip("pandas")
+    client = _multi(casse={"GDPC1"})
+    table = client.to_columns(["UNRATE", "GDPC1"])
+    frame = client.to_dataframe(["UNRATE", "GDPC1"])
+    assert "GDPC1" not in frame.columns
+    assert table.failed["GDPC1"]                            # le motif reste consultable
+
+
+def test_to_dataframe_SANS_pandas_dit_quoi_installer(monkeypatch):
+    """pandas n'est PAS une dépendance du terminal : le hot path n'a pas à porter une pile
+    numérique de plusieurs dizaines de Mo pour une commodité d'exploration. L'absence doit donc
+    produire un message actionnable, pas un ImportError nu."""
+    import builtins
+    vrai_import = builtins.__import__
+
+    def sans_pandas(name, *a, **kw):
+        if name == "pandas":
+            raise ImportError("No module named 'pandas'")
+        return vrai_import(name, *a, **kw)
+
+    monkeypatch.setattr(builtins, "__import__", sans_pandas)
+    with pytest.raises(RuntimeError) as e:
+        _multi().to_dataframe(["UNRATE"])
+    assert "pip install pandas" in str(e.value)

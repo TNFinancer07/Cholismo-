@@ -136,3 +136,13 @@ def test_le_SPF_sans_REST_est_distingue_du_connecteur_a_ecrire():
     code à produire. Les confondre ferait chercher une API qui n'existe pas."""
     ligne = cli._row(cat.BY_KEY["spf_us"])
     assert "pas de REST" in ligne and "à écrire" not in ligne
+
+
+def test_une_ligne_de_DIAGNOSTIC_se_voit_sans_ouvrir_le_registre():
+    """Elle se collecte comme les autres, mais elle ne pondère rien — et confondre les deux est
+    exactement ce que le champ `role` sert à empêcher."""
+    for key in ("payems", "cpi", "walcl", "igoas"):
+        assert "diagnostic ·" in cli._row(cat.BY_KEY[key]), key
+    for key in ("pmi_us", "lei", "sahm"):
+        assert "diagnostic" not in cli._row(cat.BY_KEY[key]), key
+    assert "diagnostics (ne pondèrent rien)" in cli.render(NOW)

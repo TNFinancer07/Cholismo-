@@ -1,2 +1,3 @@
 pytest>=8
 ruff>=0.6
+pandas>=2.2  # `to_dataframe` uniquement — commodité d exploration, JAMAIS le chemin d execution

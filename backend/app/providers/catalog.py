@@ -66,6 +66,19 @@ class Provider(str, Enum):
     NONE = "—"
 
 
+class Role(str, Enum):
+    """Une ligne alimente-t-elle une FORMULE, ou éclaire-t-elle seulement la lecture ?
+
+    Les artefacts font la distinction en prose — « redondants avec HY et NFCI, à garder pour le
+    diagnostic, **pas dans la formule du régime** », « ligne supprimable », « contrôle de
+    cohérence ». Tant que ça reste une note, rien n'empêche une ligne de diagnostic de se
+    retrouver pondérée dans un score : elle compterait alors une information que la spec ne
+    prévoit pas, ou la compterait deux fois. Un test le verrouille désormais.
+    """
+    FORMULE = "FORMULE"
+    DIAGNOSTIC = "DIAGNOSTIC"
+
+
 class Frequency(str, Enum):
     DAILY = "DAILY"
     WEEKLY = "WEEKLY"
@@ -89,6 +102,7 @@ class SeriesSpec:
     confidence: Confidence
     note: str
     depends_on: tuple[str, ...] = ()
+    role: Role = Role.FORMULE        # DIAGNOSTIC = éclaire, ne pondère rien (voir `Role`)
     extra: tuple[str, ...] = ()      # clés supplémentaires d'une même ligne (ténors, variantes)
     catalog_hint: str = ""           # OÙ relever la clé, pour une ligne C2
     # Dimensions à ÉPINGLER dans la requête. Chez Eurostat, un dataset non filtré rend un cube
@@ -239,13 +253,13 @@ CATALOG: tuple[SeriesSpec, ...] = (
        catalog_hint="dataflow OECD.SDD.STES — clé finale au codelist (miroir DBnomics)"),
     _s("gdpnow", "Nowcast GDPNow (Atlanta Fed)", Kind.OBSERVED, "D1", (), Leg.QUOTE,
        Provider.FRED, "GDPNOW", Frequency.DAILY, Confidence.C1,
-       "Contrôle de cohérence du gap. La série FRED évite tout parsing de la page Atlanta Fed."),
+       "Contrôle de cohérence du gap. La série FRED évite tout parsing de la page Atlanta Fed.", role=Role.DIAGNOSTIC),
     _s("totbkcr", "Crédit bancaire total US", Kind.OBSERVED, "D1", (5,), Leg.QUOTE,
        Provider.FRED, "TOTBKCR", Frequency.WEEKLY, Confidence.C1, "série brute du credit impulse"),
     _s("credit_impulse", "Impulsion de crédit", Kind.DERIVED, "D1", (5,), Leg.QUOTE,
        Provider.NONE, None, Frequency.WEEKLY, Confidence.C1,
        "Ratio à calculer contre le PIB — la série brute ne suffit pas.",
-       depends_on=("totbkcr", "gdpc1")),
+       depends_on=("totbkcr", "gdpc1"), role=Role.DIAGNOSTIC),
     _s("unrate", "Taux de chômage US", Kind.OBSERVED, "D1", (2, 5), Leg.QUOTE,
        Provider.FRED, "UNRATE", Frequency.MONTHLY, Confidence.C1,
        "Aucune collecte propre à D1 — réutilisation directe par Arb 2 et Arb 5."),
@@ -275,6 +289,11 @@ CATALOG: tuple[SeriesSpec, ...] = (
        Provider.YFINANCE, "^GDAXI", Frequency.DAILY, Confidence.C1,
        "Deux fournisseurs pour une même grandeur — vérifier l'alignement des jours fériés "
        "AVANT de soustraire."),
+    _s("payems", "Emploi non-agricole (NFP)", Kind.OBSERVED, "D1", (), Leg.QUOTE,
+       Provider.FRED, "PAYEMS", Frequency.MONTHLY, Confidence.C1,
+       "Hors spec — la publication la plus regardée du marché du travail US, mais elle n'entre "
+       "dans aucune formule : les poids de D1 sont PMI/gap/LEI/Sahm/IP. Diagnostic.",
+       role=Role.DIAGNOSTIC),
     _s("leading_turn", "Détection de retournement", Kind.DERIVED, "D1", (5,), Leg.NONE,
        Provider.NONE, None, Frequency.NONE, Confidence.C1,
        "Module de code, pas une source — et le meilleur candidat ML de la dimension.",
@@ -324,6 +343,21 @@ CATALOG: tuple[SeriesSpec, ...] = (
        Provider.NONE, None, Frequency.DAILY, Confidence.C2,
        "Parité couverte : se dérive de rate_diff, pas de collecte séparée nécessaire.",
        depends_on=("dff", "ecbdfr")),
+    _s("fed_target_upper", "Borne haute de la cible Fed", Kind.OBSERVED, "D2", (), Leg.QUOTE,
+       Provider.FRED, "DFEDTARU", Frequency.DAILY, Confidence.C1,
+       "Hors spec — la cible ANNONCÉE, à ne pas confondre avec `dff` (l'effectif observé) ni "
+       "avec `ois_usd` (l'anticipé). Utile pour voir l'écart des trois. Diagnostic.",
+       role=Role.DIAGNOSTIC),
+    _s("sofr", "SOFR", Kind.OBSERVED, "D2", (), Leg.QUOTE,
+       Provider.FRED, "SOFR", Frequency.DAILY, Confidence.C1,
+       "Hors spec — pendant US de l'€STR (taux garanti au jour le jour). L'Arb 1 utilise `dff` "
+       "comme ois_spot ; SOFR sert à voir les tensions de repo. Diagnostic.",
+       role=Role.DIAGNOSTIC),
+    _s("walcl", "Bilan de la Fed (total)", Kind.OBSERVED, "D2", (), Leg.QUOTE,
+       Provider.FRED, "WALCL", Frequency.WEEKLY, Confidence.C1,
+       "Hors spec — pendant US d'`ecbbs`. Même réserve que côté BCE : le TOTAL est bruité par "
+       "les opérations de refinancement, ce n'est pas un proxy propre du QT. Diagnostic.",
+       role=Role.DIAGNOSTIC),
     _s("d2_label", "Étiquette D2 (absorbée)", Kind.DERIVED, "D2", (1,), Leg.NONE,
        Provider.NONE, None, Frequency.NONE, Confidence.C1,
        "Sortie d'affichage en labels_absorbes, poids 0 — magnitude portée par l'Arb 1. "
@@ -337,11 +371,21 @@ CATALOG: tuple[SeriesSpec, ...] = (
        Provider.ECB_SDMX, "HICP.M.U2.N.000000.4.ANR", Frequency.MONTHLY, Confidence.C1,
        "⚠ Le dataflow ICP est DISCONTINUÉ depuis le 04.02.2026, remplacé par HICP à structure "
        "de clé identique. Une clé ICP codée en dur renvoie une erreur, pas une valeur fausse."),
+    _s("cpi", "CPI (tous postes)", Kind.OBSERVED, "D3", (), Leg.QUOTE,
+       Provider.FRED, "CPIAUCSL", Frequency.MONTHLY, Confidence.C1,
+       "Hors spec, et la confusion à ne pas faire : le π de `taylor_now` est le core PCE, PAS "
+       "le CPI. Le CPI reste ce que le marché commente — d'où sa place ici, en diagnostic.",
+       role=Role.DIAGNOSTIC),
+    _s("core_cpi", "CPI sous-jacent", Kind.OBSERVED, "D3", (), Leg.QUOTE,
+       Provider.FRED, "CPILFESL", Frequency.MONTHLY, Confidence.C1,
+       "Hors spec — même réserve que `cpi` : ne remplace pas `pcepilfe` dans l'Arb 1. L'écart "
+       "core CPI − core PCE est lui-même une information. Diagnostic.",
+       role=Role.DIAGNOSTIC),
     _s("t10yie", "Breakeven 10 ans US", Kind.OBSERVED, "D3", (2,), Leg.QUOTE,
        Provider.FRED, "T10YIE", Frequency.DAILY, Confidence.C1,
        "Ténor 10 ans, choisi pour matcher la jambe EUR — voir l'alerte Bund€i."),
     _s("t5yie", "Breakeven 5 ans US", Kind.OBSERVED, "D3", (2,), Leg.QUOTE,
-       Provider.FRED, "T5YIE", Frequency.DAILY, Confidence.C1, "variante d'horizon"),
+       Provider.FRED, "T5YIE", Frequency.DAILY, Confidence.C1, "variante d'horizon", role=Role.DIAGNOSTIC),
     _s("t5yifr", "Forward 5y5y US", Kind.OBSERVED, "D3", (2,), Leg.QUOTE,
        Provider.FRED, "T5YIFR", Frequency.DAILY, Confidence.C1,
        "Ancre par défaut de la courbe de Phillips US : quotidien et market-based, cohérent "
@@ -389,15 +433,15 @@ CATALOG: tuple[SeriesSpec, ...] = (
        "(voir KNOWN_CONFLICTS d4_ttl_vs_nfci)."),
     _s("move", "MOVE (volatilité obligataire)", Kind.OBSERVED, "D4", (), Leg.GLOBAL,
        Provider.YFINANCE, "^MOVE", Frequency.DAILY, Confidence.C1,
-       "Ligne SUPPRIMABLE : VIX + HY + NFCI suffisent à définir le régime sans elle."),
+       "Ligne SUPPRIMABLE : VIX + HY + NFCI suffisent à définir le régime sans elle.", role=Role.DIAGNOSTIC),
     _s("igoas", "Spread investment grade", Kind.OBSERVED, "D4", (), Leg.GLOBAL,
        Provider.FRED, "BAMLC0A0CM", Frequency.DAILY, Confidence.C1,
-       "Second rang — redondant avec HY, à garder pour le diagnostic, pas dans la formule."),
+       "Second rang — redondant avec HY, à garder pour le diagnostic, pas dans la formule.", role=Role.DIAGNOSTIC),
     _s("stlfsi", "Stress financier St. Louis", Kind.OBSERVED, "D4", (), Leg.GLOBAL,
-       Provider.FRED, "STLFSI4", Frequency.WEEKLY, Confidence.C1, "second rang, diagnostic"),
+       Provider.FRED, "STLFSI4", Frequency.WEEKLY, Confidence.C1, "second rang, diagnostic", role=Role.DIAGNOSTIC),
     _s("dtwexbgs", "Dollar index (broad)", Kind.OBSERVED, "D4", (), Leg.GLOBAL,
        Provider.FRED, "DTWEXBGS", Frequency.DAILY, Confidence.C1,
-       "BROAD, pas le DXY — pondération commerciale différente."),
+       "BROAD, pas le DXY — pondération commerciale différente.", role=Role.DIAGNOSTIC),
     _s("cot_fx", "Positionnement COT (TFF)", Kind.OBSERVED, "D4", (6,), Leg.GLOBAL,
        Provider.CFTC_SOCRATA, "gpe5-46if", Frequency.WEEKLY, Confidence.C1,
        "Hebdomadaire (mardi, publié vendredi) — historique gratuit et RÉTROACTIF, point "
@@ -442,10 +486,10 @@ CATALOG: tuple[SeriesSpec, ...] = (
     _s("reer", "Taux de change effectif réel", Kind.OBSERVED, "D5", (3,), Leg.DIFF,
        Provider.SDMX_INTL, "WS_EER_M/M.R.B.XM", Frequency.MONTHLY, Confidence.C1,
        "Validation croisée du misalignment. Exemple validé côté BIS : M.N.B.CH ; cible zone "
-       "euro M.R.B.XM (real, broad)."),
+       "euro M.R.B.XM (real, broad).", role=Role.DIAGNOSTIC),
     _s("bopgstb", "Balance commerciale US", Kind.OBSERVED, "D5", (3,), Leg.QUOTE,
        Provider.FRED, "BOPGSTB", Frequency.MONTHLY, Confidence.C1,
-       "Mensuel — la seule ligne rapide d'une dimension par ailleurs lente."),
+       "Mensuel — la seule ligne rapide d'une dimension par ailleurs lente.", role=Role.DIAGNOSTIC),
     _s("dexuseu", "Spot EUR/USD", Kind.OBSERVED, "D5", (3, 4, 6), Leg.DIFF,
        Provider.FRED, "DEXUSEU", Frequency.DAILY, Confidence.C1,
        "Comparé au BEER pour le misalignment ; sert aussi la dépréciation de l'Arb 4."),
