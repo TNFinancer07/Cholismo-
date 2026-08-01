@@ -28,8 +28,8 @@ import importlib
 import logging
 import math
 import urllib.request
-from dataclasses import dataclass
-from typing import Callable, Optional
+from dataclasses import dataclass, field
+from typing import Callable, Optional, Sequence
 
 from . import connectors as cx
 from .catalog import BY_KEY, Provider, SeriesSpec
@@ -61,6 +61,20 @@ class SeriesResult:
     series: Optional[cx.ParsedSeries]
     error: Optional[str] = None
     url: str = ""                      # URL RÉDIGÉE (sans secret) — traçabilité sans fuite
+
+
+@dataclass(frozen=True)
+class SeriesTable:
+    """Plusieurs séries alignées, **sans pandas**. Les échecs sont à part, jamais des colonnes
+    vides : un réseau mort et une donnée pas encore publiée ne se lisent pas pareil (§3)."""
+    periods: tuple[str, ...]                       # union des périodes, ordre chronologique
+    columns: dict[str, tuple[Optional[float], ...]] = field(default_factory=dict)
+    failed: dict[str, str] = field(default_factory=dict)     # série → motif
+    coverage: dict[str, int] = field(default_factory=dict)   # série → observations RÉELLES
+
+    @property
+    def rows(self) -> int:
+        return len(self.periods)
 
 
 class HttpSeriesClient:
@@ -104,6 +118,71 @@ class HttpSeriesClient:
 
     async def _run_async(self, series_id: str, url: str) -> SeriesResult:
         return await asyncio.to_thread(self._run, series_id, url)
+
+    # -- assemblage tabulaire : plusieurs séries, un tableau --
+
+    def _fetch_one(self, name: str, *, catalog: bool, **kw) -> SeriesResult:
+        """Une série, désignée par UN nom. Chaque connecteur a une telle forme : un identifiant
+        FRED, une clé SDMX pointée, un dataset Eurostat. C'est le seul point que l'assemblage
+        tabulaire a besoin de connaître — le reste lui est indifférent."""
+        return self.fetch_catalog(name, **kw) if catalog else self.fetch(name, **kw)
+
+    def to_columns(self, series: Sequence[str], *, catalog: bool = False,
+                   **kw) -> SeriesTable:
+        """Plusieurs séries alignées sur l'union de leurs PÉRIODES, en Python pur.
+
+        C'est ici qu'est toute la logique — `to_dataframe` n'en est qu'un habillage. Trois
+        règles, et chacune corrige une manière de mentir :
+
+        1. **Une série en ÉCHEC n'est jamais une colonne vide.** Elle sort du tableau et part
+           dans `failed` avec son motif. Sinon un réseau mort et une donnée pas encore publiée
+           deviennent indistinguables — la confusion que §3 interdit.
+        2. **Aucun remplissage, jamais.** Pas de `ffill`, pas d'interpolation : une valeur
+           reportée est une valeur inventée, et un z-score calculé dessus n'est pas un z-score.
+           Si un remplissage a lieu, c'est une décision de l'appelant, prise sciemment.
+        3. **La couverture est rendue.** Mêler du quotidien, du mensuel et du trimestriel
+           produit un tableau très majoritairement vide : ce n'est pas un défaut, mais le lire
+           sans le savoir en est un.
+
+        `catalog=True` prend les clés MÉTIER du registre (`vixcls`) au lieu des identifiants
+        FRED, applique le portillon, et nomme les colonnes par ces clés."""
+        columns: dict[str, tuple[Optional[float], ...]] = {}
+        failed: dict[str, str] = {}
+        brut: dict[str, dict[str, float]] = {}
+        for name in series:
+            result = self._fetch_one(name, catalog=catalog, **kw)
+            if result.series is None or not result.series.observations:
+                failed[name] = result.error or "aucune observation exploitable"
+                continue
+            brut[name] = {o.date: o.value for o in result.series.observations}
+        periods = tuple(sorted({p for obs in brut.values() for p in obs}))
+        for name, obs in brut.items():
+            columns[name] = tuple(obs.get(p) for p in periods)
+        return SeriesTable(periods=periods, columns=columns, failed=failed,
+                           coverage={n: len(o) for n, o in brut.items()})
+
+    def to_dataframe(self, series: Sequence[str], *, catalog: bool = False,
+                     datetime_index: bool = False, **kw):
+        """Même chose, en `pandas.DataFrame`. Les séries en échec ne sont PAS des colonnes —
+        leur motif reste consultable via `to_columns(...).failed`.
+
+        L'index garde la période telle que FRED la publie. `datetime_index=True` est **opt-in**
+        parce qu'il invente de la précision (« 2026 » deviendrait le 1ᵉʳ janvier) : c'est
+        l'appelant qui accepte cette précision, jamais le défaut.
+
+        pandas n'est **pas** une dépendance du terminal : le chemin d'exécution n'a pas à porter
+        une pile numérique de plusieurs dizaines de Mo pour une commodité d'exploration."""
+        try:
+            import pandas as pd
+        except ImportError as exc:
+            raise RuntimeError(
+                "pandas est requis pour `to_dataframe` et n'est pas une dépendance du terminal "
+                "(commodité d'exploration, hors chemin d'exécution) — `pip install pandas`, ou "
+                "utiliser `to_columns` qui rend la même chose en Python pur."
+            ) from exc
+        table = self.to_columns(series, catalog=catalog, **kw)
+        index = pd.to_datetime(list(table.periods)) if datetime_index else list(table.periods)
+        return pd.DataFrame({n: list(v) for n, v in table.columns.items()}, index=index)
 
     # -- portillon du registre, commun à tous les connecteurs --
 

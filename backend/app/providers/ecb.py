@@ -145,6 +145,12 @@ class EcbClient(HttpSeriesClient):
                 f"« {dotted} » : clé SDMX incomplète — forme attendue « DATAFLOW.reste.de.la.clé »")
         return self.fetch(dataflow, key)
 
+    def _fetch_one(self, name: str, *, catalog: bool, **kw) -> SeriesResult:
+        """Côté BCE, « un nom = une série » veut dire la clé POINTÉE (`HICP.M.U2.…`) — c'est
+        ainsi que le registre et les artefacts l'écrivent. Sans cette précision, l'assemblage
+        tabulaire appellerait `fetch(dataflow, key)` avec un seul argument."""
+        return self.fetch_catalog(name, **kw) if catalog else self.fetch_key(name, **kw)
+
     def fetch_catalog(self, catalog_key: str) -> SeriesResult:
         """Chemin normal : on demande `yc_spot`, pas la clé SDMX. Le portillon du registre
         s'applique (C1 seulement) et le fournisseur est vérifié."""
