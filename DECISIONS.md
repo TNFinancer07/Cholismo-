@@ -3267,10 +3267,47 @@ motif sans fuite de clé.
   timeout et l'annulation, 12 sur la vue) → **851 passed**, ruff clean, `tsc` clean,
   112 Vitest verts. Vue rendue à l'écran, les deux modes.
 
+### Connecteur SDMX BCE — et l'extraction du harnais qui l'a précédé
+- **Refactor d'abord, feature ensuite** (Loop 3 puis Loop 1, deux commits — jamais mélangés).
+  Le client BCE partageait tout le harnais d'interrogation avec FRED : timeout borné, fetcher
+  injecté, lecture bornée, les deux natures d'échec, rédaction des secrets, portillon du
+  registre. Extrait dans `providers/client.py` **avant** d'écrire le second connecteur —
+  dupliquer ce harnais une deuxième fois l'aurait figé, et les cinq suivants l'auraient recopié.
+  Zéro changement de comportement, et c'est vérifiable : les **34 tests FRED passent sans être
+  touchés**, motifs au mot près.
+- **Aucune clé API, et c'est prouvable.** Le service BCE est public. `EcbClient` n'a même pas de
+  paramètre de clé (test par introspection de signature), et un test vérifie qu'une
+  `FRED_API_KEY` définie n'apparaît ni dans l'URL ni dans le résultat. Un client qui exigerait
+  une clé refuserait des séries accessibles ; un client qui en enverrait une la ferait fuiter
+  chez un tiers qui ne l'a pas demandée.
+- **Générique par construction** : une seule fonction `fetch(dataflow, key)` couvre YC, AME,
+  SPF, EST, ILM, HICP — « même connecteur générique, seuls le dataflow et la clé changent ».
+  `DATAFLOWS` documente ce que chacun sert **sans restreindre** : le connecteur accepte tout
+  dataflow bien formé.
+- **ICP refusé AVANT la requête, avec son remplaçant nommé.** Le dataflow est mort depuis le
+  04.02.2026 ; laisser partir l'appel ramènerait une erreur de service qu'on lirait comme une
+  panne réseau. Le refus vaut aussi par la clé pointée (`ICP.M.U2…`).
+- **Défaut que j'ai introduit puis corrigé avant de committer** : j'avais deux constructions
+  d'URL BCE — celle du registre (`connectors._ecb_url`) et celle du client. Exactement ce que
+  j'avais reproché à FRED et corrigé là-bas. Le registre délègue désormais au client (import
+  local, la dépendance ne peut aller que dans ce sens), un test verrouille l'égalité des deux
+  chemins sur cinq lignes — et les gardes du client (dataflow retiré, clé mal formée)
+  s'appliquent du coup aussi au chemin registre.
+- **L'avertissement le plus lourd de la spec rendu actionnable** : « ne jamais coder une clé en
+  dur sans l'avoir confirmée au catalogue » suppose de savoir où le chercher.
+  `series_keys_url(dataflow)` le donne. Réserve assumée dans l'esprit C2 :
+  `detail=serieskeysonly` est le paramètre SDMX REST standard mais **n'a pas été vérifié contre
+  le service de la BCE** cette session — c'est dit dans la docstring, pas maquillé.
+- **Vérif** : +38 tests → **889 passed**, ruff clean. Essai réel sur le chemin `urllib`
+  (serveur local rejouant du SDMX-CSV) : YC / AME / SPF lues avec le trou « . » compté, clé
+  pointée et clé métier du registre, quatre refus de politique sans qu'aucune requête ne parte,
+  zéro `api_key` dans les URL produites.
+
 ### Reste ouvert (sans blocage)
 Six lignes de catalogue à relever (3 clés SDMX en une session, la clé du Bund€i qui débloque
-aussi `rdiff`), les six connecteurs non-FRED n'ont pas encore leur client d'interrogation (URL
-et parsing sont là), et le câblage au `ContextSchema`/aux panneaux n'est pas commencé.
+aussi `rdiff`), cinq connecteurs sur sept n'ont pas encore leur client d'interrogation (Eurostat,
+Bundesbank, Socrata CFTC, SDMX international, Yahoo — URL et parsing sont là), et le câblage au
+`ContextSchema`/aux panneaux n'est pas commencé.
 
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events

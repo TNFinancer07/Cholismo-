@@ -131,11 +131,15 @@ def _fred_url(spec: SeriesSpec, *, api_key: Optional[str], start: Optional[str],
 
 
 def _ecb_url(spec: SeriesSpec, **_: Any) -> str:
+    # Import LOCAL, et volontairement : `ecb` dépend de ce module (parsing, redaction), donc
+    # l'inverse ne peut pas se faire en tête de fichier. Le faire ici garde une SEULE
+    # construction d'URL BCE — dont les gardes (dataflow retiré, clé mal formée) valent alors
+    # aussi pour le chemin registre.
+    from .ecb import data_url
     dataflow, _, series = (spec.identifier or "").partition(".")
     if not dataflow or not series:
         raise SeriesBlocked(f"{spec.key} : clé SDMX BCE incomplète — dataflow.série attendus")
-    return (f"https://data-api.ecb.europa.eu/service/data/{quote(dataflow)}/{quote(series)}"
-            f"?format=csvdata")
+    return data_url(dataflow, series)
 
 
 def _eurostat_url(spec: SeriesSpec, **_: Any) -> str:
