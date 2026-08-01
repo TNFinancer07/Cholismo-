@@ -3484,6 +3484,53 @@ des deux corrections ; ce qui l'a rentabilisé, c'est la couche de réfutation, 
   du registre, inchangé. Rien à optimiser.
 - **Vérif** : +4 tests → **977 passed**, ruff clean, `tsc` + `vite build` OK, 112 Vitest verts.
 
+### Les sept connecteurs sont complets — et la validation réelle reste hors de portée d'ici
+**Bundesbank (BBSIS)** : les 20 tests écrits avant une interruption sont repris tels quels et
+passent (38 avec paramétrage). Un point de doctrine y est encodé : la spec donne `R10XX` (10 ans)
+et `R05XX` (5 ans) et dit que le code encode la maturité résiduelle. Le motif saute aux yeux —
+et c'est le piège. `svensson_key(2)` est REFUSÉ : `R02XX` serait une inférence, pas une clé
+vérifiée. **Un motif évident est un indice, pas une preuve.** Le parser reconnaît désormais le
+séparateur en essayant plusieurs et en gardant celui qui produit des PÉRIODES ; auparavant un
+export `;` tombait en « illisible » — fail-closed correct, mais cul-de-sac.
+
+**Socrata CFTC** : `value_field` est un argument OBLIGATOIRE et sans défaut. La ressource porte
+des dizaines de colonnes ; en deviner une produirait une série fausse ET plausible, le pire cas.
+`$limit` est toujours posé — sans lui Socrata plafonne à 1 000 lignes **en silence**.
+
+**SDMX international** : deux formats (SDMX-CSV du BIS, JSON à listes parallèles de DBnomics)
+servis par le MÊME client. Le parser est choisi par la méthode appelée, passé en argument à
+`_run` — un attribut d'instance aurait rendu le résultat sensible à l'ordre des appels, et un
+test le vérifie en alternant les deux.
+
+**Yahoo** : la réserve des specs est écrite dans le module plutôt que découverte un matin — ce
+n'est pas une API officielle, les CGU couvrent l'usage personnel, ça cassera un jour et le
+remplacement sera manuel. `ZQ` reste une racine de contrat, jamais un ticker.
+
+**Deux tests devenus obsolètes ont été CONSERVÉS**, pas supprimés : « une ligne collectable sans
+client s'affiche honnêtement » ne mord plus, puisque les sept connecteurs ont un client. Ils
+testent désormais l'invariant sur un registre de clients amputé. Le supprimer parce qu'il ne
+mord plus aujourd'hui, ce serait perdre le garde au moment où le prochain fournisseur arrive.
+
+**53 lignes sur 54 sont interrogeables** ; la 54ᵉ est `spf_us`, dont l'absence de REST est
+structurelle.
+
+### Validation end-to-end : BLOQUÉE PAR L'ENVIRONNEMENT, pas par le code
+Mesuré : `pypi.org` répond 200, et **les cinq fournisseurs sont refusés au CONNECT (403)** par la
+politique d'egress. Le README du proxy est explicite : « do not retry organization policy denials
+(403/407) — report them instead. » Aucune requête réelle n'a donc jamais atteint un fournisseur,
+et les formats de réponse viennent des SPECS, pas d'une réponse observée. C'est la seule chose
+que ce dépôt ne peut pas prouver depuis l'intérieur, et elle est dite plutôt que maquillée.
+
+`scripts/validation_reelle.py` est livré pour être lancé LÀ où l'accès existe : il exerce les
+clients maison contre les vrais services, une ligne C1 par fournisseur, et classe chaque échec
+**par cause** — RÉSEAU / SERVICE / PARSING / CRASH. La distinction n'est pas cosmétique :
+`PARSING` est le verdict qui vaut le déplacement, puisqu'il dit que la spec se trompait sur le
+format — précisément ce qu'un mock ne peut pas révéler.
+
+*Défaut trouvé sur moi-même en l'écrivant* : la première version étiquetait « ✗ PARSING » toute
+absence de série, y compris les pannes réseau — la confusion même que ce paquet passe son temps
+à défaire. Corrigée avant commit.
+
 ### Reste ouvert (sans blocage)
 Six lignes de catalogue à relever (3 clés SDMX en une session, la clé du Bund€i qui débloque
 aussi `rdiff`), quatre connecteurs sur sept n'ont pas encore leur client d'interrogation

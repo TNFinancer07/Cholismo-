@@ -150,11 +150,11 @@ def _eurostat_url(spec: SeriesSpec, **_: Any) -> str:
 
 
 def _bundesbank_url(spec: SeriesSpec, **_: Any) -> str:
+    from .bundesbank import data_url                # import local, même raison que BCE/Eurostat
     dataset, _, series = (spec.identifier or "").partition(".")
     if not dataset or not series:
         raise SeriesBlocked(f"{spec.key} : clé Bundesbank incomplète — dataset.série attendus")
-    return (f"https://api.statistiken.bundesbank.de/rest/download/{quote(dataset)}/{quote(series)}"
-            f"?format=csv&lang=en")
+    return data_url(dataset, series)
 
 
 def _socrata_url(spec: SeriesSpec, *, start: Optional[str], limit: int, **_: Any) -> str:
@@ -370,11 +370,11 @@ def parse_eurostat_json(text: str) -> Optional[ParsedSeries]:
     return _finish(rows, dropped)
 
 
-def _csv_rows(text: str) -> Optional[list[list[str]]]:
+def _csv_rows(text: str, delimiter: str = ",") -> Optional[list[list[str]]]:
     if _too_big(text) or not text.strip():
         return None
     try:
-        return [row for row in csv.reader(io.StringIO(text)) if row]
+        return [row for row in csv.reader(io.StringIO(text), delimiter=delimiter) if row]
     except (csv.Error, ValueError):
         return None
 
@@ -406,7 +406,18 @@ def parse_bundesbank_csv(text: str) -> Optional[ParsedSeries]:
     """CSV Bundesbank : en-têtes de métadonnées à SAUTER (leur nombre varie selon la série), et
     les jours fériés écrits « . ». On ne saute pas un nombre fixe de lignes — on ne garde que
     celles dont le premier champ est une période."""
-    rows = _csv_rows(text)
+    # Le dialecte n'est pas donné par la spec, et les exports allemands utilisent volontiers
+    # « ; » avec la virgule décimale. On essaie les deux et on garde celui qui produit des
+    # PÉRIODES — pas de devinette : un séparateur qui ne date rien n'est pas le bon.
+    best, best_dates = None, -1
+    for sep in (",", ";", "\t"):
+        candidate = _csv_rows(text, sep)
+        if candidate is None:
+            continue
+        dates = sum(1 for r in candidate if r and _period(r[0]) is not None)
+        if dates > best_dates:
+            best, best_dates = candidate, dates
+    rows = best
     if not rows:
         return None
     out, dropped = [], 0

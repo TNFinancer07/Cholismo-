@@ -106,14 +106,19 @@ def test_la_vue_est_en_LECTURE_SEULE_et_le_dit():
 # =============================================================================================
 
 
-def test_une_ligne_COLLECTABLE_sans_client_n_est_pas_affichee_comme_interrogeable():
-    """`bund_nominal` est C1 avec un endpoint REST, mais aucun client Bundesbank n'existe
-    encore. L'afficher comme `✓` serait une promesse que le code ne tient pas."""
+def test_une_ligne_COLLECTABLE_sans_client_n_est_pas_affichee_comme_interrogeable(monkeypatch):
+    """Une ligne C1 avec un endpoint REST mais sans client ne doit pas s'afficher `✓` — ce
+    serait une promesse que le code ne tient pas.
+
+    Les sept connecteurs ont un client depuis D-057 ; l'invariant se teste donc sur un registre
+    de clients amputé plutôt que sur une ligne réelle. Il resservira au prochain fournisseur."""
     from app.providers import client as cl
     spec = cat.BY_KEY["bund_nominal"]
     assert cat.fetch_block_reason("bund_nominal") is None      # collectable
     assert cx.has_rest_endpoint("bund_nominal") is True        # et un endpoint existe
-    assert cl.has_client(spec.provider) is False               # mais pas de client
+    monkeypatch.setattr(cl, "_CLIENT_MODULES",
+                        {k: v for k, v in cl._CLIENT_MODULES.items()
+                         if k is not cat.Provider.BUNDESBANK})
     ligne = cli._row(spec)
     assert ligne.strip().startswith(cli.GLYPHS["attente"])
     assert "connecteur BUNDESBANK à écrire" in ligne

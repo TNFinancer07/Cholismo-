@@ -114,7 +114,10 @@ class HttpSeriesClient:
 
     # -- exécution : la seule manière d'aller chercher --
 
-    def _run(self, series_id: str, url: str) -> SeriesResult:
+    def _run(self, series_id: str, url: str, parser: Optional[Callable] = None) -> SeriesResult:
+        # `parser` explicite plutôt qu'un état d'instance : Socrata a besoin du champ de valeur
+        # et le SDMX international sert deux formats — un attribut mutable les rendrait
+        # sensibles à l'ordre des appels.
         safe_url = cx.redact(url)
         try:
             text = self._fetcher(url)
@@ -122,7 +125,7 @@ class HttpSeriesClient:
             motif = self._motif_echec(exc)
             log.warning("%s (%s) : %s", self.LABEL, series_id, motif)
             return SeriesResult(series_id, None, motif, safe_url)
-        parsed = type(self).PARSER(text)
+        parsed = (parser or type(self).PARSER)(text)
         if parsed is None:
             echec = SeriesResult(series_id, None,
                                  f"réponse {self.LABEL} illisible ou hors bornes — cache "
@@ -163,8 +166,9 @@ class HttpSeriesClient:
         Par défaut, « illisible » est la seule cause connue et le motif reste tel quel."""
         return result
 
-    async def _run_async(self, series_id: str, url: str) -> SeriesResult:
-        return await asyncio.to_thread(self._run, series_id, url)
+    async def _run_async(self, series_id: str, url: str,
+                         parser: Optional[Callable] = None) -> SeriesResult:
+        return await asyncio.to_thread(self._run, series_id, url, parser)
 
     # -- assemblage tabulaire : plusieurs séries, un tableau --
 
@@ -282,6 +286,10 @@ _CLIENT_MODULES: dict[Provider, tuple[str, str]] = {
     Provider.FRED: ("fred", "FredClient"),
     Provider.ECB_SDMX: ("ecb", "EcbClient"),
     Provider.EUROSTAT: ("eurostat", "EurostatClient"),
+    Provider.BUNDESBANK: ("bundesbank", "BundesbankClient"),
+    Provider.CFTC_SOCRATA: ("cftc", "CftcClient"),
+    Provider.SDMX_INTL: ("sdmx", "SdmxClient"),
+    Provider.YFINANCE: ("yahoo", "YahooClient"),
 }
 
 

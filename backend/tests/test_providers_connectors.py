@@ -318,13 +318,20 @@ def test_client_for_rend_le_bon_connecteur_sans_que_l_appelant_ait_a_le_savoir()
     assert isinstance(client_for("unrate_ez"), EurostatClient)
 
 
-def test_client_for_dit_quand_le_connecteur_reste_a_ECRIRE():
+def test_client_for_dit_quand_le_connecteur_reste_a_ECRIRE(monkeypatch):
     """Cas qu'aucun autre garde ne couvrait : la ligne est collectable, l'endpoint existe, et
-    pourtant on ne sait pas aller la chercher. Le motif doit dire que c'est du CODE à produire,
-    pas un relevé de catalogue."""
-    from app.providers.client import client_for
+    pourtant on ne sait pas aller la chercher — le motif doit dire que c'est du CODE à produire,
+    pas un relevé de catalogue.
+
+    Les sept connecteurs ont désormais un client, donc plus aucune ligne réelle n'est dans cet
+    état. L'invariant reste testé sur un registre de clients amputé : il resservira au prochain
+    fournisseur ajouté, et le supprimer parce qu'il ne mord plus aujourd'hui serait perdre le
+    garde au moment où il redeviendra utile."""
+    from app.providers import client as cl
+    ampute = {k: v for k, v in cl._CLIENT_MODULES.items() if k is not cat.Provider.BUNDESBANK}
+    monkeypatch.setattr(cl, "_CLIENT_MODULES", ampute)
     with pytest.raises(cx.SeriesBlocked) as e:
-        client_for("bund_nominal")
+        cl.client_for("bund_nominal")
     assert "pas encore écrit" in str(e.value) and "code à produire" in str(e.value)
 
 
