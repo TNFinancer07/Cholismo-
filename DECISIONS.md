@@ -3439,6 +3439,38 @@ en héritent ; le seul point propre à chacun (« un nom désigne quelle série 
 **Vérif** : +18 tests → **968 passed**, ruff clean. Essai réel : appel borné, trois granularités
 bornées simultanément, période gardée telle quelle, et trois refus de politique sans requête.
 
+### Audit adversarial du script FRED — et les deux défauts qu'il a trouvés DANS MON code
+39 agents, 3 lentilles (données / API-sécurité / cohérence au registre), chaque constat soumis à
+un réfutateur. **36 constats, 12 confirmés, 24 réfutés** — la passe adversariale en a tué les
+deux tiers, ce qui est le point de l'exercice. Deux résultats méritent d'être consignés.
+
+**Le verify a corrigé son propre auditeur.** L'auditeur affirmait que « réseau KO » et « donnée
+absente » étaient indiscernables dans le script. Faux, démontré : `fredapi` ne lève rien sur une
+série vide, il rend une `Series` vide — la colonne est donc PRÉSENTE en tout-NaN, alors qu'une
+panne réseau la fait disparaître. Le réfutateur a même relevé que la démonstration de l'auditeur
+IMPRIMAIT deux shapes différentes tout en concluant « strictement indiscernable ». Il a ensuite
+ré-énoncé le constat sur le bon couple, **plus grave** : dans le script, une panne réseau et un
+**refus de politique** (clé révoquée, série inexistante, quota 429) produisent des DataFrames
+`equals()`. Une clé morte se lit comme une panne de FRED.
+
+**Deux défauts confirmés dans `providers/`, vérifiés par moi avant correction :**
+1. **`to_dataframe` reproduisait le défaut que je venais de reprocher aux scripts.** La série en
+   échec disparaissait du tableau, `df.attrs` était vide, et le motif n'était récupérable qu'en
+   rappelant `to_columns` — donc en **refaisant tous les appels**. Un tableau amputé sans trace
+   se lit comme un tableau complet. `failed` / `coverage` / `requested` voyagent désormais AVEC
+   le tableau. Seul `SeriesTable` tenait la doctrine ; l'étage pandas ne la tenait pas.
+2. **« Injoignable » couvrait aussi les refus.** Un HTTP 400/401/404/429 signifie que le service
+   a RÉPONDU et refusé : la demande est en cause. Le motif disait « FRED injoignable », ce qui
+   envoie chercher une coupure réseau inexistante et peut masquer une clé morte des heures.
+   Motifs distincts désormais (accès refusé / série inconnue / quota / requête en cause /
+   panne 5xx), pour les trois connecteurs puisque c'est dans le harnais. On ne LÈVE pas pour
+   autant : c'est une condition d'exécution, pas une erreur détectable avant l'appel.
+
+**Ce que je retiens de l'exercice** : le seul reproche fondé contre le dépôt portait sur du code
+écrit dans cette même session, et je ne l'avais pas vu — les autres mentions du dépôt dans
+l'audit le citaient comme contre-exemple. Le coût (2,6 M jetons) est disproportionné au regard
+des deux corrections ; ce qui l'a rentabilisé, c'est la couche de réfutation, pas la recherche.
+
 ### Reste ouvert (sans blocage)
 Six lignes de catalogue à relever (3 clés SDMX en une session, la clé du Bund€i qui débloque
 aussi `rdiff`), quatre connecteurs sur sept n'ont pas encore leur client d'interrogation

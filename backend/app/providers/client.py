@@ -101,9 +101,9 @@ class HttpSeriesClient:
         try:
             text = self._fetcher(url)
         except Exception as exc:                   # noqa: BLE001 — condition de données
-            detail = cx.redact(str(exc)) or exc.__class__.__name__
-            log.warning("%s injoignable (%s) : %s", self.LABEL, series_id, detail)
-            return SeriesResult(series_id, None, f"{self.LABEL} injoignable — {detail}", safe_url)
+            motif = self._motif_echec(exc)
+            log.warning("%s (%s) : %s", self.LABEL, series_id, motif)
+            return SeriesResult(series_id, None, motif, safe_url)
         parsed = type(self).PARSER(text)
         if parsed is None:
             echec = SeriesResult(series_id, None,
@@ -113,6 +113,32 @@ class HttpSeriesClient:
             # d'échec les nomme ICI, sans refaire d'appel.
             return self._on_unreadable(text, echec)
         return SeriesResult(series_id, parsed, None, safe_url)
+
+    def _motif_echec(self, exc: Exception) -> str:
+        """« Injoignable » et « refusé » ne sont pas la même panne (constat d'audit).
+
+        Un HTTP 4xx veut dire que le service a RÉPONDU : la demande est en cause — clé révoquée,
+        identifiant inexistant, quota dépassé. Le lire « injoignable » envoie chercher une
+        coupure réseau qui n'existe pas, et masque une clé morte pendant des heures. On ne LÈVE
+        pas pour autant : c'est une condition d'exécution, pas une erreur de programme
+        détectable avant l'appel — le motif dit simplement la vérité."""
+        detail = cx.redact(str(exc)) or exc.__class__.__name__
+        code = getattr(exc, "code", None)
+        if not isinstance(code, int):
+            return f"{self.LABEL} injoignable — {detail}"
+        if code in (401, 403):
+            return (f"{self.LABEL} a refusé l'accès (HTTP {code}) — vérifier la clé API ou les "
+                    "droits. Le service répond : ce n'est pas une panne.")
+        if code == 404:
+            return (f"série inconnue de {self.LABEL} (HTTP 404) — l'identifiant n'existe pas "
+                    "chez ce fournisseur, le relever au catalogue.")
+        if code == 429:
+            return (f"quota {self.LABEL} dépassé (HTTP 429) — ralentir les appels. Le service "
+                    "répond : ce n'est pas une panne.")
+        if 400 <= code < 500:
+            return (f"{self.LABEL} a refusé la demande (HTTP {code}) — la requête est en cause, "
+                    f"pas le réseau · {detail}")
+        return f"{self.LABEL} en panne (HTTP {code}) — réessayer plus tard · {detail}"
 
     def _on_unreadable(self, text: str, result: SeriesResult) -> SeriesResult:
         """Point d'extension : requalifier un parsing refusé quand le connecteur sait pourquoi.
@@ -185,7 +211,15 @@ class HttpSeriesClient:
             ) from exc
         table = self.to_columns(series, catalog=catalog, **kw)
         index = pd.to_datetime(list(table.periods)) if datetime_index else list(table.periods)
-        return pd.DataFrame({n: list(v) for n, v in table.columns.items()}, index=index)
+        frame = pd.DataFrame({n: list(v) for n, v in table.columns.items()}, index=index)
+        # La trace VOYAGE avec le tableau (constat d'audit) : sans elle, une série disparue
+        # laissait un tableau amputé qui se lit comme un tableau complet, et le motif n'était
+        # récupérable qu'en rappelant `to_columns` — donc en REFAISANT tous les appels. C'est
+        # exactement le défaut reproché aux scripts d'origine ; il était ici aussi.
+        frame.attrs["failed"] = dict(table.failed)
+        frame.attrs["coverage"] = dict(table.coverage)
+        frame.attrs["requested"] = tuple(series)
+        return frame
 
     # -- portillon du registre, commun à tous les connecteurs --
 

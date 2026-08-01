@@ -385,3 +385,63 @@ def test_to_dataframe_SANS_pandas_dit_quoi_installer(monkeypatch):
     with pytest.raises(RuntimeError) as e:
         _multi().to_dataframe(["UNRATE"])
     assert "pip install pandas" in str(e.value)
+
+
+# =============================================================================================
+# Constats d'audit adversarial (39 agents) — deux défauts confirmés DANS CE CODE
+# =============================================================================================
+
+
+def test_AUDIT_le_DataFrame_porte_la_trace_des_echecs_sans_refetch():
+    """Constat confirmé : `to_dataframe` reproduisait le défaut que je reprochais au script
+    d'origine — la série en échec disparaît, et le motif n'était récupérable qu'en rappelant
+    `to_columns`, donc en REFAISANT les appels. Un tableau amputé sans trace se lit comme un
+    tableau complet."""
+    client = _multi(casse={"GDPC1"})
+    frame = client.to_dataframe(["UNRATE", "GDPC1"])
+    assert "GDPC1" not in frame.columns
+    assert "GDPC1" in frame.attrs["failed"]                 # la trace VOYAGE avec le tableau
+    assert "injoignable" in frame.attrs["failed"]["GDPC1"]
+    assert frame.attrs["coverage"]["UNRATE"] == 2
+    assert frame.attrs["requested"] == ("UNRATE", "GDPC1")
+
+
+def test_AUDIT_un_tableau_sans_echec_le_dit_aussi():
+    """`attrs` toujours renseigné : « absent » ne doit pas vouloir dire « je n'ai pas regardé »."""
+    frame = _multi().to_dataframe(["UNRATE", "GDPC1"])
+    assert frame.attrs["failed"] == {}
+
+
+def test_AUDIT_un_service_qui_REFUSE_ne_se_lit_pas_comme_un_service_injoignable():
+    """Second constat : un HTTP 400 signifie que le service a RÉPONDU et refusé la demande —
+    clé révoquée, série inexistante, quota. Le lire « injoignable » fait chercher une panne
+    réseau qui n'existe pas."""
+    import urllib.error
+
+    def http(code):
+        def fetcher(url):
+            raise urllib.error.HTTPError(url, code, "refus", {}, None)
+        return fred.FredClient(api_key="K", fetcher=fetcher)
+
+    assert "clé" in http(401).fetch("UNRATE").error
+    assert "inconnue" in http(404).fetch("UNRATE").error
+    assert "quota" in http(429).fetch("UNRATE").error
+    assert "requête" in http(400).fetch("UNRATE").error
+    for code in (401, 404, 429, 400):
+        assert "injoignable" not in http(code).fetch("UNRATE").error, code
+
+
+def test_AUDIT_une_panne_du_SERVICE_reste_une_panne():
+    import urllib.error
+
+    def fetcher(url):
+        raise urllib.error.HTTPError(url, 503, "Service Unavailable", {}, None)
+    result = fred.FredClient(api_key="K", fetcher=fetcher).fetch("UNRATE")
+    assert "503" in result.error and "panne" in result.error
+
+
+def test_AUDIT_une_vraie_coupure_reseau_reste_injoignable():
+    """Le motif d'origine ne doit pas disparaître : sans réponse du tout, « injoignable » est
+    exact."""
+    client, _ = _client(payload=OSError("connection reset"))
+    assert "injoignable" in client.fetch("UNRATE").error
