@@ -42,6 +42,9 @@ DEFAULT_TIMEOUT_S = 10.0
 # main tout de suite côté boucle, mais le thread vit jusqu'au timeout de la socket — un timeout
 # absent ou géant laisserait un thread qui ne meurt jamais, et un arrêt qui n'en finit pas.
 MIN_TIMEOUT_S, MAX_TIMEOUT_S = 1.0, 60.0
+# S'annoncer. Un `Python-urllib/3.x` anonyme se fait bloquer par certains services publics — et
+# le refus qui s'ensuit se lit comme une panne de source, pas comme une politesse manquante.
+USER_AGENT = "CholismoTerminal/1.0 (+terminal de trading human-in-the-loop)"
 
 
 def clamp_timeout(value: object) -> float:
@@ -204,7 +207,8 @@ class HttpSeriesClient:
     # -- interne --
 
     def _fetch_url(self, url: str) -> str:
-        with urllib.request.urlopen(url, timeout=self.timeout_s) as resp:    # dans un thread
+        request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+        with urllib.request.urlopen(request, timeout=self.timeout_s) as resp:  # dans un thread
             # Lecture BORNÉE (+1 pour détecter le dépassement) : une réponse plus grosse que la
             # borne ne peut pas être une série macro, et elle ne doit pas manger la RAM.
             return resp.read(cx.MAX_FEED_BYTES + 1).decode("utf-8", errors="replace")

@@ -340,3 +340,30 @@ def test_client_for_applique_le_portillon_du_registre():
 def test_client_for_transmet_les_options_au_client():
     from app.providers.client import client_for
     assert client_for("hicp_ez", timeout_s=42.0).timeout_s == 42.0
+
+
+def test_le_fetcher_par_defaut_s_ANNONCE_avec_un_User_Agent():
+    """Un `Python-urllib/3.x` anonyme se fait bloquer par certains services publics, et ne dit
+    à personne qui appelle. L'en-tête est une politesse qui évite un refus qu'on lirait comme
+    une panne."""
+    import urllib.request
+
+    from app.providers.client import USER_AGENT, HttpSeriesClient
+    vu = {}
+
+    def faux_urlopen(req, timeout=None):
+        vu["ua"] = req.get_header("User-agent")
+
+        class R:
+            def read(self, n): return b"TIME_PERIOD,OBS_VALUE\n2026-01,1.0\n"
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+        return R()
+
+    original = urllib.request.urlopen
+    urllib.request.urlopen = faux_urlopen
+    try:
+        HttpSeriesClient()._fetch_url("https://exemple.test/x")
+    finally:
+        urllib.request.urlopen = original
+    assert vu["ua"] == USER_AGENT and "Cholismo" in USER_AGENT

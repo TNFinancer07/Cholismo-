@@ -255,3 +255,65 @@ def test_fetch_async_propage_le_refus_de_politique():
 def test_le_timeout_est_borne_comme_ailleurs():
     assert ecb.EcbClient(timeout_s=None).timeout_s == ecb.DEFAULT_TIMEOUT_S
     assert ecb.EcbClient(timeout_s=1e9).timeout_s == ecb.MAX_TIMEOUT_S
+
+
+# =============================================================================================
+# Borne de période — `startPeriod` / `endPeriod` (repris d'un script opérateur)
+# =============================================================================================
+
+
+def test_startPeriod_borne_la_requete_au_lieu_de_tout_telecharger():
+    """Manquait au client : il ramenait l'historique complet à chaque appel. La borne est un
+    paramètre SDMX REST standard, et elle change l'ordre de grandeur du transfert."""
+    client, seen = _client()
+    client.fetch("YC", "B.U2.EUR", start="2023-01-01")
+    assert "startPeriod=2023-01-01" in seen[0] and "format=csvdata" in seen[0]
+
+
+def test_endPeriod_aussi_et_les_deux_ensemble():
+    client, seen = _client()
+    client.fetch("YC", "B.U2.EUR", start="2023-01-01", end="2024-12-31")
+    assert "startPeriod=2023-01-01" in seen[0] and "endPeriod=2024-12-31" in seen[0]
+
+
+@pytest.mark.parametrize("periode", ["2023", "2023-01", "2023-01-02", "2023-Q1", "2023-S1",
+                                     "2023-W05"])
+def test_toutes_les_granularites_SDMX_sont_acceptees(periode):
+    """SDMX borne aussi en trimestres, semestres et semaines — un client qui n'accepterait que
+    des jours rendrait `AME` (annuel) et `SPF` (trimestriel) inbornables."""
+    client, seen = _client()
+    client.fetch("YC", "B.U2.EUR", start=periode)
+    assert f"startPeriod={periode}" in seen[0]
+
+
+@pytest.mark.parametrize("mauvaise", ["hier", "2023-13", "2023-01-02&x=1", "01/2023", 2023,
+                                      "2023-Q5"])
+def test_une_borne_mal_formee_est_refusee_AVANT_la_requete(mauvaise):
+    """Elle finirait dans la query string : un `&` y ajouterait un paramètre."""
+    client, seen = _client()
+    with pytest.raises(cx.SeriesBlocked) as e:
+        client.fetch("YC", "B.U2.EUR", start=mauvaise)
+    assert "période" in str(e.value).lower()
+    assert seen == []
+
+
+def test_la_borne_passe_aussi_par_la_cle_pointee_et_la_cle_metier():
+    client, seen = _client()
+    client.fetch_key("HICP.M.U2.N.000000.4.ANR", start="2023-01")
+    client.fetch_catalog("yc_spot", start="2020")
+    assert "startPeriod=2023-01" in seen[0] and "startPeriod=2020" in seen[1]
+
+
+def test_l_ordre_des_parametres_est_STABLE():
+    """URL stable = comparable d'un appel à l'autre, et testable."""
+    client, seen = _client()
+    client.fetch("YC", "B.U2.EUR", start="2023-01-01", end="2024-12-31")
+    assert seen[0].endswith("?format=csvdata&startPeriod=2023-01-01&endPeriod=2024-12-31")
+
+
+def test_assemblage_tabulaire_disponible_cote_BCE():
+    """Hérité du harnais : le connecteur BCE n'a pas eu à le réécrire."""
+    client, _ = _client()
+    table = client.to_columns(["YC.B.U2.EUR", "HICP.M.U2.N"], start="2023-01-01")
+    assert set(table.columns) == {"YC.B.U2.EUR", "HICP.M.U2.N"}
+    assert table.rows == 2 and table.failed == {}

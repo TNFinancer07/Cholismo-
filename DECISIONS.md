@@ -3399,6 +3399,46 @@ registre : **22 séries communes sur 28**, 6 ajouts, 10 absences, 0 vrai désacc
   faux FRED : 12 colonnes / 3 périodes pour D1, `nrou` en 503 sorti du tableau avec son motif,
   et le creux structurel visible colonne par colonne.
 
+### Script BCE d'un opérateur — ce qu'il apportait, ce qu'il coûtait
+Second script personnel (`requests` + pandas, connecteur SDMX BCE). Le connecteur maison existait
+déjà et était plus strict, mais **le script avait deux choses que je n'avais pas** — reprises :
+- **`startPeriod` / `endPeriod`.** Le client BCE ramenait l'historique COMPLET à chaque appel.
+  C'est un paramètre SDMX REST standard, et il change l'ordre de grandeur du transfert pour rien.
+  Étendu à `endPeriod`, et la validation accepte **toutes les granularités SDMX** — année, mois,
+  jour, mais aussi trimestre, semestre, semaine : n'accepter que des jours rendrait `AME`
+  (annuel) et `SPF` (trimestriel) inbornables. Une borne mal formée est refusée avant l'URL,
+  puisqu'elle finirait dans la query string.
+- **Un `User-Agent`.** Le fetcher par défaut envoyait un `Python-urllib/3.x` anonyme, que
+  certains services publics bloquent — et le refus se lit alors comme une panne de source.
+  Ajouté au harnais, donc valable pour les trois connecteurs.
+
+**Quatre défauts du script, démontrés par exécution plutôt qu'affirmés** (pandas 3.0.5) :
+1. `pd.to_datetime` fait **collapser des granularités différentes sur le même horodatage** :
+   `"2023"` (AMECO annuel) et `"2023-Q1"` (SPF trimestriel) deviennent tous deux
+   `2023-01-01`, sans trace. C'est précisément la précision inventée que `to_dataframe` refuse
+   par défaut ici — l'index horodaté y est opt-in.
+2. `"2023-S1"` et `"2023-W05"`, périodes SDMX **légales**, font LEVER `pd.to_datetime` — et la
+   levée est **hors** du `except requests.exceptions.RequestException`.
+3. `pd.to_numeric` lève sur un marqueur non numérique, également hors du `except` capturé : un
+   échec réseau rend un DataFrame vide, une valeur mal formée fait planter l'appelant.
+4. `return pd.DataFrame()` sur erreur : `.empty` est **vrai** aussi bien pour un 503 que pour une
+   fenêtre légitimement vide — la confusion échec/absence que §3 interdit. Et si les colonnes
+   attendues manquent (page d'erreur, autre format), le script **retourne le DataFrame brut**
+   avec des colonnes arbitraires.
+
+**Réserve sur la clé d'exemple** : `B.U2.EUR.4F.G_N_A.SV_C_UC.A100` ne correspond pas à la clé
+vérifiée de la spec (`…SV_C_YM.SR_1Y`). C'est exactement le cas C2 — une clé plausible non
+confirmée. Le client ne peut pas l'attraper (elle est bien formée) : seul le relevé au catalogue
+le peut, d'où `series_keys_url()`.
+
+**Refactor préalable** (Loop 3, commit séparé) : `SeriesTable` / `to_columns` / `to_dataframe`
+sont remontés de `fred.py` dans le harnais — ils ne doivent rien à FRED. Les trois connecteurs
+en héritent ; le seul point propre à chacun (« un nom désigne quelle série ? ») devient
+`_fetch_one`. 47 tests FRED inchangés.
+
+**Vérif** : +18 tests → **968 passed**, ruff clean. Essai réel : appel borné, trois granularités
+bornées simultanément, période gardée telle quelle, et trois refus de politique sans requête.
+
 ### Reste ouvert (sans blocage)
 Six lignes de catalogue à relever (3 clés SDMX en une session, la clé du Bund€i qui débloque
 aussi `rdiff`), quatre connecteurs sur sept n'ont pas encore leur client d'interrogation

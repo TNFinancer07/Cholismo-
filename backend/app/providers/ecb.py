@@ -67,6 +67,19 @@ _DATAFLOW_RE = re.compile(r"^[A-Z][A-Z0-9_]{1,19}$")
 # pour « tous ». Tout le reste — espace, `?`, `&`, `/` — sort de la query string et n'a rien à
 # faire là.
 _KEY_RE = re.compile(r"^[A-Za-z0-9_+*.\-]{1,200}$")
+# Période SDMX : année, mois, jour, mais AUSSI trimestre, semestre et semaine. N'accepter que
+# des jours rendrait `AME` (annuel) et `SPF` (trimestriel) inbornables.
+_PERIOD_RE = re.compile(
+    r"^\d{4}(-(0[1-9]|1[0-2])(-(0[1-9]|[12]\d|3[01]))?|-Q[1-4]|-S[12]|-W(0[1-9]|[1-4]\d|5[0-3]))?$")
+
+
+def _check_period(value: object, nom: str) -> str:
+    if not isinstance(value, str) or not _PERIOD_RE.match(value):
+        raise cx.SeriesBlocked(
+            f"{nom} : « {value} » n'est pas une période SDMX — refusé avant construction de "
+            "l'URL (elle finirait dans la query string). Formes acceptées : 2023, 2023-01, "
+            "2023-01-02, 2023-Q1, 2023-S1, 2023-W05.")
+    return value
 
 
 def _check_dataflow(dataflow: object) -> str:
@@ -90,12 +103,22 @@ def _check_key(key: object, dataflow: str) -> str:
     return key
 
 
-def data_url(dataflow: str, key: str) -> str:
+def data_url(dataflow: str, key: str, *, start: Optional[str] = None,
+             end: Optional[str] = None) -> str:
     """URL d'observations. Toujours `csvdata` : c'est le format que sait lire le parser, et
-    proposer un format qu'on ne parse pas serait une promesse creuse."""
+    proposer un format qu'on ne parse pas serait une promesse creuse.
+
+    `start` / `end` bornent la fenêtre (`startPeriod` / `endPeriod`, paramètres SDMX REST
+    standards). Sans eux le service rend l'historique COMPLET à chaque appel — ce qui marche,
+    mais change l'ordre de grandeur du transfert pour rien."""
     flow = _check_dataflow(dataflow)
     series = _check_key(key, flow)
-    return f"{BASE}/{quote(flow)}/{quote(series)}?format=csvdata"
+    url = f"{BASE}/{quote(flow)}/{quote(series)}?format=csvdata"
+    if start is not None:
+        url += f"&startPeriod={quote(_check_period(start, 'startPeriod'))}"
+    if end is not None:
+        url += f"&endPeriod={quote(_check_period(end, 'endPeriod'))}"
+    return url
 
 
 def series_keys_url(dataflow: str) -> str:
@@ -120,30 +143,32 @@ class EcbClient(HttpSeriesClient):
 
     # -- interrogation générique : un connecteur, tous les dataflows --
 
-    def fetch(self, dataflow: str, key: str) -> SeriesResult:
+    def fetch(self, dataflow: str, key: str, *, start: Optional[str] = None,
+              end: Optional[str] = None) -> SeriesResult:
         """Observations d'une série (`YC` + `B.U2.EUR.4F.G_N_A.SV_C_YM.SR_1Y`, `AME` + …).
 
         Lève `SeriesBlocked` si la demande est refusée par politique ; sinon rend toujours un
         résultat, motif à l'appui quand la donnée n'est pas venue."""
-        url = data_url(dataflow, key)
+        url = data_url(dataflow, key, start=start, end=end)
         return self._run(f"{dataflow}/{key}", url)
 
-    async def fetch_async(self, dataflow: str, key: str) -> SeriesResult:
+    async def fetch_async(self, dataflow: str, key: str, *, start: Optional[str] = None,
+                          end: Optional[str] = None) -> SeriesResult:
         """Même chose, I/O en thread : la boucle d'événements ne gèle jamais (§7). Le refus de
         politique est levé AVANT de partir en thread."""
-        url = data_url(dataflow, key)
+        url = data_url(dataflow, key, start=start, end=end)
         return await self._run_async(f"{dataflow}/{key}", url)
 
     # -- formes d'appel dérivées --
 
-    def fetch_key(self, dotted: str) -> SeriesResult:
+    def fetch_key(self, dotted: str, **kw) -> SeriesResult:
         """Clé complète telle que le registre et les artefacts l'écrivent
         (`HICP.M.U2.N.000000.4.ANR`) : le dataflow est le premier segment."""
         dataflow, _, key = (dotted or "").partition(".")
         if not dataflow or not key:
             raise cx.SeriesBlocked(
                 f"« {dotted} » : clé SDMX incomplète — forme attendue « DATAFLOW.reste.de.la.clé »")
-        return self.fetch(dataflow, key)
+        return self.fetch(dataflow, key, **kw)
 
     def _fetch_one(self, name: str, *, catalog: bool, **kw) -> SeriesResult:
         """Côté BCE, « un nom = une série » veut dire la clé POINTÉE (`HICP.M.U2.…`) — c'est
@@ -151,10 +176,10 @@ class EcbClient(HttpSeriesClient):
         tabulaire appellerait `fetch(dataflow, key)` avec un seul argument."""
         return self.fetch_catalog(name, **kw) if catalog else self.fetch_key(name, **kw)
 
-    def fetch_catalog(self, catalog_key: str) -> SeriesResult:
+    def fetch_catalog(self, catalog_key: str, **kw) -> SeriesResult:
         """Chemin normal : on demande `yc_spot`, pas la clé SDMX. Le portillon du registre
         s'applique (C1 seulement) et le fournisseur est vérifié."""
-        return self.fetch_key(self._spec_for(catalog_key).identifier or "")
+        return self.fetch_key(self._spec_for(catalog_key).identifier or "", **kw)
 
 
 def fetch_series(dataflow: str, key: str,
