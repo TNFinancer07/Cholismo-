@@ -3144,6 +3144,94 @@ Deux axes demandés : sweeps chaotiques et coupure de flux. Le premier a révél
 - **Reste ouvert** : la bascule elle-même. Elle se fera quand l'ombre aura montré assez d'accords
   — et le désaccord de la scène B est précisément le genre de cas à examiner avant, pas après.
 
+## D-057 · Accès aux données macro de Youssef — registre, connecteurs, cascade, client FRED
+**Sources** : les deux artefacts fournis par le propriétaire de la spec — `API × Arbitrage`
+(juillet 2026, 6 arbitrages) et `API × Dimension` (31.07.2026, D1–D5, « catalogues vérifiés »).
+**Livré** : `backend/app/providers/` — `catalog.py` (registre), `connectors.py` (7 connecteurs),
+`cascade.py` (z-score/divergence/tanh), `fred.py` (client d'interrogation).
+
+### Périmètre assumé
+Les specs décrivent ~50 variables, 7 familles de sources, 5 dimensions, 6 arbitrages. Cette
+tranche livre **la couche d'accès et sa structure**, pas le câblage au `ContextSchema` : aucun
+panneau nouveau, aucun bloc de schéma touché (§1 — un panneau lit UN champ, et il n'y a encore
+rien à lire de vivant). Les artefacts disent eux-mêmes que la collecte doit démarrer pendant
+que les catalogues se relèvent, « puisque la profondeur d'historique se construit avec le temps
+et ne se rattrape pas ». Le câblage viendra quand une série aura de la profondeur.
+
+### La doctrine C1/C2/C3 est devenue exécutable
+La note pour Sony est explicite : « un C2 veut dire *ne pas coder l'identifiant en dur sans être
+passé par le catalogue du fournisseur d'abord*, un C3 veut dire *ne pas commencer* ». Tenu comme
+une règle de code, pas comme un commentaire :
+- toute ligne non-C1 a `identifier is None` — **il n'existe aucune clé « probable » dans le
+  dépôt**. Une clé inventée aurait exactement l'apparence d'une clé vérifiée (§3) ;
+- `fetch_block_reason` est le seul portillon, et `build_url` refuse (`SeriesBlocked`) tout ce
+  qu'il bloque. Une clé inconnue est bloquée **par défaut**, jamais autorisée par défaut ;
+- **70 lignes, 48 collectables aujourd'hui** ; 7 en C2 (relevé de catalogue), 5 en C3.
+
+### Trois natures de ligne — les confondre était le piège principal
+`OBSERVED` (collectable) · `DERIVED` (calcul) · `PARAMETER` (aucune requête ne le fournira).
+Conséquence non évidente et testée : **une ligne dérivée dont la dépendance est bloquée est
+bloquée aussi, et le motif nomme le maillon** — `ilsw_ez` renvoie vers `bundei_real`, pas vers
+un défaut de son propre étage. Sans ça, on cherche le problème au mauvais niveau.
+Autre distinction qui manquait : **collectable ≠ interrogeable en HTTP**. Le SPF de Philadelphie
+est C1 vérifié et n'a aucun REST — l'absence est structurelle, `has_rest_endpoint` le dit.
+
+### Le registre est verrouillé au moteur qui tourne
+La matrice de poids du quadrant existait déjà dans `strategies/youssef.py`. Elle existe
+maintenant à deux endroits, donc un test exige leur égalité — de même que les six arbitrages
+doivent porter les mêmes dimension/horizon/seuil que ceux que `compute_arbitrages` émet. Une
+spec transcrite qui dérive silencieusement du code qu'elle décrit ne vaut rien.
+
+### Pièges de source armés (ceux qui cassent en silence)
+- **Dataflow ICP mort** depuis le 04.02.2026, remplacé par HICP à structure identique : un test
+  interdit à tout identifiant du registre de commencer par `ICP.`.
+- **Code de zone AMECO** en constante visible (`EA20` → `EA21` aux élargissements).
+- **Bascule d'ISIN du Bund€i écrite maintenant**, comme la spec le demande — « pas le jour où la
+  série cassera ». Et elle MESURE au lieu de supposer : au 01.08.2026, jambe EUR à **6,7 ans**
+  contre 10 ans constants côté US, soit **3,3 ans d'écart de ténor déjà**. La spec parlait d'une
+  dérive à venir ; elle est là. `bundei_roll_state` rend `BASCULE_REQUISE`.
+- **Marqueurs de trou, un par fournisseur, tous mortels s'ils sont lus comme des nombres** :
+  `.` (FRED, Bundesbank), `:` (Eurostat), `null` (Yahoo, DBnomics). Aucun ne vaut zéro.
+
+### Incohérences : déclarées, pas patchées en douce (protocole des artefacts)
+`KNOWN_CONFLICTS` porte les trois, avec les deux valeurs en présence et ce que le code fait
+aujourd'hui — coefficient RED **0.4 (registre N3) vs 0.0 (référentiel)**, TTL 4 h contre NFCI
+hebdomadaire, échelle k/seuils qui empêche mécaniquement tout GO.
+**Un seul point tranché, et il va plus loin que la spec** : le TTL est séparé en deux axes —
+âge de NOTRE COPIE (piloté par la dimension) et âge de la PUBLICATION (piloté par la fréquence).
+La spec dit qu'une lecture littérale tuerait le NFCI ; c'est incomplet. **VIXCLS et
+BAMLH0A0HYM2 sont des séries de clôture quotidienne** — un seuil de 4 h sur l'âge d'observation
+les tuerait aussi. Ce n'est donc pas le seul cas hebdomadaire qui condamne la lecture littérale.
+
+### Cascade — trois gardes qui viennent des trois conséquences de la spec
+Profondeur (sous la fenêtre : rien, pas d'approximation), plancher de σ (une série plate n'a pas
+de z-score, elle a une division par zéro), et signalement `outlier` **sans écrêtage** — parce que
+`tanh` noie l'aberration plus loin : si elle n'est pas vue ici, personne ne la verra, et écrêter
+déciderait à la place de l'opérateur (§2.1). Une composante manquante n'est **jamais
+renormalisée** sur les présentes : un D1 amputé du PMI (0.30) se lirait comme un D1 complet.
+
+### Client FRED — deux natures d'échec, jamais confondues
+Refus de POLITIQUE → exception (clé absente, identifiant mal formé, ligne C2/C3, mauvais
+fournisseur) : c'est une erreur de programme, elle doit s'arrêter, pas se dégrader en série vide
+qu'on lirait comme un marché calme. Condition de DONNÉES → motif dans le résultat, sans
+exception : l'appelant garde ce qu'il avait (doctrine D-050).
+Deux gardes non demandés mais nécessaires : **l'identifiant est validé avant la construction de
+l'URL** (sans ça, `series_id` écrit dans la query string — un `&` suffit à ajouter un paramètre
+à l'appel), et **la clé ne fuit nulle part** (un message de socket contient volontiers l'URL
+entière ; tous les motifs passent par `redact`).
+
+### Vérification
+**826 passed** (+99 : 25 registre, 31 connecteurs, 18 cascade, 25 FRED), ruff clean, `tsc`
+clean. **Essai réel** sur le chemin `urllib` par défaut (serveur local rejouant une réponse
+FRED, pas le fetcher injecté) : UNRATE/DFF/SP500/T10YIE lues, trou « . » compté, `vixcls` par la
+clé métier, quatre refus de politique sans qu'aucune requête ne parte, réseau mort rendu en
+motif sans fuite de clé.
+
+### Reste ouvert (sans blocage)
+Six lignes de catalogue à relever (3 clés SDMX en une session, la clé du Bund€i qui débloque
+aussi `rdiff`), les six connecteurs non-FRED n'ont pas encore leur client d'interrogation (URL
+et parsing sont là), et le câblage au `ContextSchema`/aux panneaux n'est pas commencé.
+
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)
 `VITE_OPERATOR` (ou `?operator=YOUSSEF`) fixe l'instance ; défaut `SONY`. Tous les events
 portent `operator`.
