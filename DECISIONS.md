@@ -3303,10 +3303,42 @@ motif sans fuite de clé.
   pointée et clé métier du registre, quatre refus de politique sans qu'aucune requête ne parte,
   zéro `api_key` dans les URL produites.
 
+### Connecteur Eurostat — et le défaut silencieux qu'il a fait sortir
+- **/bugfix (Loop 2) AVANT la feature.** En écrivant les tests, j'ai vérifié ce que faisait mon
+  parser JSON-stat déjà committé sur une réponse NON filtrée. Repro : cube 3 pays × 3 mois avec
+  `id = [time, geo]` → il rendait `6.1 / 3.1 / 7.1`, soit **trois PAYS lus comme trois DATES**.
+  Un chômage zone euro affiché à 3,1 % puis 7,1 %, avec l'air d'une mesure. Cause racine :
+  indexer `value` par la position temporelle n'est correct que si toutes les autres dimensions
+  valent 1 — le parser avait été écrit sur la forme d'une réponse filtrée et supposait cette
+  réduction sans jamais la vérifier.
+- **Le cas symétrique est refusé aussi, et c'est le point important** : avec `id = [geo, time]`
+  le parser rendait par HASARD la bonne série — celle de EA20, que personne n'avait demandée.
+  Choisir un pays par défaut serait décider à la place de l'opérateur (§2.1). Les deux ordres
+  sont couverts par des tests de régression.
+- **`eurostat_open_dimensions` dit QUOI épingler**, pas seulement « non ». Et le client
+  distingue les deux causes : « réponse Eurostat NON FILTRÉE : geo, unit portent encore
+  plusieurs valeurs » ≠ « réponse illisible ». Chercher un défaut de parsing quand il manque
+  juste un filtre fait perdre l'après-midi. La requalification passe par un point d'extension
+  du harnais (`_on_unreadable`), qui reçoit le texte déjà en main — **aucun second appel réseau**
+  (ma première version en refaisait un, corrigée avant commit).
+- **Aucune valeur de filtre inventée.** `unrate_ez` porte `geo=EA20` parce que la spec l'écrit ;
+  pour les deux autres datasets, rien n'est deviné — c'est la RÉPONSE du service qui nomme les
+  dimensions restées ouvertes, et c'est une information plus fiable qu'une constante supposée
+  (doctrine C2 appliquée aux filtres, pas seulement aux identifiants). Le registre gagne un
+  champ `filters`, et `fetch_catalog("unrate_ez")` applique le filtre d'office.
+- **Leçon BCE appliquée d'emblée** : une seule construction d'URL Eurostat, le chemin registre
+  délègue au client (import local), test d'égalité sur les trois lignes.
+- **Réserve de fond redite dans le module** : l'ESI n'est pas un PMI. Le biais n'est présent
+  que d'un côté de la divergence, donc il ne s'annule pas — il se lit comme du signal. C'est le
+  risque n°1 de D1, dont le PMI porte le plus gros poids (0.30).
+- **Vérif** : +33 tests → **922 passed**, ruff clean. Essai réel sur le chemin `urllib` : les
+  trois datasets lus filtrés, `unrate_ez` par la clé métier, **le même appel sans filtre rend
+  le motif au lieu d'une série**, quatre refus de politique sans qu'aucune requête ne parte.
+
 ### Reste ouvert (sans blocage)
 Six lignes de catalogue à relever (3 clés SDMX en une session, la clé du Bund€i qui débloque
-aussi `rdiff`), cinq connecteurs sur sept n'ont pas encore leur client d'interrogation (Eurostat,
-Bundesbank, Socrata CFTC, SDMX international, Yahoo — URL et parsing sont là), et le câblage au
+aussi `rdiff`), quatre connecteurs sur sept n'ont pas encore leur client d'interrogation
+(Bundesbank, Socrata CFTC, SDMX international, Yahoo — URL et parsing sont là), et le câblage au
 `ContextSchema`/aux panneaux n'est pas commencé.
 
 ## D-015 · Un opérateur par instance (AUTORITÉ `CLAUDE §9`)

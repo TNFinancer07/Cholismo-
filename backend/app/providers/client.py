@@ -88,10 +88,18 @@ class HttpSeriesClient:
             return SeriesResult(series_id, None, f"{self.LABEL} injoignable — {detail}", safe_url)
         parsed = type(self).PARSER(text)
         if parsed is None:
-            return SeriesResult(series_id, None,
-                                f"réponse {self.LABEL} illisible ou hors bornes — cache "
-                                "précédent conservé", safe_url)
+            echec = SeriesResult(series_id, None,
+                                 f"réponse {self.LABEL} illisible ou hors bornes — cache "
+                                 "précédent conservé", safe_url)
+            # Le texte est encore en main : un connecteur qui sait distinguer plusieurs causes
+            # d'échec les nomme ICI, sans refaire d'appel.
+            return self._on_unreadable(text, echec)
         return SeriesResult(series_id, parsed, None, safe_url)
+
+    def _on_unreadable(self, text: str, result: SeriesResult) -> SeriesResult:
+        """Point d'extension : requalifier un parsing refusé quand le connecteur sait pourquoi.
+        Par défaut, « illisible » est la seule cause connue et le motif reste tel quel."""
+        return result
 
     async def _run_async(self, series_id: str, url: str) -> SeriesResult:
         return await asyncio.to_thread(self._run, series_id, url)

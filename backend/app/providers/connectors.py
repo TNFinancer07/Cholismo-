@@ -143,8 +143,10 @@ def _ecb_url(spec: SeriesSpec, **_: Any) -> str:
 
 
 def _eurostat_url(spec: SeriesSpec, **_: Any) -> str:
-    return ("https://ec.europa.eu/eurostat/api/dissemination/statistics/1.0/data/"
-            f"{quote(spec.identifier or '')}?format=JSON")
+    # Import LOCAL, même raison que pour la BCE : une SEULE construction d'URL Eurostat, donc
+    # les filtres du registre et les gardes du client valent aussi pour le chemin registre.
+    from .eurostat import data_url
+    return data_url(spec.identifier or "", dict(spec.filters))
 
 
 def _bundesbank_url(spec: SeriesSpec, **_: Any) -> str:

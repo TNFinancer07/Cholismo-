@@ -91,6 +91,10 @@ class SeriesSpec:
     depends_on: tuple[str, ...] = ()
     extra: tuple[str, ...] = ()      # clés supplémentaires d'une même ligne (ténors, variantes)
     catalog_hint: str = ""           # OÙ relever la clé, pour une ligne C2
+    # Dimensions à ÉPINGLER dans la requête. Chez Eurostat, un dataset non filtré rend un cube
+    # (pays × unité × âge × temps) : sans ces filtres, la réponse n'est pas une série. La
+    # valeur ne figure ici que lorsque la spec l'écrit — on n'invente pas un code (doctrine C2).
+    filters: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -248,7 +252,9 @@ CATALOG: tuple[SeriesSpec, ...] = (
     _s("nrou", "NAIRU US (estimation CBO)", Kind.OBSERVED, "D1", (2, 5), Leg.QUOTE,
        Provider.FRED, "NROU", Frequency.QUARTERLY, Confidence.C1, "ancre du marché du travail"),
     _s("unrate_ez", "Taux de chômage zone euro", Kind.OBSERVED, "D1", (2,), Leg.BASE,
-       Provider.EUROSTAT, "une_rt_m", Frequency.MONTHLY, Confidence.C1, "filtre geo=EA20"),
+       Provider.EUROSTAT, "une_rt_m", Frequency.MONTHLY, Confidence.C1,
+       "Filtre geo=EA20 (spec) — sans lui la réponse est un cube, pas une série.",
+       filters=(("geo", AMECO_ZONE),)),
     _s("nairu_ez", "NAWRU zone euro (AMECO)", Kind.OBSERVED, "D1", (2,), Leg.BASE,
        Provider.ECB_SDMX, None, Frequency.ANNUAL, Confidence.C2,
        "Même connecteur SDMX que l'output gap AMECO, variable différente.",
