@@ -47,7 +47,47 @@ def test_le_motif_de_blocage_dit_QUOI_FAIRE_et_pas_seulement_non():
     C3 → ne pas commencer ; paramètre → calibrer, pas collecter."""
     assert "catalogue" in cat.fetch_block_reason("oecd_cli").lower()
     assert "calibr" in cat.fetch_block_reason("d4_coeff").lower()
-    assert "bloqu" in cat.fetch_block_reason("rr_current").lower()
+    assert "commencer" in cat.fetch_block_reason("rr_current").lower()
+
+
+def test_tous_les_motifs_ont_la_MEME_FORME_pour_etre_lisibles_en_liste():
+    """Vingt-deux motifs défilent d'un coup : sans étiquette de tête commune, l'œil ne trie
+    plus. Chaque motif commence par sa CATÉGORIE, puis dit quoi faire."""
+    tags = ("C2 — ", "C3 — ", "paramètre — ", "dérivé — ", "inconnu — ")
+    for spec in cat.CATALOG:
+        reason = cat.fetch_block_reason(spec.key)
+        if reason is not None:
+            assert reason.startswith(tags), f"{spec.key} : {reason}"
+
+
+def test_une_ligne_DERIVEE_nomme_ses_INTRANTS_au_lieu_de_renvoyer_au_code():
+    """« voir depends_on » renvoie à un nom de champ, pas à la réponse. Ce qu'on veut savoir,
+    c'est DEPUIS QUOI la ligne se calcule."""
+    reason = cat.fetch_block_reason("output_gap_us")
+    assert "gdpc1" in reason and "gdppot" in reason
+    assert "depends_on" not in reason
+
+
+def test_les_motifs_ne_se_REPETENT_pas_eux_memes():
+    """Le motif générique et la note du registre disaient deux fois la même chose."""
+    for key in ("d4_coeff", "beta_phillips", "rr_current", "r_star_ez"):
+        reason = cat.fetch_block_reason(key)
+        assert reason.count("pas une donnée") <= 1, key
+        assert " — —" not in reason and "((" not in reason and "))" not in reason, key
+
+
+def test_un_CYCLE_de_dependances_est_dit_pas_une_pile_qui_deborde():
+    """Personne n'en a écrit un, mais rien ne l'empêche : une `RecursionError` au premier
+    import serait un blocage sans message (§Loop 5)."""
+    boucle = cat.SeriesSpec("a_test", "A", cat.Kind.DERIVED, "D1", (), cat.Leg.NONE,
+                            cat.Provider.NONE, None, cat.Frequency.NONE, cat.Confidence.C1,
+                            "", depends_on=("b_test",))
+    autre = cat.SeriesSpec("b_test", "B", cat.Kind.DERIVED, "D1", (), cat.Leg.NONE,
+                           cat.Provider.NONE, None, cat.Frequency.NONE, cat.Confidence.C1,
+                           "", depends_on=("a_test",))
+    registre = {**cat.BY_KEY, "a_test": boucle, "b_test": autre}
+    reason = cat.fetch_block_reason("a_test", registry=registre)
+    assert reason is not None and "circulaire" in reason.lower()
 
 
 def test_une_ligne_DERIVEE_dont_la_dependance_est_bloquee_est_bloquee_AUSSI():

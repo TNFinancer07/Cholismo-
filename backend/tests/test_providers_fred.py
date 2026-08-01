@@ -192,3 +192,61 @@ def test_fetch_async_propage_le_refus_de_politique():
     client, _ = _client()
     with pytest.raises(cx.SeriesBlocked):
         asyncio.run(client.fetch_async("UNRATE&x=1"))
+
+
+# =============================================================================================
+# Sortie propre — un thread ne s'annule pas, donc il doit être BORNÉ
+# =============================================================================================
+
+
+@pytest.mark.parametrize("given,attendu", [
+    (None, fred.DEFAULT_TIMEOUT_S),                       # absent → défaut
+    (float("inf"), fred.DEFAULT_TIMEOUT_S),               # absurde → défaut
+    (float("nan"), fred.DEFAULT_TIMEOUT_S),
+    ("30", fred.DEFAULT_TIMEOUT_S),                       # pas un nombre → défaut
+    (0.0, fred.MIN_TIMEOUT_S),
+    (-5.0, fred.MIN_TIMEOUT_S),
+    (1e9, fred.MAX_TIMEOUT_S),
+    (5.0, 5.0),
+])
+def test_le_timeout_est_TOUJOURS_borne(given, attendu):
+    """`fetch_async` part en `asyncio.to_thread`, et un thread ne s'annule pas : à l'arrêt, la
+    boucle rend la main tout de suite mais le thread vit jusqu'au timeout de la socket.
+    `timeout_s=None` se traduirait en `urlopen(timeout=None)` — un thread qui ne meurt jamais
+    et un Ctrl-C qui n'en finit pas."""
+    assert fred.FredClient(api_key="K", timeout_s=given).timeout_s == attendu
+
+
+def test_l_annulation_libere_la_BOUCLE_tout_de_suite_mais_pas_le_THREAD():
+    """Constat mesuré, et c'est lui qui justifie la borne de timeout.
+
+    L'annulation rend la main à la boucle d'événements immédiatement. Le THREAD, lui, continue
+    jusqu'au bout de sa socket — et `asyncio.run` attend son pool à la fermeture. La durée d'un
+    arrêt propre est donc exactement le timeout du fetch : sans borne, un arrêt qui n'en finit
+    jamais."""
+    import threading
+    import time
+    parti, liberer = threading.Event(), threading.Event()
+    fini = []
+
+    def fetcher(url: str) -> str:
+        parti.set()
+        liberer.wait(5.0)                                 # simule une socket qui traîne
+        fini.append(True)
+        return OBS
+
+    client = fred.FredClient(api_key="K", fetcher=fetcher)
+
+    async def scenario():
+        task = asyncio.create_task(client.fetch_async("UNRATE"))
+        await asyncio.to_thread(parti.wait, 5.0)
+        debut = time.perf_counter()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        libere_en = time.perf_counter() - debut
+        assert not fini                                   # le thread, lui, tourne toujours
+        liberer.set()                                     # (sinon la fermeture attendrait 5 s)
+        return libere_en
+
+    assert asyncio.run(scenario()) < 0.5

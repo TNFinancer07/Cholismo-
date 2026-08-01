@@ -3227,6 +3227,46 @@ FRED, pas le fetcher injecté) : UNRATE/DFF/SP500/T10YIE lues, trou « . » comp
 clé métier, quatre refus de politique sans qu'aucune requête ne parte, réseau mort rendu en
 motif sans fuite de clé.
 
+### /polish (Loop 5) — un registre qu'on ne peut pas lire n'est pas un registre
+- **Latence : MESURÉE, rien à faire.** Passe complète sur les 70 lignes (motifs + endpoints
+  rédigés) = **0,36 ms** (0,32 min / 0,62 max), `fetchable()` 0,05 ms, import 98 ms. Aucun
+  travail d'optimisation n'était justifié, et le dire vaut mieux que le supposer.
+- **Les motifs disaient « non » sans dire quoi faire.** Le pire était `calcul dérivé, pas une
+  collecte — voir depends_on` : renvoyer à un NOM DE CHAMP quand la question est « depuis quoi
+  se calcule cette ligne ». Les motifs nomment désormais leurs intrants
+  (`dérivé — calculé depuis gdpc1, gdppot`), et **tous** portent la même forme
+  `catégorie — constat : quoi faire` (`C2 —`, `C3 —`, `paramètre —`, `dérivé —`, `inconnu —`) :
+  vingt-deux motifs défilent d'un coup, sans étiquette de tête commune l'œil ne trie plus.
+  Au passage : notes recollées proprement (majuscule initiale, point final, parenthèses
+  imbriquées) et **redondances supprimées** — `d4_coeff` disait deux fois « pas une donnée ».
+- **Dépendance circulaire : dite, pas une pile qui déborde.** Personne n'en a écrit, rien ne
+  l'empêchait — une `RecursionError` au premier import aurait été un blocage sans message. Le
+  garde remonte le cycle **tel quel** jusqu'en haut : dire « ouvrir `b` » puis « ouvrir `a` »
+  enverrait l'opérateur en rond, ce qui est pire que ne rien dire.
+- **Sortie propre : un thread ne s'annule pas.** `timeout_s=None` se traduisait en
+  `urlopen(timeout=None)` — un thread qui ne meurt jamais. Timeout borné [1 s, 60 s], défaut
+  pour toute valeur absurde. **Mesuré** : à l'annulation, la boucle d'événements se libère en
+  < 0,5 ms, mais le thread continue jusqu'au bout de sa socket et `asyncio.run` attend son pool
+  à la fermeture — **la durée d'un arrêt propre EST le timeout du fetch**. C'est ce constat, pas
+  le confort, qui justifie la borne haute.
+- **Découvrabilité — `python -m app.providers`.** Le registre transcrit deux specs de ~50
+  lignes ; tant qu'il ne se lit qu'en important des modules, la question qu'on se pose devant
+  ces artefacts (« qu'est-ce que je collecte aujourd'hui, qu'est-ce qui est bloqué, par quoi ? »)
+  n'a pas de réponse à portée de main. Vue dense, monospace, **sans aucune couleur** : le statut
+  passe par un glyphe **et** le texte du motif — un test interdit qu'une ligne non collectable
+  s'affiche sans son motif (§3 transposé au terminal). Troncature toujours VISIBLE (`…`), rien
+  ne dépasse la largeur, la clé API n'est jamais imprimée, et l'en-tête dit « lecture seule ·
+  aucun appel réseau · aucun ordre ». Seconde vue `arbitrages` (groupée par Arb 1–6, formule à
+  l'appui). Aucun appel réseau, aucun panneau nouveau (§10 — on ne construit pas N+1 avant N).
+- **Trois familles cessent d'être confondues dans le compte** : « 6 identifiants à relever ·
+  3 sources bloquées · 2 paramètres à calibrer », au lieu d'un « 5 bloquées » qui mélangeait un
+  relevé de catalogue avec un paramètre — or « C3 » ne veut pas dire « donnée manquante », et
+  un paramètre ne manque jamais.
+- **Nettoyage** : `ParsedSeries.note` était mort-né (jamais renseigné, jamais lu) — supprimé.
+- **Vérif /polish** : +18 tests (5 sur la forme des motifs et le cycle, 8 sur la borne de
+  timeout et l'annulation, 12 sur la vue) → **851 passed**, ruff clean, `tsc` clean,
+  112 Vitest verts. Vue rendue à l'écran, les deux modes.
+
 ### Reste ouvert (sans blocage)
 Six lignes de catalogue à relever (3 clés SDMX en une session, la clé du Bund€i qui débloque
 aussi `rdiff`), les six connecteurs non-FRED n'ont pas encore leur client d'interrogation (URL

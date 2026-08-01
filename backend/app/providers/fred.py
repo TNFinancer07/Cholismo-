@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import urllib.request
 from dataclasses import dataclass
 from typing import Callable, Optional
@@ -37,6 +38,21 @@ from .catalog import BY_KEY, Provider
 log = logging.getLogger("cholismo.providers.fred")
 
 DEFAULT_TIMEOUT_S = 10.0
+# Bornes de timeout. La borne HAUTE n'est pas du confort : `fetch_async` part en
+# `asyncio.to_thread`, et un thread ne s'annule pas. Une annulation (Ctrl-C, `stop()`) rend la
+# main tout de suite côté boucle, mais le thread vit jusqu'au timeout de la socket — un timeout
+# absent ou géant laisserait un thread qui ne meurt jamais, et un arrêt qui n'en finit pas.
+MIN_TIMEOUT_S, MAX_TIMEOUT_S = 1.0, 60.0
+
+
+def _clamp_timeout(value: object) -> float:
+    """Un timeout absent ou absurde devient le défaut, puis reste dans les bornes. Sans ça,
+    `timeout_s=None` se traduit en `urlopen(timeout=None)` : un thread qui ne meurt jamais."""
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return DEFAULT_TIMEOUT_S
+    if not math.isfinite(value):
+        return DEFAULT_TIMEOUT_S
+    return min(max(float(value), MIN_TIMEOUT_S), MAX_TIMEOUT_S)
 
 
 @dataclass(frozen=True)
@@ -58,7 +74,7 @@ class FredClient:
         # gèlerait à l'import, défaut déjà payé une fois (D-056).
         self._api_key = api_key
         self._fetcher = fetcher if fetcher is not None else self._fetch_url
-        self._timeout_s = timeout_s
+        self.timeout_s = _clamp_timeout(timeout_s)
 
     # -- interrogation directe : n'importe quelle série --
 
@@ -112,7 +128,7 @@ class FredClient:
         return config.FRED_API_KEY if self._api_key is None else self._api_key
 
     def _fetch_url(self, url: str) -> str:
-        with urllib.request.urlopen(url, timeout=self._timeout_s) as resp:   # dans un thread
+        with urllib.request.urlopen(url, timeout=self.timeout_s) as resp:    # dans un thread
             # Lecture BORNÉE (+1 pour détecter le dépassement) : une réponse plus grosse que la
             # borne ne peut pas être une série macro, et elle ne doit pas manger la RAM.
             return resp.read(cx.MAX_FEED_BYTES + 1).decode("utf-8", errors="replace")

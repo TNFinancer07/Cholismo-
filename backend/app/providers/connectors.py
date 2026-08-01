@@ -60,7 +60,6 @@ class Observation:
 class ParsedSeries:
     observations: tuple[Observation, ...]
     dropped: int       # lignes écartées (valeur manquante, illisible, doublon) — jamais silencieux
-    note: str = ""
 
 
 # =============================================================================================
@@ -247,7 +246,7 @@ def _period(raw: Any) -> Optional[str]:
     return text if text and _PERIOD_RE.match(text) else None
 
 
-def _finish(rows: list[tuple[str, float]], dropped: int, note: str = "") -> Optional[ParsedSeries]:
+def _finish(rows: list[tuple[str, float]], dropped: int) -> Optional[ParsedSeries]:
     """Dédoublonne (le PREMIER gagne — une révision arrivée dans le même lot ne réécrit pas en
     silence ce qu'on vient de lire), ordonne, borne."""
     if not rows:
@@ -261,7 +260,7 @@ def _finish(rows: list[tuple[str, float]], dropped: int, note: str = "") -> Opti
     if len(seen) > MAX_OBSERVATIONS:
         return None
     obs = tuple(Observation(date=d, value=v) for d, v in sorted(seen.items()))
-    return ParsedSeries(observations=obs, dropped=dropped, note=note)
+    return ParsedSeries(observations=obs, dropped=dropped)
 
 
 def parse_fred_json(text: str) -> Optional[ParsedSeries]:

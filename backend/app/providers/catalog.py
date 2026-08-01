@@ -312,7 +312,8 @@ CATALOG: tuple[SeriesSpec, ...] = (
        catalog_hint="format du fichier publié par la NY Fed à confirmer avant parsing"),
     _s("r_star_ez", "Taux neutre réel zone euro", Kind.OBSERVED, "D2", (1,), Leg.BASE,
        Provider.NONE, None, Frequency.QUARTERLY, Confidence.C3,
-       "Non traité : gap non résolu — à traiter AVANT de coder la jambe EUR complète de l'Arb 1."),
+       "gap non résolu, non traité cette session — à traiter AVANT de coder la jambe EUR "
+       "complète de l'Arb 1"),
     _s("uip_implied", "Dépréciation implicite (UIP)", Kind.DERIVED, "D2", (4,), Leg.NONE,
        Provider.NONE, None, Frequency.DAILY, Confidence.C2,
        "Parité couverte : se dérive de rate_diff, pas de collecte séparée nécessaire.",
@@ -368,7 +369,7 @@ CATALOG: tuple[SeriesSpec, ...] = (
        "Structure de clé vérifiée — même dataflow que le consensus de croissance EZ."),
     _s("beta_phillips", "Pente de la courbe de Phillips (β)", Kind.PARAMETER, "D3", (2,),
        Leg.NONE, Provider.NONE, None, Frequency.NONE, Confidence.C3,
-       "Paramètre à estimer PAR PAYS — PLACEHOLDER. Pas une donnée à collecter."),
+       "une pente à estimer PAR PAYS — PLACEHOLDER"),
 
     # --- D4 · Régime de risque (type B modulateur, TTL 4 h, fail-closed) -----------------
     _s("vixcls", "VIX", Kind.OBSERVED, "D4", (4, 6), Leg.GLOBAL,
@@ -397,8 +398,8 @@ CATALOG: tuple[SeriesSpec, ...] = (
        "important pour tout z-score. Alimente l'Arb 6bis."),
     _s("d4_coeff", "Coefficient de régime D4", Kind.PARAMETER, "D4", (4,), Leg.NONE,
        Provider.NONE, None, Frequency.NONE, Confidence.C3,
-       "Seuils de bascule GREEN/YELLOW/ORANGE/RED — PLACEHOLDER, et valeur RED contradictoire "
-       "entre deux sources (voir KNOWN_CONFLICTS d4_red_coeff)."),
+       "seuils de bascule GREEN/YELLOW/ORANGE/RED — PLACEHOLDER ; valeur RED contradictoire "
+       "entre deux sources, voir KNOWN_CONFLICTS d4_red_coeff"),
     _s("spot_momentum", "Momentum du spot", Kind.DERIVED, "D4", (6,), Leg.NONE,
        Provider.NONE, None, Frequency.DAILY, Confidence.C1,
        "|variation| du spot normalisée — seule variable NON bloquée de l'Arb 6.",
@@ -552,29 +553,63 @@ def zscore_window(key: str) -> int:
 # Doctrine de confiance — le seul portillon d'accès
 # =============================================================================================
 
-def fetch_block_reason(key: str) -> Optional[str]:
-    """`None` = ligne collectable. Sinon, le motif — en français, et il dit QUOI FAIRE.
+_CYCLE_TAG = "dérivé — dépendance CIRCULAIRE détectée"
+
+
+def _detail(note: str) -> str:
+    """Recolle une note du registre à la SUITE d'un motif : elle a été écrite comme une phrase
+    autonome (majuscule initiale, point final) et se retrouve ici au milieu d'une ligne."""
+    text = (note or "").strip().rstrip(".")
+    if len(text) > 1 and text[0].isupper() and text[1].islower():
+        text = text[0].lower() + text[1:]               # « Non traité » → « non traité »
+    return text
+
+
+def fetch_block_reason(key: str, *, registry: Optional[dict] = None,
+                       _seen: Optional[frozenset] = None) -> Optional[str]:
+    """`None` = ligne collectable. Sinon le motif, en français, sous une forme CONSTANTE :
+    `catégorie — constat : quoi faire`. Vingt-deux motifs défilent d'un coup quand on lit le
+    registre ; sans étiquette de tête commune, l'œil ne trie plus (§Loop 5).
 
     Fail-closed : une clé inconnue est bloquée, jamais autorisée par défaut."""
-    spec = BY_KEY.get(key)
+    table = BY_KEY if registry is None else registry
+    spec = table.get(key)
     if spec is None:
-        return f"« {key} » n'est pas au registre — rien à collecter tant qu'il n'y est pas."
+        return f"inconnu — « {key} » n'est pas au registre : rien à collecter tant qu'il n'y est pas"
+    if _seen and key in _seen:
+        # Personne n'a écrit de cycle, mais rien ne l'empêche : sans ce garde, la récursion
+        # déborderait la pile au premier import — un blocage sans message.
+        return f"{_CYCLE_TAG} sur « {key} » : le graphe se mord la queue, casser la boucle"
     if spec.kind is Kind.PARAMETER:
-        return ("paramètre à CALIBRER (60 trades), pas une donnée : aucune requête ne le "
-                "fournira" + (f" — {spec.note}" if spec.note else ""))
-    blocked_deps = [d for d in spec.depends_on if fetch_block_reason(d) is not None]
+        return ("paramètre — à calibrer (60 trades), aucune requête ne le fournira"
+                + (f" · {_detail(spec.note)}" if spec.note else ""))
+    seen = (_seen or frozenset()) | {key}
+    blocked, cycle = [], None
+    for dep in spec.depends_on:
+        dep_reason = fetch_block_reason(dep, registry=table, _seen=seen)
+        if dep_reason is None:
+            continue
+        if dep_reason.startswith(_CYCLE_TAG):
+            cycle = dep_reason          # remonté TEL QUEL : « ouvrir b_test » puis « ouvrir
+            break                       # a_test » enverrait l'opérateur en rond
+        blocked.append(dep)
+    if cycle is not None:
+        return cycle
     if spec.kind is Kind.DERIVED:
-        if blocked_deps:
-            return (f"calcul dérivé, et sa dépendance est bloquée : {', '.join(blocked_deps)} — "
-                    "ouvrir le maillon avant l'étage du dessus")
-        return "calcul dérivé, pas une collecte — voir depends_on"
+        if blocked:
+            return (f"dérivé — bloqué par {', '.join(blocked)} : ouvrir ce maillon avant "
+                    "l'étage du dessus")
+        if not spec.depends_on:
+            return "dérivé — sortie composite, sans intrant déclaré : rien à collecter ici"
+        return f"dérivé — calculé depuis {', '.join(spec.depends_on)} : rien à collecter ici"
     if spec.confidence is Confidence.C2:
-        hint = spec.catalog_hint or "catalogue du fournisseur"
-        return (f"C2 — relever l'identifiant au CATALOGUE avant tout codage en dur ({hint})")
+        hint = _detail(spec.catalog_hint) or "catalogue du fournisseur"
+        return ("C2 — identifiant NON confirmé : le relever au catalogue avant de le coder "
+                f"en dur · {hint}")
     if spec.confidence is Confidence.C3:
-        return f"C3 — bloqué, ne pas commencer : {spec.note}"
-    if blocked_deps:
-        return f"dépendance bloquée : {', '.join(blocked_deps)}"
+        return f"C3 — ne pas commencer : {_detail(spec.note)}"
+    if blocked:
+        return f"C1 — bloqué par {', '.join(blocked)} : ouvrir ce maillon d'abord"
     return None
 
 
