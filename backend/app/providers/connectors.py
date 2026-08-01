@@ -288,21 +288,68 @@ def parse_fred_json(text: str) -> Optional[ParsedSeries]:
     return _finish(rows, dropped)
 
 
-def parse_eurostat_json(text: str) -> Optional[ParsedSeries]:
-    """JSON-stat : `value` est indexé par POSITION, les libellés de période sont dans
-    `dimension.time.category.index`. Le marqueur de trou est « : »."""
+def _eurostat_payload(text: str) -> Optional[dict]:
     if _too_big(text):
         return None
     try:
         raw = json.loads(text)
     except (json.JSONDecodeError, TypeError, ValueError):
         return None
-    if not isinstance(raw, dict):
+    return raw if isinstance(raw, dict) else None
+
+
+def eurostat_open_dimensions(text: str) -> Optional[tuple[str, ...]]:
+    """Dimensions encore OUVERTES (plusieurs valeurs) hors `time`. `()` = cube réduit à une
+    seule série ; `None` = réponse illisible.
+
+    C'est la question de sûreté d'Eurostat : un dataset non filtré rend un CUBE
+    (pays × unité × âge × temps) aplati en un seul tableau. Y lire la position temporelle donne
+    un nombre — pas la bonne série, et parfois trois pays lus comme trois dates."""
+    raw = _eurostat_payload(text)
+    if raw is None:
         return None
+    ids, sizes = raw.get("id"), raw.get("size")
+    if isinstance(ids, list) and isinstance(sizes, list) and len(ids) == len(sizes):
+        return tuple(str(d) for d, s in zip(ids, sizes)
+                     if str(d) != "time" and isinstance(s, int) and s > 1)
+    dimension = raw.get("dimension")
+    if not isinstance(dimension, dict):
+        return None
+    open_dims = []
+    for name, spec in dimension.items():
+        if name == "time" or not isinstance(spec, dict):
+            continue
+        index = ((spec.get("category") or {}).get("index"))
+        if isinstance(index, dict) and len(index) > 1:
+            open_dims.append(str(name))
+    return tuple(open_dims)
+
+
+def parse_eurostat_json(text: str) -> Optional[ParsedSeries]:
+    """JSON-stat : `value` est indexé par POSITION, les libellés de période sont dans
+    `dimension.time.category.index`. Le marqueur de trou est « : ».
+
+    **Le cube doit être réduit à une série avant d'arriver ici.** Indexer `value` par la
+    position temporelle n'est correct que si toutes les autres dimensions valent 1 : le pas de
+    `time` vaut alors 1, quel que soit son rang dans `id`. Dès qu'une autre dimension reste
+    ouverte, la lecture est fausse — et silencieusement plausible. On refuse ; l'appelant
+    demande à `eurostat_open_dimensions` ce qu'il reste à épingler. Choisir un pays par défaut
+    serait décider à la place de l'opérateur (§2.1)."""
+    raw = _eurostat_payload(text)
+    if raw is None:
+        return None
+    open_dims = eurostat_open_dimensions(text)
+    if open_dims is None or open_dims:
+        return None                                  # cube non réduit → pas une série
     index = (((raw.get("dimension") or {}).get("time") or {}).get("category") or {}).get("index")
     values = raw.get("value")
     if not isinstance(index, dict) or not isinstance(values, (dict, list)):
         return None
+    ids, sizes = raw.get("id"), raw.get("size")
+    if isinstance(ids, list) and isinstance(sizes, list) and "time" in ids:
+        declared = sizes[ids.index("time")] if len(ids) == len(sizes) else None
+        if not isinstance(declared, int) or declared != len(index):
+            return None                              # `size` et l'index se contredisent
     rows, dropped = [], 0
     for label, position in index.items():
         date = _period(label)
