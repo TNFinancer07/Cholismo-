@@ -301,3 +301,42 @@ def test_module_PURE_aucune_lecture_d_horloge():
     src = inspect.getsource(cx)
     for banned in ("time.time", "perf_counter", "monotonic"):
         assert banned not in src, banned
+
+
+# =============================================================================================
+# Porte d'entrée unique — quel connecteur pour quelle ligne (/polish)
+# =============================================================================================
+
+
+def test_client_for_rend_le_bon_connecteur_sans_que_l_appelant_ait_a_le_savoir():
+    from app.providers.client import client_for
+    from app.providers.ecb import EcbClient
+    from app.providers.eurostat import EurostatClient
+    from app.providers.fred import FredClient
+    assert isinstance(client_for("vixcls"), FredClient)
+    assert isinstance(client_for("hicp_ez"), EcbClient)
+    assert isinstance(client_for("unrate_ez"), EurostatClient)
+
+
+def test_client_for_dit_quand_le_connecteur_reste_a_ECRIRE():
+    """Cas qu'aucun autre garde ne couvrait : la ligne est collectable, l'endpoint existe, et
+    pourtant on ne sait pas aller la chercher. Le motif doit dire que c'est du CODE à produire,
+    pas un relevé de catalogue."""
+    from app.providers.client import client_for
+    with pytest.raises(cx.SeriesBlocked) as e:
+        client_for("bund_nominal")
+    assert "pas encore écrit" in str(e.value) and "code à produire" in str(e.value)
+
+
+def test_client_for_applique_le_portillon_du_registre():
+    from app.providers.client import client_for
+    for key, attendu in (("oecd_cli", "catalogue"), ("d4_coeff", "calibr"),
+                         ("spf_us", "REST"), ("inconnue", "registre")):
+        with pytest.raises(cx.SeriesBlocked) as e:
+            client_for(key)
+        assert attendu.lower() in str(e.value).lower(), key
+
+
+def test_client_for_transmet_les_options_au_client():
+    from app.providers.client import client_for
+    assert client_for("hicp_ez", timeout_s=42.0).timeout_s == 42.0

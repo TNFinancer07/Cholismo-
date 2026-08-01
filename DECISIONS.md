@@ -3335,6 +3335,30 @@ motif sans fuite de clé.
   trois datasets lus filtrés, `unrate_ez` par la clé métier, **le même appel sans filtre rend
   le motif au lieu d'une série**, quatre refus de politique sans qu'aucune requête ne parte.
 
+### /polish (Loop 5) après les trois connecteurs — dire ce qu'on sait VRAIMENT aller chercher
+- **La vue mentait par omission.** Elle affichait `✓ bund_nominal` comme « collectable » alors
+  qu'aucun client Bundesbank n'existe : la ligne est C1, l'endpoint REST existe, et pourtant on
+  ne sait pas l'interroger. Trois niveaux à ne pas confondre, désormais distincts partout :
+  1. **collectable** (registre : C1, observée) — `fetch_block_reason` ;
+  2. **endpoint HTTP** (le SPF est C1 et n'en a aucun) — `has_rest_endpoint` ;
+  3. **connecteur écrit** — `has_client`. Nouveau, et c'est le niveau qui manquait.
+  En-tête honnête : « 48 collectables · **41 INTERROGEABLES aujourd'hui** ». Glyphe `○` distinct,
+  et le motif suit toujours (§3) : `connecteur BUNDESBANK à écrire`, `pas de REST` — deux causes
+  différentes, deux messages, parce que l'une est structurelle et l'autre est du code à produire.
+- **Le marqueur passe DEVANT l'identifiant**, sinon la troncature mange précisément la partie
+  actionnable — le test de largeur l'a attrapé, et c'est la même faute que j'avais corrigée sur
+  les indices de catalogue. Deux fois le même piège : la partie utile doit survivre à la coupe.
+- **Une porte d'entrée unique** : `client_for(key)` rend le client capable d'aller chercher CETTE
+  ligne, sans que l'appelant sache quel connecteur s'en occupe — et lève un motif utile sinon, y
+  compris le cas « connecteur pas encore écrit », **qu'aucun autre garde ne couvrait**.
+- **Uniformité des motifs vérifiée entre les trois clients** (FRED, BCE, Eurostat) : « X
+  injoignable — … » et « réponse X illisible ou hors bornes — cache précédent conservé ». Le
+  harnais partagé tient sa promesse ; rien à harmoniser à la main.
+- **Latence re-mesurée** après l'ajout des imports locaux : passe complète sur les 70 lignes
+  **0,49 ms** en médiane, avec un premier passage à ~47 ms — c'est le coût d'import unique des
+  modules connecteurs, pas un coût par appel, et ce chemin est un diagnostic, pas le hot path.
+- **Vérif /polish** : +8 tests → **930 passed**, ruff clean. Vue rendue à l'écran, les deux modes.
+
 ### Reste ouvert (sans blocage)
 Six lignes de catalogue à relever (3 clés SDMX en une session, la clé du Bund€i qui débloque
 aussi `rdiff`), quatre connecteurs sur sept n'ont pas encore leur client d'interrogation

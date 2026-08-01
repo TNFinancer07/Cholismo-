@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from app.providers import __main__ as cli
 from app.providers import catalog as cat
+from app.providers import connectors as cx
 
 NOW = 1785542400.0                                        # 2026-08-01T00:00:00Z
 
@@ -98,3 +99,40 @@ def test_main_choisit_la_vue_et_rend_zero(capsys):
 def test_la_vue_est_en_LECTURE_SEULE_et_le_dit():
     out = cli.render(NOW)
     assert "lecture seule" in out and "aucun ordre" in out
+
+
+# =============================================================================================
+# Trois niveaux d'accès — collectable, interrogeable en HTTP, client écrit (/polish)
+# =============================================================================================
+
+
+def test_une_ligne_COLLECTABLE_sans_client_n_est_pas_affichee_comme_interrogeable():
+    """`bund_nominal` est C1 avec un endpoint REST, mais aucun client Bundesbank n'existe
+    encore. L'afficher comme `✓` serait une promesse que le code ne tient pas."""
+    from app.providers import client as cl
+    spec = cat.BY_KEY["bund_nominal"]
+    assert cat.fetch_block_reason("bund_nominal") is None      # collectable
+    assert cx.has_rest_endpoint("bund_nominal") is True        # et un endpoint existe
+    assert cl.has_client(spec.provider) is False               # mais pas de client
+    ligne = cli._row(spec)
+    assert ligne.strip().startswith(cli.GLYPHS["attente"])
+    assert "connecteur BUNDESBANK à écrire" in ligne
+
+
+def test_une_ligne_avec_client_reste_interrogeable():
+    for key in ("vixcls", "hicp_ez", "unrate_ez"):             # FRED, BCE, Eurostat
+        assert cli._row(cat.BY_KEY[key]).strip().startswith(cli.GLYPHS["ok"])
+
+
+def test_le_compte_distingue_collectable_et_interrogeable():
+    out = cli.render(NOW)
+    interrogeables = sum(1 for s in cat.fetchable() if cli._interrogeable(s))
+    assert 0 < interrogeables < len(cat.fetchable())
+    assert f"{len(cat.fetchable())} collectables · {interrogeables} INTERROGEABLES" in out
+
+
+def test_le_SPF_sans_REST_est_distingue_du_connecteur_a_ecrire():
+    """Deux causes différentes, deux motifs : l'un est structurel (pas d'API), l'autre est du
+    code à produire. Les confondre ferait chercher une API qui n'existe pas."""
+    ligne = cli._row(cat.BY_KEY["spf_us"])
+    assert "pas de REST" in ligne and "à écrire" not in ligne

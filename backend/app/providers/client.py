@@ -24,6 +24,7 @@ fait partir l'I/O en `asyncio.to_thread` pour que la boucle d'événements ne g�
 from __future__ import annotations
 
 import asyncio
+import importlib
 import logging
 import math
 import urllib.request
@@ -128,3 +129,48 @@ class HttpSeriesClient:
             # Lecture BORNÉE (+1 pour détecter le dépassement) : une réponse plus grosse que la
             # borne ne peut pas être une série macro, et elle ne doit pas manger la RAM.
             return resp.read(cx.MAX_FEED_BYTES + 1).decode("utf-8", errors="replace")
+
+
+# =============================================================================================
+# Quel connecteur pour quelle ligne — la porte d'entrée unique
+# =============================================================================================
+
+# Trois niveaux à ne pas confondre, et c'est la raison d'être de cette table :
+#   1. la ligne est-elle COLLECTABLE ? (registre : C1, observée)            → fetch_block_reason
+#   2. a-t-elle un endpoint HTTP ?     (le SPF est C1 et n'en a aucun)      → has_rest_endpoint
+#   3. sait-on ALLER LA CHERCHER ?     (l'étage d'interrogation existe-t-il ?) → ici
+# Une ligne peut franchir 1 et 2 et rester inaccessible parce que son client n'est pas écrit.
+# L'afficher comme « collectable » sans le dire serait une promesse que le code ne tient pas.
+_CLIENT_MODULES: dict[Provider, tuple[str, str]] = {
+    Provider.FRED: ("fred", "FredClient"),
+    Provider.ECB_SDMX: ("ecb", "EcbClient"),
+    Provider.EUROSTAT: ("eurostat", "EurostatClient"),
+}
+
+
+def has_client(provider: Provider) -> bool:
+    """Le fournisseur a-t-il un étage d'interrogation écrit ?"""
+    return provider in _CLIENT_MODULES
+
+
+def client_for(key: str, **kwargs) -> "HttpSeriesClient":
+    """Client capable d'aller chercher CETTE ligne du registre, sans que l'appelant ait à
+    savoir quel connecteur s'en occupe. Lève `SeriesBlocked` avec un motif utile sinon —
+    y compris quand le connecteur reste à écrire, cas qu'aucun autre garde ne couvrait."""
+    reason = cx.fetch_block_reason(key)
+    if reason is not None:
+        raise cx.SeriesBlocked(f"{key} : {reason}")
+    provider = BY_KEY[key].provider
+    if not cx.has_rest_endpoint(key):
+        raise cx.SeriesBlocked(f"{key} : {cx.describe_endpoint(key)}")
+    entry = _CLIENT_MODULES.get(provider)
+    if entry is None:
+        raise cx.SeriesBlocked(
+            f"{key} : connecteur {provider.value} pas encore écrit — l'URL et le parsing "
+            "existent, l'étage d'interrogation manque. Rien à relever au catalogue ici : "
+            "c'est du code à produire.")
+    module_name, class_name = entry
+    # Import LOCAL : les connecteurs importent ce module, donc l'inverse ne peut pas se faire
+    # en tête de fichier.
+    module = importlib.import_module(f"{__package__}.{module_name}")
+    return getattr(module, class_name)(**kwargs)

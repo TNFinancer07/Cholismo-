@@ -18,18 +18,27 @@ import sys
 import time
 
 from . import catalog as cat
+from . import connectors as cx
+from .client import has_client
 
 WIDTH = 118
-GLYPHS = {"ok": "✓", "catalogue": "≈", "bloque": "✕", "calcul": "·"}
+# `ok` : collectable ET interrogeable aujourd'hui. `attente` : collectable, mais l'étage
+# d'interrogation n'existe pas encore — l'afficher comme `ok` serait une promesse que le code
+# ne tient pas. Statut jamais porté par le seul glyphe : le motif suit toujours (§3).
+GLYPHS = {"ok": "✓", "attente": "○", "catalogue": "≈", "bloque": "✕", "calcul": "·"}
 # Libellés courts : la colonne fournisseur est fixe, et `PHILADELPHIA_FED` (16) décalait toute
 # la ligne — une colonne qui déborde par intermittence casse la lecture en tableau.
 _PROVIDER_LABEL = {cat.Provider.PHILADELPHIA_FED: "PHIL_FED", cat.Provider.CFTC_SOCRATA: "CFTC",
                    cat.Provider.BUNDESBANK: "BUBA"}
 
 
+def _interrogeable(spec: cat.SeriesSpec) -> bool:
+    return cx.has_rest_endpoint(spec.key) and has_client(spec.provider)
+
+
 def _glyph(spec: cat.SeriesSpec, reason: str | None) -> str:
     if reason is None:
-        return GLYPHS["ok"]
+        return GLYPHS["ok"] if _interrogeable(spec) else GLYPHS["attente"]
     if spec.kind in (cat.Kind.DERIVED, cat.Kind.PARAMETER):
         return GLYPHS["calcul"]
     return GLYPHS["catalogue"] if spec.confidence is cat.Confidence.C2 else GLYPHS["bloque"]
@@ -44,6 +53,13 @@ def _row(spec: cat.SeriesSpec) -> str:
     reason = cat.fetch_block_reason(spec.key)
     if reason is None:
         right = spec.identifier or "—"
+        if not _interrogeable(spec):
+            # Le glyphe ne suffit jamais : on dit CE QU'IL MANQUE. Et le manque passe DEVANT
+            # l'identifiant — sinon la troncature mange précisément la partie actionnable,
+            # comme elle le faisait sur les indices de catalogue avant correction.
+            manque = ("pas de REST" if not cx.has_rest_endpoint(spec.key)
+                      else f"connecteur {spec.provider.value} à écrire")
+            right = f"{manque} · {right}"
     elif spec.confidence is cat.Confidence.C2 and spec.catalog_hint:
         # Sur une ligne à relever, l'information utile est OÙ relever — c'est elle qui doit
         # survivre à la troncature, pas la phrase générique qui la précède.
@@ -63,6 +79,7 @@ def _section(title: str, subtitle: str = "") -> str:
 def render(now: float, view: str = "dimensions") -> str:
     total = len(cat.CATALOG)
     collectables = len(cat.fetchable())
+    interrogeables = sum(1 for s in cat.fetchable() if _interrogeable(s))
     # Trois familles bien distinctes, et les confondre est le piège que les specs signalent :
     # une C3 n'est pas forcément « une donnée qui manque », et un paramètre ne manque jamais.
     a_relever = [s for s in cat.CATALOG
@@ -73,12 +90,14 @@ def render(now: float, view: str = "dimensions") -> str:
 
     out = [
         "CHOLISMO · registre des séries macro de Youssef — D1–D5 × Arb 1–6 (D-057)",
-        f"{total} lignes · {collectables} collectables · {len(a_relever)} identifiants à "
-        f"relever · {len(bloquees)} sources bloquées · {len(parametres)} paramètres à "
-        "calibrer · 0 € / mois",
-        f"  {GLYPHS['ok']} collectable   {GLYPHS['catalogue']} identifiant à relever   "
-        f"{GLYPHS['bloque']} bloqué   {GLYPHS['calcul']} calculé ou paramètre "
-        "— le motif est toujours affiché",
+        f"{total} lignes · {collectables} collectables · {interrogeables} INTERROGEABLES "
+        "aujourd'hui (connecteur écrit)",
+        f"{len(a_relever)} identifiants à relever · {len(bloquees)} sources bloquées · "
+        f"{len(parametres)} paramètres à calibrer · 0 € / mois",
+        f"  {GLYPHS['ok']} interrogeable   {GLYPHS['attente']} collectable, connecteur à "
+        f"écrire   {GLYPHS['catalogue']} identifiant à relever   {GLYPHS['bloque']} bloqué   "
+        f"{GLYPHS['calcul']} calculé ou paramètre",
+        "  le motif est TOUJOURS affiché — aucun statut ne tient au seul glyphe",
         "  lecture seule · aucun appel réseau · aucun ordre (§2.1)",
     ]
 
