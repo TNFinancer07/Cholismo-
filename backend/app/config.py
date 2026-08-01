@@ -279,3 +279,9 @@ BOOK_HISTORY_MAX = int(os.getenv("BOOK_HISTORY_MAX", "120"))
 # Au-delà, la déplétion n'a pas été observée : elle est INFÉRÉE à travers un trou de cécité
 # (coupure de flux). Un trou n'est pas une observation (/devil D-056). 8 échantillons à 4 Hz.
 ORDERFLOW_MAX_BOOK_GAP_S = float(os.getenv("ORDERFLOW_MAX_BOOK_GAP_S", "2.0"))
+
+# --- Sources macro de Youssef — registre + connecteurs (D-057) ---
+# FRED est le socle (~30 lignes sur 5 dimensions) : un endpoint, un format, une clé GRATUITE.
+# Vide par défaut = aucune requête FRED n'est construite (fail-closed : on ne part pas chercher
+# une série qui reviendra en erreur d'authentification et se lirait comme une panne de source).
+FRED_API_KEY = os.getenv("FRED_API_KEY", "")
