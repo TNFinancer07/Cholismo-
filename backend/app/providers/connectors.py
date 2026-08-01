@@ -101,15 +101,34 @@ def build_url(key: str, *, api_key: Optional[str] = None, start: Optional[str] =
     return builder(spec, api_key=api_key, start=start, contract=contract, limit=limit)
 
 
-def _fred_url(spec: SeriesSpec, *, api_key: Optional[str], start: Optional[str], **_: Any) -> str:
+FRED_OBSERVATIONS = "https://api.stlouisfed.org/fred/series/observations"
+# Un identifiant FRED est alphanumérique (UNRATE, DFF, SP500, T10YIE, BAMLH0A0HYM2…). Tout ce
+# qui sort de cette forme n'est pas une série : c'est une tentative d'écrire dans la query
+# string (`&api_key=…`, `../`, un espace). On refuse AVANT de construire l'URL.
+_FRED_SERIES_ID_RE = re.compile(r"^[A-Za-z0-9_]{1,64}$")
+
+
+def fred_observations_url(series_id: str, *, api_key: Optional[str] = None,
+                          start: Optional[str] = None, context: str = "") -> str:
+    """URL d'observations FRED pour N'IMPORTE QUELLE série. Source unique de vérité de cet
+    endpoint : le registre passe par ici, le client direct aussi."""
+    label = context or (series_id if isinstance(series_id, str) else "?")
+    if not isinstance(series_id, str) or not _FRED_SERIES_ID_RE.match(series_id):
+        raise SeriesBlocked(
+            f"{label} : « {series_id} » n'a pas la forme d'un identifiant FRED "
+            "(alphanumérique, ≤ 64 caractères) — refusé avant construction de l'URL.")
     key = config.FRED_API_KEY if api_key is None else api_key
     if not key:
         raise SeriesBlocked(
-            f"{spec.key} : clé API FRED absente — renseigner FRED_API_KEY (gratuite). "
+            f"{label} : clé API FRED absente — renseigner FRED_API_KEY (gratuite). "
             "Sans elle, on ne part pas à l'aveugle chercher une série qui reviendra en erreur.")
-    url = (f"https://api.stlouisfed.org/fred/series/observations"
-           f"?series_id={quote(spec.identifier or '')}&api_key={quote(key)}&file_type=json")
+    url = f"{FRED_OBSERVATIONS}?series_id={quote(series_id)}&api_key={quote(key)}&file_type=json"
     return url + (f"&observation_start={quote(start)}" if start else "")
+
+
+def _fred_url(spec: SeriesSpec, *, api_key: Optional[str], start: Optional[str], **_: Any) -> str:
+    return fred_observations_url(spec.identifier or "", api_key=api_key, start=start,
+                                 context=spec.key)
 
 
 def _ecb_url(spec: SeriesSpec, **_: Any) -> str:
