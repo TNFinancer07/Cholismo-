@@ -25,3 +25,4 @@ backend/dump.rdb
 dump.rdb
 *.tsbuildinfo
 backend/data/snapshots/
+backend/app/replay/sample_orderbook.csv
