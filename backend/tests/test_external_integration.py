@@ -10,9 +10,14 @@ C'est aussi ce qui justifie le choix d'architecture : le module écrit `macro_re
 tout le pipeline aval (normalisation D-040, `compute_macro_risk`, `MACRO_BLACKOUT`, panneaux)
 fonctionne sans avoir été prévenu.
 
-Le mode replay est choisi à dessein : `ReplayDataSource.tick_slow` n'écrit rien, donc le module
-externe est le SEUL à écrire ces champs. En mode mock, le mock les réécrirait à chaque tick —
-c'est le conflit que `main.py` signale par un WARNING au démarrage.
+Le mode replay est choisi à dessein pour les premiers tests : `ReplayDataSource.tick_slow`
+n'écrit rien, donc le module externe est trivialement le seul producteur.
+
+La dernière section couvre le cas MOCK, qui posait un vrai conflit d'écriture — deux producteurs
+pour une même clé, donc une valeur décidée par l'ordonnancement. Il est résolu par la PROPRIÉTÉ
+déclarée (`external.OWNED_FIELDS` → `MockDataSource(skip_fields=…)`) : le mock ne produit plus
+ces champs, il n'est pas simplement écrasé. La différence n'est pas cosmétique — être écrasé
+donne le même écran par accident, et le jour où l'ordre change, la valeur change aussi.
 """
 from __future__ import annotations
 
@@ -104,3 +109,98 @@ def test_la_PROVENANCE_de_repli_arrive_INTACTE_jusque_dans_le_schema(tmp_path):
     champ = engine.schema.s2_state.cascade.vix
     assert champ.value == pytest.approx(21.5)
     assert "EXTERNAL" in champ.flags and "EXTERNAL_FALLBACK" in champ.flags
+
+
+# =============================================================================================
+# Le conflit d'écriture est RÉSOLU, pas silencé
+# =============================================================================================
+
+
+def test_le_mock_ne_produit_PLUS_les_champs_appartenant_a_la_source_externe():
+    """Deux producteurs pour une même clé, c'est le dernier tick qui gagne : une valeur qui
+    dépend de l'ordonnancement, donc de rien. Le mock ne les produit plus — il n'est pas
+    simplement écrasé, ce qui donnerait le même écran par accident."""
+    from app.datasource.mock import MockDataSource
+    from app.external import OWNED_FIELDS
+
+    class Capture:
+        """Redis remplacé par un dictionnaire — couvre les trois méthodes que le mock utilise."""
+
+        def __init__(self) -> None:
+            self.champs: set[str] = set()
+
+        async def write_raw(self, field, value, source, ts=None, flags=None):  # type: ignore[no-untyped-def]
+            self.champs.add(field)
+
+        async def source_up(self, source):   # type: ignore[no-untyped-def]
+            return True
+
+        async def scenario(self):            # type: ignore[no-untyped-def]
+            return None          # scénario par défaut : `resolve(None)` le gère
+
+    async def scenario() -> tuple[set[str], set[str]]:
+        libre, bride = Capture(), Capture()
+        for src, cap in ((MockDataSource(), libre),
+                         (MockDataSource(skip_fields=OWNED_FIELDS), bride)):
+            await src.tick_fast(cap)
+            await src.tick_slow(cap)
+        return libre.champs, bride.champs
+
+    libre, bride = asyncio.run(scenario())
+    assert set(OWNED_FIELDS) <= libre, "le mock produisait bien ces champs auparavant"
+    assert not (set(OWNED_FIELDS) & bride), f"le mock produit encore : {set(OWNED_FIELDS) & bride}"
+    # Le reste de la production du mock est INTACT : on retire deux champs, pas une source.
+    assert len(bride) >= len(libre) - len(OWNED_FIELDS)
+    assert "econ_calendar" in bride            # même source `econ_feed`, mais pas le même champ
+
+
+def test_la_valeur_EXTERNE_survit_a_un_tick_complet_du_mock(tmp_path):
+    """Le test qui aurait attrapé le conflit : sans la propriété, `vix` valait ce que le dernier
+    tick du mock avait écrit, et la valeur externe disparaissait en silence."""
+    from app.datasource.mock import MockDataSource
+    from app.external import OWNED_FIELDS, ExternalDataModule, StaticVix
+
+    async def scenario() -> float:
+        state = RedisState()
+        module = ExternalDataModule(calendar=None, vix=StaticVix(28.5))
+        await module.refresh()
+        await module.publish(state)
+        mock = MockDataSource(skip_fields=OWNED_FIELDS)
+        for _ in range(5):
+            await mock.tick_fast(state)
+        brut = await state.read_raw("vix")
+        await state.close()
+        return float(brut["value"])
+
+    assert asyncio.run(scenario()) == pytest.approx(28.5)
+
+
+def test_sans_source_externe_le_mock_garde_TOUTE_sa_production():
+    """Le contrôle négatif : la bride ne doit s'appliquer que lorsqu'un propriétaire existe,
+    sinon `EXTERNAL_DATA` absent priverait le stack démo de son VIX."""
+    from app.datasource.mock import MockDataSource
+
+    class Capture:
+        """Redis remplacé par un dictionnaire — couvre les trois méthodes que le mock utilise."""
+
+        def __init__(self) -> None:
+            self.champs: set[str] = set()
+
+        async def write_raw(self, field, value, source, ts=None, flags=None):  # type: ignore[no-untyped-def]
+            self.champs.add(field)
+
+        async def source_up(self, source):   # type: ignore[no-untyped-def]
+            return True
+
+        async def scenario(self):            # type: ignore[no-untyped-def]
+            return None          # scénario par défaut : `resolve(None)` le gère
+
+    cap = Capture()
+
+    async def scenario() -> None:
+        src = MockDataSource()
+        await src.tick_fast(cap)
+        await src.tick_slow(cap)
+
+    asyncio.run(scenario())
+    assert {"vix", "macro_releases"} <= cap.champs

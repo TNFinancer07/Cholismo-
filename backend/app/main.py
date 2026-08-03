@@ -19,6 +19,7 @@ from .macro_news import MacroNewsProvider
 from .risk_sizer import APEX_EOD_50K, apex_eod_account
 from .engine import Engine
 from .event_store import get_store
+from .external import OWNED_FIELDS as EXTERNAL_FIELDS
 from .external import build_default as build_external
 from .log_scraper import LogTailer, nt8_daily_log_path, startup_report
 from .redis_state import RedisState
@@ -48,6 +49,11 @@ async def lifespan(app: FastAPI):
     # la protection de facto reste le couplage news du détecteur D-028 + le blackout humain.
     app.state.news_provider = (MacroNewsProvider(config.MACRO_NEWS_FEED_URL)
                                if config.MACRO_NEWS_FEED_URL else None)
+    # Sources externes Niveau 3 (D-062) : calendrier éco F5 + VIX F3. Opt-in — sans
+    # EXTERNAL_DATA=1, rien ne tourne. Décidé AVANT la source de marché, car c'est lui qui
+    # détermine les champs que le mock ne doit plus produire.
+    app.state.external = build_external() if config.EXTERNAL_DATA else None
+
     # Le mode replay se choisit au démarrage, par la couture unique (§4) : le moteur ne sait
     # pas laquelle des trois sources est branchée. `REPLAY_FILE` absent = source mock.
     if config.REPLAY_FILE:
@@ -56,18 +62,23 @@ async def lifespan(app: FastAPI):
         log.warning("MODE REPLAY : %s — les prints sont REJOUÉS, pas du direct (source=replay)",
                     config.REPLAY_FILE)
     else:
-        app.state.datasource = MockDataSource()
+        # Le mock ne produit PAS les champs qu'une source réelle alimente (D-062). Les laisser
+        # produire puis se faire écraser donnerait le même écran par accident d'ordonnancement,
+        # et un `vix` différent selon l'ordre des ticks n'est pas une donnée.
+        app.state.datasource = MockDataSource(
+            skip_fields=EXTERNAL_FIELDS if app.state.external is not None else ())
+    if app.state.external is not None:
+        # INFO, pas un avertissement : il n'y a plus de conflit, il y a un propriétaire. La
+        # contrepartie est réelle et doit être lisible — sans source externe joignable, ces
+        # champs deviennent ABSENT et Phase 0 bloque (fail-closed §3), au lieu d'afficher du mock.
+        log.info("EXTERNAL_DATA actif — champs alimentés par la source externe : %s "
+                 "(le mock ne les produit plus ; muets = ABSENT, jamais du mock déguisé)",
+                 ", ".join(EXTERNAL_FIELDS))
+
     # Sources externes Niveau 3 (D-062) : calendrier éco F5 + VIX F3. Opt-in — sans
     # EXTERNAL_DATA=1, rien ne tourne et le mock reste seul maître de `vix`/`macro_releases`.
     # Le module ne DÉCIDE rien : il alimente deux champs que les couches déterministes
     # existantes exploitent déjà (compute_macro_risk, update_regime, VIX_CRIT).
-    app.state.external = build_external() if config.EXTERNAL_DATA else None
-    if app.state.external is not None and isinstance(app.state.datasource, MockDataSource):
-        # Conflit RÉEL, dit plutôt que subi : le mock réécrit `vix` à chaque tick rapide et
-        # écrasera donc la valeur externe. EXTERNAL_DATA vise le replay et le live, où la
-        # source de microstructure n'écrit pas la macro.
-        log.warning("EXTERNAL_DATA actif AVEC la source mock : le mock réécrit `vix` à chaque "
-                    "tick et écrasera la valeur externe. Utiliser REPLAY_FILE ou une source live.")
     app.state.engine = Engine(app.state.datasource, app.state.redis,
                               account_provider=app.state.account_provider,
                               news_provider=app.state.news_provider)

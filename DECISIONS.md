@@ -3695,11 +3695,37 @@ replay** (où le module est seul à écrire ces champs) : NFP à +60 s → `MACR
 « Nonfarm Payrolls dans la fenêtre ±15 min » ; le même à +2 h → bloqueur absent ; VIX externe à 34
 → `VIX_LIMIT : VIX 34.0 > 30`. Zéro ligne modifiée dans `engine.py`.
 
+### Le conflit d'écriture mock ↔ externe — RÉSOLU par la propriété déclarée
+Première version : `EXTERNAL_DATA=1` avec la source mock donnait **deux producteurs pour la même
+clé** (`vix` à chaque tick rapide, `macro_releases` à chaque tick lent), et je m'étais contenté
+d'un WARNING au démarrage. C'était insuffisant : la valeur finale dépendait de l'ordonnancement
+des ticks, c'est-à-dire de rien. Un avertissement décrit un défaut, il ne le corrige pas.
+
+**Corrigé en rendant la propriété explicite**, pas en éteignant le log :
+`external.OWNED_FIELDS` déclare les champs que le module possède quand il est actif, et
+`MockDataSource(skip_fields=…)` les retire de sa production — un seul point de passage (`_emit`).
+Le mock **cesse réellement de les produire** ; il n'est pas simplement écrasé. La nuance n'est pas
+cosmétique : être écrasé donne le même écran *par accident*, et le jour où l'ordre change, la
+valeur change aussi.
+
+**Contrepartie assumée, et c'est la bonne direction** : avec `EXTERNAL_DATA=1`, une source externe
+muette rend ces champs **ABSENT** — Phase 0 bloque (fail-closed §3) au lieu d'afficher du mock
+déguisé en donnée réelle. Le démarrage le dit en **INFO** (plus aucun avertissement) : quels
+champs sont externalisés, et que muet = ABSENT.
+
+Essai manuel, Redis vidé entre les deux :
+- `EXTERNAL_DATA=1` + mock → aucun WARNING ; `vix = 28.5 flags=[EXTERNAL, EXTERNAL_FALLBACK]` ;
+  `macro_releases` **ABSENT** (aucune source calendrier configurée) ; `econ_calendar` et `chop`
+  toujours produits par le mock — on retire deux champs, pas une source.
+- sans `EXTERNAL_DATA` → `vix = 13.72 source=cboe`, `macro_releases` mock : aucune régression.
+
+Trois tests le verrouillent, dont le contrôle négatif (`test_sans_source_externe_le_mock_garde_
+TOUTE_sa_production`) : sans lui, une bride toujours active priverait le stack démo de son VIX.
+
 ### Reste ouvert
 Le format Finnhub à confirmer (`scripts/validation_externe.py` sur une machine réseau), puis
-`verified=True`. `EXTERNAL_DATA=1` avec la source mock provoque un conflit d'écriture sur `vix` —
-signalé par un WARNING au démarrage, non résolu : le mode visé est replay/live.
-(L'écart `VIX_CRIT` / hystérésis D4 a été **tranché** — voir ci-dessus, il n'est plus ouvert.)
+`verified=True`. C'est le dernier point ouvert de D-062 : l'écart `VIX_CRIT` / hystérésis D4 a été
+**tranché** et le conflit d'écriture **résolu** (voir ci-dessus).
 
 ## D-061 · Le tape d'essai fabrique enfin de la microstructure — et dit ce qu'il ne peut pas
 **Constat de départ, jamais formulé jusqu'ici.** Le générateur produisait des prints

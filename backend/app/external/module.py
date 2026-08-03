@@ -51,6 +51,14 @@ log = logging.getLogger("cholismo.external")
 CALENDAR_FIELD, CALENDAR_SOURCE = "macro_releases", "econ_feed"
 VIX_FIELD, VIX_SOURCE = "vix", "cboe"
 
+# Champs dont ce module devient PROPRIÉTAIRE quand il est actif. Deux producteurs pour un même
+# champ, c'est le dernier qui écrit qui gagne — donc une valeur qui dépend de l'ordonnancement,
+# c'est-à-dire de rien. La propriété est déclarée ICI, au plus près de qui publie, et
+# `MockDataSource` la reçoit au montage : le mock cesse alors réellement de les produire, il
+# n'est pas simplement écrasé. Conséquence assumée : si la source externe est muette, ces champs
+# deviennent ABSENT et Phase 0 bloque — c'est le bon sens du fail-closed (§3), pas une panne.
+OWNED_FIELDS = (CALENDAR_FIELD, VIX_FIELD)
+
 
 class ExternalDataModule:
     """Manager unifié des sources externes. Voir la docstring du module pour les invariants."""

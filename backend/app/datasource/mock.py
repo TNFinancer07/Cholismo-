@@ -15,6 +15,7 @@ import math
 import random
 import time
 from collections import deque
+from typing import Iterable
 
 from .. import config
 from ..black_scholes import bs_price
@@ -44,7 +45,12 @@ SOURCES = {
 
 
 class MockDataSource(MarketDataSource):
-    def __init__(self):
+    """Source de démonstration. `skip_fields` retire de sa production les champs qu'une source
+    RÉELLE alimente (D-062) : sans cela, deux producteurs écrivent la même clé et c'est le
+    dernier tick qui gagne — une valeur qui dépend de l'ordonnancement, donc de rien."""
+
+    def __init__(self, *, skip_fields: Iterable[str] = ()):
+        self._skip = frozenset(skip_fields)
         self._rng = random.Random(42)
         self._gex_next_compute = 0.0
         self._walk: dict[str, float] = {}
@@ -65,6 +71,10 @@ class MockDataSource(MarketDataSource):
     async def _emit(self, state: RedisState, source: str, field: str, value,
                     pathologies: dict, flags: list[str] | None = None) -> None:
         """Write one reading through the pathology gauntlet."""
+        if field in self._skip:
+            # Champ appartenant à une source réelle : le mock ne le produit PAS. L'écraser
+            # ensuite reviendrait au même résultat visible, mais par accident d'ordonnancement.
+            return
         if not await state.source_up(source):
             return  # source cut -> nothing written -> ages into STALE/ABSENT for real
         rng = self._rng
