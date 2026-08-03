@@ -18,7 +18,7 @@ select = ["E4", "E7", "E9", "F"]
 # l'activer partout d'un coup produirait un bruit qu'on apprendrait à ignorer, ce qui est pire
 # que pas de vérificateur du tout. On étend module par module.
 python_version = "3.11"
-files = ["app/replay", "app/datasource/replay.py"]
+files = ["app/replay", "app/datasource/replay.py", "app/external"]
 strict = true
 ignore_missing_imports = true
 
@@ -28,5 +28,6 @@ ignore_missing_imports = true
 # (D-061) : l'outil de diagnostic appelle `compute_snapshot`. Les annoter au passage mêlerait un
 # refactor à une feature (§13, Loop 3) sur le module de calcul le plus chargé du dépôt. Ils
 # restent donc exemptés ICI, et leur propre suite les couvre (70 tests).
-module = ["app.config", "app.redis_state", "app.orderflow.*", "app.volume_profile"]
+module = ["app.config", "app.redis_state", "app.orderflow.*", "app.volume_profile",
+          "app.macro_risk", "app.strategies.*", "app.providers.*", "app.schema"]
 ignore_errors = true

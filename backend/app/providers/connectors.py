@@ -197,9 +197,17 @@ _BUILDERS = {
 }
 
 
+# Noms de paramètre porteurs d'un secret, toutes sources confondues. La liste est VOLONTAIREMENT
+# large : un rédacteur qui rate un nom de paramètre est une fuite en attente, et le coût d'un
+# faux positif (une URL trop caviardée dans un log) est nul face à une clé publiée. `token` est
+# arrivé avec Finnhub (D-062) — le second rédacteur qu'on aurait écrit à côté aurait dérivé.
+_SECRET_PARAMS = ("api_key", "apikey", "token", "access_key", "auth", "key")
+_SECRET_RE = re.compile(r"\b(" + "|".join(_SECRET_PARAMS) + r")=[^&\s]*", re.IGNORECASE)
+
+
 def redact(url: str) -> str:
     """URL sans secret — pour les logs et tout ce qui sort de la machine."""
-    return re.sub(r"(api_key=)[^&]*", r"\1{api_key}", str(url))
+    return _SECRET_RE.sub(lambda m: f"{m.group(1)}={{{m.group(1)}}}", str(url))
 
 
 def describe_endpoint(key: str) -> str:

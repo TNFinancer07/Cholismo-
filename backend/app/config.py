@@ -209,6 +209,21 @@ NT8_ACCOUNT_POLL_SECONDS = float(os.getenv("NT8_ACCOUNT_POLL_SECONDS", "1.0"))
 # Fenêtres autour d'une publication USD à fort impact (minutes) : WARNING = [T−15, T−2),
 # HARD_LOCK = [T−2, T+2] bornes incluses. Le flux ("" = désactivé, stack démo → la porte F0
 # n'existe pas ; la protection de facto reste le couplage news D-028 + le blackout humain).
+# --- Sources externes Niveau 3 (D-062) : calendrier éco F5 + VIX F3 ---
+# Le paquet `app/external` ne DÉCIDE rien : il alimente `macro_releases` et `vix`, que les
+# couches déterministes existantes (compute_macro_risk, update_regime, VIX_CRIT) exploitent
+# déjà. Opt-in : sans `EXTERNAL_DATA=1`, rien n'est démarré et le mock reste seul maître.
+EXTERNAL_DATA = os.getenv("EXTERNAL_DATA", "") not in ("", "0", "false", "False")
+FINNHUB_API_KEY = os.getenv("FINNHUB_API_KEY", "")
+EXTERNAL_CALENDAR_FILE = os.getenv("EXTERNAL_CALENDAR_FILE", "")
+# VIX simulé pour le hors-ligne. Ce qui en sort porte EXTERNAL_FALLBACK jusque dans le panneau.
+_vix_static = os.getenv("EXTERNAL_VIX_STATIC", "")
+EXTERNAL_VIX_STATIC = float(_vix_static) if _vix_static else None
+EXTERNAL_REFRESH_SECONDS = float(os.getenv("EXTERNAL_REFRESH_SECONDS", "900"))
+# Au-delà, le cache n'est plus une donnée mais un souvenir : les accesseurs rendent « aveugle »
+# et rien n'est publié — le champ vieillit visiblement plutôt que d'être blanchi (§3).
+EXTERNAL_MAX_AGE_S = float(os.getenv("EXTERNAL_MAX_AGE_S", "7200"))
+
 MACRO_NEWS_FEED_URL = os.getenv("MACRO_NEWS_FEED_URL", "")
 MACRO_NEWS_REFRESH_SECONDS = float(os.getenv("MACRO_NEWS_REFRESH_SECONDS", "3600"))
 # Calendrier plus vieux que ça = FOSSILE → SAFETY_UNKNOWN (on ne trade pas à l'aveugle).

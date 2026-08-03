@@ -3596,6 +3596,98 @@ Essai réel : terminal démarré en `REPLAY_FILE=…` ×5, contrôle complet exe
 (restart/pause/speed/seek/play), refus explicites sur les trois commandes incomplètes, et les
 prints rejoués vérifiés jusqu'au canal SSE.
 
+## D-062 · Sources externes Niveau 3 — alimenter F5 et F3, sans créer un second verrou
+**Le cahier des charges demandait de créer `EconomicCalendarProvider`, `VixProvider` et
+`getVixRegime()`. Ces trois contrats existaient déjà**, et les redoubler aurait été la pire
+option possible sur un terminal qui journalise des décisions :
+
+| demandé | existe déjà, et fait autorité |
+|---|---|
+| calendrier fort impact + fenêtre d'interdiction | `macro_risk.compute_macro_risk` → règle Phase 0 `MACRO_BLACKOUT` (D-040), verrou UNIQUE §2.2 |
+| 2ᵉ couche calendrier (Porte F0 LSR) | `macro_news.MacroNewsProvider` (D-050) |
+| régime de volatilité | `strategies.youssef.update_regime` — hystérésis D4 |
+| seuil VIX critique | `config.VIX_CRIT = 30.0`, marqué **AUTORITÉ** |
+| source VIX | ligne `vixcls` → FRED `VIXCLS`, **C1** au registre (D-057) |
+
+Deux calendriers qui répondent différemment à « sommes-nous en blackout ? », c'est exactement la
+panne que ce terminal existe pour empêcher. **Ce qui manquait n'était pas la logique : c'était la
+SOURCE.** `macro_releases` et `vix` n'étaient remplis que par le mock ; en mode replay,
+`tick_slow` n'écrivant rien, ils vieillissaient vers ABSENT et le garde tournait à vide.
+
+`app/external/` transporte donc la donnée, les couches déterministes tranchent.
+`is_high_impact_news_near()` et `get_vix_regime()` existent **avec la signature demandée**, mais
+en pure délégation — l'API voulue, une seule source de vérité.
+
+### Publié sous les noms de source que le moteur attend DÉJÀ
+`macro_releases` sous `econ_feed`, `vix` sous `cboe` → **zéro ligne modifiée dans `engine.py`**.
+Tout le pipeline aval fonctionne sans avoir été prévenu, et la couche de fraîcheur fait son
+travail parce que l'horodatage publié est celui de l'**observation**, jamais `now`.
+
+### Le constat gênant, posé plutôt qu'enfoui
+Le dépôt porte **deux systèmes de seuils VIX qui ne coïncident pas** : `VIX_CRIT = 30`
+(AUTORITÉ, veto dur) et l'hystérésis D4 (ORANGE 26 → RED 37). **Un VIX à 32 est un veto Phase 0
+mais seulement ORANGE au sens D4.** Ce n'est pas nécessairement une contradiction — un veto
+d'exécution et un multiplicateur de sizing ne répondent pas à la même question — mais personne ne
+l'avait écrit. `get_vix_regime()` rend donc `tier` ET `veto` **séparément** et n'invente pas un
+troisième jeu de seuils qui les aurait « conciliés » en douce. Un test par AST interdit tout
+littéral numérique de comparaison dans le module. **Arbitrage à trancher par le propriétaire de
+la spec.**
+
+### La promotion Tier-1 — un fail-OPEN corrigé
+`build_macro_calendar` écarte tout événement dont l'`impact` n'est pas lisible. Correct pour du
+bruit — mais écarter un NFP parce que le fournisseur a omis son champ **ouvrirait** le verrou au
+pire moment. Quand l'impact est absent/illisible ET que le nom correspond à une publication
+Tier-1 (NFP, CPI, FOMC, PPI, Jobless Claims…), l'événement est promu `HIGH`. On ne contredit
+JAMAIS un impact explicite : le fournisseur qui dit « low » est cru, parce que le corriger serait
+inventer.
+
+### Ce que je n'ai pas pu vérifier
+Le format Finnhub vient de sa **documentation, jamais d'une réponse réelle** — l'egress est
+bloqué ici. Doctrine C2 : `FinnhubCalendar` porte `verified=False`, ce qui devient un drapeau
+`SOURCE_NON_VERIFIEE` jusque dans le panneau. `scripts/validation_externe.py` lève le doute
+depuis une machine avec du réseau et classe les échecs **par cause** (RÉSEAU / SERVICE / PARSING
+/ CRASH) — un `✗ PARSING` est le résultat utile, il dit que la doc ment.
+**Piège n° 1 = le fuseau, pas le format** : Finnhub renvoie une heure naïve, l'hypothèse UTC est
+donc un paramètre EXPLICITE. Une heure d'écart déplace toute la fenêtre de blackout sans que rien
+ne le signale (même classe de faute que ms/s en D-060).
+
+### Défauts trouvés en maltraitant mon propre code (`/devil`)
+- **Une fenêtre F5 à `NaN` devenait PERMISSIVE** : `max(0.0, nan)` rend `0.0` en Python, donc
+  `near=False` — une autorisation de trader fondée sur une valeur absurde. Une fenêtre non finie
+  est une faute d'APPEL, pas une condition de donnée → elle lève (doctrine D-050).
+- **Un fournisseur qui LÈVE emportait toute la chaîne**, donc le repli — c'est-à-dire exactement
+  ce pour quoi la chaîne existe. Il est désormais écarté, pas suivi.
+- **`RecursionError` traversait le parser** sur un JSON profondément imbriqué (elle n'est pas une
+  `ValueError`). Un flux qui fait exploser la pile est empoisonné, pas illisible : même issue.
+- **`redact` ne couvrait que `api_key=`** alors que Finnhub utilise `token=`. Étendu à six noms
+  de paramètre plutôt que dupliqué — un rédacteur qui rate un nom est une fuite en attente.
+- **Aveugle ≠ calme** : sans calendrier utilisable, `news_near` rend `blind=True`, jamais
+  `near=False`. Un cache fossile n'est plus une donnée mais un souvenir : rien n'est publié, le
+  champ vieillit visiblement (le republier avec un horodatage frais le blanchirait).
+- Mes deux propres tests étaient faux : le garde anti-seuils grepait la DOCSTRING (refait par
+  AST) et j'attendais une distinction « série vide » que `providers._finish` ne fait pas.
+
+### Limite CONNUE, héritée et assumée
+`providers._finish` pose « rien de lisible = illisible, pas vide » — choix délibéré D-057. Un
+jour de fermeture, VIXCLS ne publie que des « . » et le motif remonte « illisible ». Je n'invente
+pas la distinction que je n'ai pas : `FredVix` ajoute l'indice qui évite de chercher une panne là
+où il y a un jour férié. Par ailleurs une **clôture quotidienne ne peut pas honnêtement alimenter
+un champ de canal rapide** : le drapeau `VIX_CLOTURE_<date>` part avec la valeur, et le repli
+`TermStructureVix` (déjà intraday, déjà dans le terminal) passe avant.
+
+### Vérif
+**90 tests** (85 unitaires + 5 d'intégration) → **1218 passed**, ruff clean, mypy **strict** étendu
+à `app/external` (14 fichiers), 125 vitest, tsc strict vert. **Essai manuel bout à bout, en mode
+replay** (où le module est seul à écrire ces champs) : NFP à +60 s → `MACRO_BLACKOUT` avec le motif
+« Nonfarm Payrolls dans la fenêtre ±15 min » ; le même à +2 h → bloqueur absent ; VIX externe à 34
+→ `VIX_LIMIT : VIX 34.0 > 30`. Zéro ligne modifiée dans `engine.py`.
+
+### Reste ouvert
+Le format Finnhub à confirmer (`scripts/validation_externe.py` sur une machine réseau), puis
+`verified=True`. L'écart `VIX_CRIT` / hystérésis D4 à arbitrer. `EXTERNAL_DATA=1` avec la source
+mock provoque un conflit d'écriture sur `vix` — signalé par un WARNING au démarrage, non résolu :
+le mode visé est replay/live.
+
 ## D-061 · Le tape d'essai fabrique enfin de la microstructure — et dit ce qu'il ne peut pas
 **Constat de départ, jamais formulé jusqu'ici.** Le générateur produisait des prints
 indépendants : un tape statistiquement plausible, mais sans aucun des phénomènes que le Niveau 2
