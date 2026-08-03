@@ -85,8 +85,14 @@ class Recipe:
             return self.series
         return tuple(k for c in self.components for k in (c.base, c.quote) if k)
 
-    def blocage(self) -> Optional[str]:
-        """`None` = alimentable. Sinon le motif, DÉDUIT du registre — jamais écrit à la main."""
+    def blocage(self, registry: Optional[dict[str, Any]] = None) -> Optional[str]:
+        """`None` = alimentable. Sinon le motif, DÉDUIT du registre — jamais écrit à la main.
+
+        `registry` permet d'évaluer contre un registre HYPOTHÉTIQUE : c'est ce qui laisse
+        `providers.releve` répondre à « si je relève cet identifiant, qu'est-ce qui s'allume ? »
+        sans monkey-patcher quoi que ce soit, ni dupliquer cette logique ailleurs.
+        """
+        table = BY_KEY if registry is None else registry
         if self.kind == "SANS_FORMULE":
             return self.note
         if self.kind == "DIRECT" and len(self.series) != 1:
@@ -99,9 +105,9 @@ class Recipe:
                         "jambes il n'y a pas de divergence, et le score n'est pas renormalisé "
                         "sur les composantes présentes")
         for key in self.keys():
-            if key not in BY_KEY:
+            if key not in table:
                 return f"clé absente du registre : {key}"
-            motif = fetch_block_reason(key)
+            motif = fetch_block_reason(key, registry=table)
             if motif is not None:
                 return f"{key} — {motif}"
             if not has_rest_endpoint(key):

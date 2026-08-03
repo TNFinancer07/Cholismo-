@@ -324,6 +324,18 @@ def has_client(provider: Provider) -> bool:
     return provider in _CLIENT_MODULES
 
 
+def client_for_provider(provider: Provider, **kwargs: Any) -> "HttpSeriesClient":
+    """Client d'un FOURNISSEUR, sans portillon de registre. Réservé au relevé d'un identifiant
+    CANDIDAT (D-065) : la ligne est encore C2, donc `client_for` la refuse — à juste titre pour
+    un appel de production, à tort quand on cherche précisément à la vérifier."""
+    entry = _CLIENT_MODULES.get(provider)
+    if entry is None:
+        raise cx.SeriesBlocked(f"{provider.value} : aucun client d'interrogation écrit")
+    module, classe = entry
+    mod = importlib.import_module(f".{module}", __package__)
+    return getattr(mod, classe)(**kwargs)   # type: ignore[no-any-return]
+
+
 def client_for(key: str, **kwargs) -> "HttpSeriesClient":
     """Client capable d'aller chercher CETTE ligne du registre, sans que l'appelant ait à
     savoir quel connecteur s'en occupe. Lève `SeriesBlocked` avec un motif utile sinon —

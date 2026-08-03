@@ -3596,6 +3596,52 @@ Essai réel : terminal démarré en `REPLAY_FILE=…` ×5, contrôle complet exe
 (restart/pause/speed/seek/play), refus explicites sur les trois commandes incomplètes, et les
 prints rejoués vérifiés jusqu'au canal SSE.
 
+## D-065 · Outiller le relevé C2 — et une correction à D-063
+`python -m app.providers.releve` prépare la séance de catalogue. Il pose trois questions dans
+l'ordre : **est-ce que ça répond** (appel réel, échec classé par cause), **est-ce lisible**
+(observations, premières et dernières dates), **qu'est-ce que ça débloque** (simulation contre un
+registre hypothétique, rien n'est écrit sur disque). Le passage en C1 reste MANUEL : c'est tout le
+sens de C2, un identifiant plausible se code aussi facilement que le bon.
+
+### La correction : j'avais annoncé quatre champs, il y en a deux
+J'avais écrit que relever les lignes C2 débloquerait `d5`, `beer_z`, `leading_turn` et
+`rr_zscore`. **C'est faux pour `d5` et `rr_zscore`**, et c'est l'outil qui l'a montré :
+
+`rr_zscore` passe par `ilsw_ez` et `d5` par `rdiff` — deux lignes **DÉRIVÉES**. Une ligne dérivée
+n'est jamais interrogeable : `fetch_block_reason` rend « dérivé — calculé depuis X : rien à
+collecter ici » **même une fois tous ses intrants relevés**. Relever `bundei_real` ne suffit donc
+pas ; il faudra en plus écrire l'arithmétique `rdiff = f(dfii10, bundei_real)` et
+`ilsw_ez = f(bund_nominal, bundei_real)`, qui n'est écrite nulle part au référentiel.
+
+Bilan réel du relevé complet des six lignes : **`beer_z` et `leading_turn`, rien d'autre.**
+- `oecd_cli` → `leading_turn` (seule, suffit)
+- `nfa` + `tot` → `beer_z` (**les deux**, indispensables ensemble)
+- `bundei_real`, `nairu_ez`, `r_star_us` → rien aujourd'hui, même avec les autres
+
+### Le relevé se raisonne par LOT, pas ligne à ligne
+Première version de l'outil : il jugeait chaque ligne isolément et annonçait « `nfa` n'ouvre
+RIEN » — vrai isolément, trompeur en pratique, puisque `nfa` + `tot` ouvrent `beer_z`. Un
+opérateur en aurait conclu que la séance ne servait à rien. L'outil simule désormais le lot
+complet et marque chaque ligne **indispensable** ou non.
+
+### Deux autres défauts trouvés en l'écrivant
+- **`uip_implied` figurait dans les lignes à relever** : elle est C2 mais DÉRIVÉE. Aucun
+  catalogue ne contient son identifiant, parce qu'elle n'en a pas — on aurait envoyé quelqu'un
+  chercher une chose inexistante. Le filtre exige désormais `Kind.OBSERVED` (6 lignes, ce que le
+  lecteur de registre annonçait déjà).
+- **Un identifiant mal formé était étiqueté « CRASH — défaut CHEZ NOUS »** alors que c'est le
+  résultat le plus utile du relevé : le connecteur refuse la forme, et on l'apprend AVANT de la
+  figer. Devenu `IDENTIFIANT REFUSÉ`, avec la forme attendue dans le message.
+
+`client_for_provider` (nouveau) donne le client d'un fournisseur **sans portillon de registre** :
+la ligne est encore C2, donc `client_for` la refuse — à juste titre en production, à tort quand on
+cherche précisément à la vérifier.
+
+### Vérif
+**11 tests** → **1283 passed**, ruff clean, mypy strict. `test_le_relevé_complet_debloque_
+EXACTEMENT_deux_champs` fige l'enjeu réel : il échouera le jour où un blocage change, plutôt que
+de laisser la promesse dériver en silence.
+
 ## D-064 · `fetch_catalog` devient un vrai contrat (Loop 3)
 Sept connecteurs implémentaient `fetch_catalog(clé_du_registre)`, **aucun ne le déclarait**. Un
 contrat de fait que le typage ne pouvait pas vérifier — D-063 le contournait par un `cast`, en
