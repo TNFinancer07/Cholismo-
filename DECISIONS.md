@@ -3596,6 +3596,66 @@ Essai réel : terminal démarré en `REPLAY_FILE=…` ×5, contrôle complet exe
 (restart/pause/speed/seek/play), refus explicites sur les trois commandes incomplètes, et les
 prints rejoués vérifiés jusqu'au canal SSE.
 
+## D-063 · Le registre branché sur le `ContextSchema` — et ce qu'il refuse d'alimenter
+53 séries sont interrogeables depuis D-057 et **n'alimentaient rien**. `MacroSeriesProvider`
+(`app/external/macro_series.py`) est le pont manquant : il fetche, calcule avec les formules DÉJÀ
+écrites (`providers/cascade.py`), et publie sous la source `macro_feed` que le moteur attend —
+**zéro ligne modifiée dans `engine.py`**, comme pour D-062.
+
+### La faisabilité est DÉRIVÉE du registre, jamais déclarée
+`RECIPES` dit COMMENT un champ se construit, jamais s'il est alimentable : ça se déduit à l'appel
+de `fetch_block_reason`, `has_rest_endpoint` et de l'existence des deux jambes. Une table de
+faisabilité écrite à la main mentirait le jour où un identifiant C2 est relevé — ou pire,
+resterait « OK » après qu'une source soit passée C3. **Les six lignes C2 relevées débloqueront
+leurs champs sans toucher ce fichier.**
+
+### Le résultat, sans maquillage : 1 champ sur 17
+**`real_rates` seul est alimentable aujourd'hui** (DFII10, ligne C1). Les seize autres sont
+bloqués, chacun avec un motif vérifiable et recopié du registre :
+
+| champ | motif |
+|---|---|
+| `d1` | `lei`, `sahm`, `ip` n'ont **aucune jambe BASE** — pas de divergence, et `cascade.aggregate` refuse de renormaliser sur les présentes (un D1 sur 45 % du poids se lirait comme un D1 complet) |
+| `d2`, `d3` | ABSORBÉS par Arb1/Arb2 (poids 0 dans `DIMENSIONS`) — un score propre les compterait deux fois |
+| `d4` | `d4_coeff` est un PARAMÈTRE à calibrer ; l'incohérence `d4_red_coeff` reste ouverte |
+| `d5`, `beer_z` | `nfa` et `tot` sont C2 |
+| `taylor_ois_delta` | `r_star_us` C2, `r_star_ez` C3 |
+| `phillips_tips_delta` | `beta_phillips` à calibrer |
+| `leading_turn`, `rr_zscore` | bloqués par `oecd_cli` / `bundei_real` (C2) |
+| `bridgewater_matrix`, `g_momentum`, `pi_momentum`, `carry_net`, `cycle_div_delta`, `spot_momentum` | **aucune formule figée** au référentiel — le mock les fabrique ; en inventer une ici la ferait passer pour de la mesure (§8/§11) |
+
+Ce n'est pas un échec du câblage : **c'est le câblage qui dit la vérité**. `python -m
+app.external.macro_series` affiche les 17 champs avec leur motif, sans ouvrir une seule socket.
+
+### Discipline de quota
+Seules les séries d'une recette FAISABLE sont interrogées — **une aujourd'hui**, pas 53. Le
+`fetcher` d'essai LÈVE sur toute clé hors périmètre : la discipline est vérifiée, pas espérée.
+
+### Trouvé en câblant
+- **`fetch_catalog` est un contrat de fait** : les sept clients l'implémentent, **aucun ne le
+  déclare**. Typé localement (`CatalogClient` Protocol) avec un `cast` qui est l'aveu exact du
+  trou — mêler un refactor de `providers` à ce câblage aurait violé la Loop 3. À remonter dans
+  `HttpSeriesClient` lors d'une passe dédiée.
+- **Une recette `DIRECT` mal formée tuait le worker** (`series[0]` sur un tuple vide) — et avec
+  lui toute la macro, pour une faute de frappe dans la table.
+- **Une clé d'API absente est un refus de POLITIQUE**, pas une panne réseau (D-050). Le worker ne
+  meurt pas : le champ reste ABSENT, et le motif dit `renseigner FRED_API_KEY`.
+- **Mon propre garde anti-seuils était trop large** : il attrapait un contrôle d'ARITÉ
+  (`len(...) != 1`). Affiné plutôt que désactivé.
+
+### Vérif
+**21 tests** (dont 2 d'intégration) → **1244 passed**, ruff clean, mypy strict (15 fichiers).
+Essai manuel bout à bout en replay : `real_rates = 2.03` arrive **FRESH**, `source=macro_feed`,
+`flags=[MACRO_SERIES]`, dans `s2_state.cascade.real_rates`. Contrôle négatif : pont muet → champ
+**ABSENT**, jamais un zéro. Démarrage avec `EXTERNAL_DATA=1` : aucun avertissement, le mock cède
+`real_rates` en plus de `vix`/`macro_releases`.
+
+### Reste ouvert
+Les six lignes C2 à relever (une session, même protocole) débloqueront `d5`, `beer_z`,
+`leading_turn`, `rr_zscore`. Les six champs SANS FORMULE attendent une décision du propriétaire de
+la spec, pas du code. `d1` restera bloqué tant que `lei`/`sahm`/`ip` n'auront pas de jambe zone
+euro — c'est un manque de SÉRIE, pas de câblage.
+
 ## D-062 · Sources externes Niveau 3 — alimenter F5 et F3, sans créer un second verrou
 **Le cahier des charges demandait de créer `EconomicCalendarProvider`, `VixProvider` et
 `getVixRegime()`. Ces trois contrats existaient déjà**, et les redoubler aurait été la pire

@@ -21,6 +21,8 @@ from .engine import Engine
 from .event_store import get_store
 from .external import OWNED_FIELDS as EXTERNAL_FIELDS
 from .external import build_default as build_external
+from .external.macro_series import OWNED_FIELDS as MACRO_FIELDS
+from .external.macro_series import MacroSeriesProvider
 from .log_scraper import LogTailer, nt8_daily_log_path, startup_report
 from .redis_state import RedisState
 from .snapshot import capture_snapshot
@@ -53,6 +55,10 @@ async def lifespan(app: FastAPI):
     # EXTERNAL_DATA=1, rien ne tourne. Décidé AVANT la source de marché, car c'est lui qui
     # détermine les champs que le mock ne doit plus produire.
     app.state.external = build_external() if config.EXTERNAL_DATA else None
+    # Pont registre → ContextSchema (D-063) : les 53 séries interrogeables alimentent enfin le
+    # canal lent. Il ne revendique QUE les champs qu'il remplit réellement — aujourd'hui
+    # `real_rates` ; les autres restent bloqués par le registre, avec leur motif.
+    app.state.macro_series = MacroSeriesProvider() if config.EXTERNAL_DATA else None
 
     # Le mode replay se choisit au démarrage, par la couture unique (§4) : le moteur ne sait
     # pas laquelle des trois sources est branchée. `REPLAY_FILE` absent = source mock.
@@ -66,14 +72,16 @@ async def lifespan(app: FastAPI):
         # produire puis se faire écraser donnerait le même écran par accident d'ordonnancement,
         # et un `vix` différent selon l'ordre des ticks n'est pas une donnée.
         app.state.datasource = MockDataSource(
-            skip_fields=EXTERNAL_FIELDS if app.state.external is not None else ())
+            skip_fields=((*EXTERNAL_FIELDS, *MACRO_FIELDS)
+                         if app.state.external is not None else ()))
     if app.state.external is not None:
         # INFO, pas un avertissement : il n'y a plus de conflit, il y a un propriétaire. La
         # contrepartie est réelle et doit être lisible — sans source externe joignable, ces
         # champs deviennent ABSENT et Phase 0 bloque (fail-closed §3), au lieu d'afficher du mock.
-        log.info("EXTERNAL_DATA actif — champs alimentés par la source externe : %s "
-                 "(le mock ne les produit plus ; muets = ABSENT, jamais du mock déguisé)",
-                 ", ".join(EXTERNAL_FIELDS))
+        log.info("EXTERNAL_DATA actif — champs alimentés par une source réelle : %s "
+                 "(le mock ne les produit plus ; muets = ABSENT, jamais du mock déguisé). "
+                 "Détail du pont macro : python -m app.external.macro_series",
+                 ", ".join((*EXTERNAL_FIELDS, *MACRO_FIELDS)))
 
     # Sources externes Niveau 3 (D-062) : calendrier éco F5 + VIX F3. Opt-in — sans
     # EXTERNAL_DATA=1, rien ne tourne et le mock reste seul maître de `vix`/`macro_releases`.
@@ -88,6 +96,8 @@ async def lifespan(app: FastAPI):
         await app.state.news_provider.start()
     if app.state.external is not None:
         await app.state.external.start(app.state.redis)
+    if app.state.macro_series is not None:
+        await app.state.macro_series.start(app.state.redis)
     await app.state.engine.start()
     # AI: async only, out of the hot path (CLAUDE §2.8); no keys -> explicit UNAVAILABLE.
     app.state.ai = AITasks(app.state.engine)
@@ -111,6 +121,8 @@ async def lifespan(app: FastAPI):
             await app.state.news_provider.stop()
         if app.state.external is not None:
             await app.state.external.stop()          # sortie propre : worker annulé
+        if app.state.macro_series is not None:
+            await app.state.macro_series.stop()
         await app.state.ai.stop()
         await app.state.engine.stop()
         await app.state.redis.close()
