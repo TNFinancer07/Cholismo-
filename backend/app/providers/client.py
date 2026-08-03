@@ -29,7 +29,7 @@ import logging
 import math
 import urllib.request
 from dataclasses import dataclass, field
-from typing import Callable, Optional, Sequence
+from typing import Any, Callable, Optional, Sequence
 
 from . import connectors as cx
 from .catalog import BY_KEY, Provider, SeriesSpec
@@ -244,6 +244,32 @@ class HttpSeriesClient:
         frame.attrs["coverage"] = dict(table.coverage)
         frame.attrs["requested"] = tuple(series)
         return frame
+
+    # -- interrogation par la clé du REGISTRE : le contrat commun (D-064) --
+
+    def fetch_catalog(self, catalog_key: str, **kw: Any) -> SeriesResult:
+        """Interroge une ligne par sa clé MÉTIER (`pmi_us`), jamais par l'identifiant du
+        fournisseur (`GACDISA066MSFRBNY`). C'est le chemin normal : il empêche un identifiant de
+        se retrouver codé en dur chez l'appelant, ce que la doctrine C2 interdit (D-057).
+
+        Les **filtres déclarés au registre s'appliquent d'office** — l'appelant n'a pas à se
+        souvenir que `unrate_ez` impose `geo=EA20`. Un filtre passé ici l'emporte : compléter est
+        un choix explicite, contredire en silence n'en serait pas un.
+
+        Les sept connecteurs l'implémentaient chacun de leur côté sans qu'aucun ne le déclare :
+        un contrat de fait que le typage ne pouvait pas vérifier, et qu'un huitième connecteur
+        aurait pu oublier sans que rien ne le dise.
+        """
+        spec = self._spec_for(catalog_key)
+        return self._by_identifier(spec.identifier or "", **{**dict(spec.filters), **kw})
+
+    def _by_identifier(self, identifier: str, **kw: Any) -> SeriesResult:
+        """Point d'entrée d'un connecteur par l'identifiant du fournisseur. Une ligne par
+        connecteur — c'est le seul endroit où ils diffèrent (`fetch` pour les uns, `fetch_key`
+        en deux segments pour les SDMX)."""
+        raise NotImplementedError(
+            f"{type(self).__name__} n'expose pas d'entrée par identifiant : implémenter "
+            "`_by_identifier`, qui réalise le contrat de `fetch_catalog`.")
 
     # -- portillon du registre, commun à tous les connecteurs --
 

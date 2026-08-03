@@ -15,7 +15,7 @@ une source différente.
 from __future__ import annotations
 
 import re
-from typing import Optional
+from typing import Any, Optional
 from urllib.parse import quote
 
 from . import connectors as cx
@@ -83,8 +83,8 @@ class SdmxClient(HttpSeriesClient):
     def _fetch_one(self, name: str, *, catalog: bool, **kw) -> SeriesResult:
         return self.fetch_catalog(name, **kw) if catalog else self.fetch_key(name, **kw)
 
-    def fetch_catalog(self, catalog_key: str, **kw) -> SeriesResult:
-        return self.fetch_key(self._spec_for(catalog_key).identifier or "", **kw)
+    def _by_identifier(self, identifier: str, **kw: Any) -> SeriesResult:
+        return self.fetch_key(identifier, **kw)
 
 
 def fetch_series(dataflow: str, key: str, fetcher: Optional[object] = None) -> SeriesResult:

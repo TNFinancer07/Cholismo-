@@ -3596,6 +3596,40 @@ Essai réel : terminal démarré en `REPLAY_FILE=…` ×5, contrôle complet exe
 (restart/pause/speed/seek/play), refus explicites sur les trois commandes incomplètes, et les
 prints rejoués vérifiés jusqu'au canal SSE.
 
+## D-064 · `fetch_catalog` devient un vrai contrat (Loop 3)
+Sept connecteurs implémentaient `fetch_catalog(clé_du_registre)`, **aucun ne le déclarait**. Un
+contrat de fait que le typage ne pouvait pas vérifier — D-063 le contournait par un `cast`, en
+notant la dette. Passe de refactor dédiée, comme prévu (§13, Loop 3 : jamais mêlé à une feature).
+
+- `HttpSeriesClient.fetch_catalog` est désormais **concret et unique** : il résout la spec, fusionne
+  les filtres du registre, et délègue à `_by_identifier` — la seule ligne où les connecteurs
+  diffèrent (`fetch` pour quatre, `fetch_key` en deux segments pour les trois SDMX).
+- Les sept `fetch_catalog` disparaissent, remplacés par un `_by_identifier` d'une ligne.
+- **La fusion des filtres du registre remonte dans la base.** Elle ne valait que pour Eurostat ;
+  elle vaut pour tous. Neutre aujourd'hui — une seule ligne du catalogue porte des filtres
+  (`unrate_ez` : `geo=EA20`) — et c'est vérifié par un test.
+- Le `cast` de `macro_series.py` disparaît : mypy vérifie l'appel.
+
+### Le filet de refactor a trouvé un défaut AVANT que je touche au code
+Écrit d'abord, vert avant : `tests/test_providers_fetch_catalog.py` fixe le comportement
+observable des sept (identifiant pris au REGISTRE, filtres d'office, clé bloquée qui LÈVE, clé
+inconnue refusée). Il a immédiatement révélé que **CFTC ne pouvait pas honorer le contrat** :
+`value_field` est obligatoire sans défaut (choix D-057 — deviner la colonne porteuse
+fabriquerait une donnée), donc `fetch_catalog("cot_fx")` sortait un `TypeError` brut du fond de
+la pile. Latent aujourd'hui (aucune recette faisable n'utilise `cot_fx`), fatal demain.
+
+**Un seul changement de comportement, assumé et testé** : le refus devient un `SeriesBlocked`
+qui NOMME `value_field` et dit quoi faire. Un contrat que six implémentations sur sept honorent
+n'est pas un contrat ; le déclarer sans corriger la septième aurait été pire qu'avant.
+
+Mon propre test était faux sur un point : Yahoo encode `^GDAXI` en `%5EGDAXI`, et je comparais la
+chaîne brute — l'assertion échouait sur un connecteur parfaitement correct. Corrigée en comparant
+l'URL décodée.
+
+### Vérif
+**28 tests de filet** → **1272 passed**, ruff clean, mypy strict (15 fichiers). Les 351 tests des
+suites `providers` + `macro_series` passent sans modification : le comportement est préservé.
+
 ## D-063 · Le registre branché sur le `ContextSchema` — et ce qu'il refuse d'alimenter
 53 séries sont interrogeables depuis D-057 et **n'alimentaient rien**. `MacroSeriesProvider`
 (`app/external/macro_series.py`) est le pont manquant : il fetche, calcule avec les formules DÉJÀ

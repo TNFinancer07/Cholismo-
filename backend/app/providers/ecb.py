@@ -28,7 +28,7 @@ le seuil de 0,30 % suppose pourtant un bruit comparable des deux côtés.
 from __future__ import annotations
 
 import re
-from typing import Optional
+from typing import Any, Optional
 from urllib.parse import quote
 
 from . import connectors as cx
@@ -176,10 +176,8 @@ class EcbClient(HttpSeriesClient):
         tabulaire appellerait `fetch(dataflow, key)` avec un seul argument."""
         return self.fetch_catalog(name, **kw) if catalog else self.fetch_key(name, **kw)
 
-    def fetch_catalog(self, catalog_key: str, **kw) -> SeriesResult:
-        """Chemin normal : on demande `yc_spot`, pas la clé SDMX. Le portillon du registre
-        s'applique (C1 seulement) et le fournisseur est vérifié."""
-        return self.fetch_key(self._spec_for(catalog_key).identifier or "", **kw)
+    def _by_identifier(self, identifier: str, **kw: Any) -> SeriesResult:
+        return self.fetch_key(identifier, **kw)
 
 
 def fetch_series(dataflow: str, key: str,

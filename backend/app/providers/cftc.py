@@ -14,7 +14,7 @@ Aucune clé API : le portail est public (un jeton Socrata ne fait que relever le
 from __future__ import annotations
 
 import re
-from typing import Optional
+from typing import Any, Optional
 from urllib.parse import quote
 
 from . import connectors as cx
@@ -78,8 +78,16 @@ class CftcClient(HttpSeriesClient):
     def _fetch_one(self, name: str, *, catalog: bool, **kw) -> SeriesResult:
         return self.fetch_catalog(name, **kw) if catalog else self.fetch(name, **kw)
 
-    def fetch_catalog(self, catalog_key: str, **kw) -> SeriesResult:
-        return self.fetch(self._spec_for(catalog_key).identifier or "", **kw)
+    def _by_identifier(self, identifier: str, **kw: Any) -> SeriesResult:
+        """Socrata est le seul connecteur dont le contrat exige un argument DE PLUS que la clé :
+        `value_field` n'a pas de défaut, parce que deviner quelle colonne porte la valeur
+        fabriquerait une donnée (D-057). Le refus le DIT — avant, l'appel sortait un `TypeError`
+        brut du fond de la pile, illisible pour l'appelant (trouvé par le filet de refactor)."""
+        if not kw.get("value_field"):
+            raise cx.SeriesBlocked(
+                f"{identifier} : `value_field` est obligatoire pour une ressource Socrata — "
+                "nommer la colonne qui porte la valeur ; la deviner fabriquerait une donnée.")
+        return self.fetch(identifier, **kw)
 
 
 def fetch_series(resource: str, *, value_field: str,

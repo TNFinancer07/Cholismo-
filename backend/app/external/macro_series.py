@@ -47,7 +47,7 @@ import math
 import time
 from dataclasses import dataclass
 from dataclasses import field as dc_field
-from typing import Any, Callable, Mapping, Optional, Protocol, cast
+from typing import Any, Callable, Mapping, Optional
 
 from ..providers import cascade
 from ..providers.catalog import BY_KEY, D1_WEIGHTS, fetch_block_reason, zscore_window
@@ -58,15 +58,6 @@ from ..redis_state import RedisState
 log = logging.getLogger("cholismo.macro_series")
 
 MACRO_SOURCE = "macro_feed"
-
-
-class CatalogClient(Protocol):
-    """`fetch_catalog(clé)` est implémenté par les SEPT clients du paquet `providers` — mais
-    déclaré sur AUCUN d'eux : c'est un contrat de fait, invisible à la lecture de la classe de
-    base. Le typer ici le rend vérifiable sans mêler un refactor de `providers` à ce câblage
-    (§13, Loop 3). À remonter dans `HttpSeriesClient` lors d'une passe de refactor dédiée."""
-
-    def fetch_catalog(self, catalog_key: str, **kw: Any) -> SeriesResult: ...
 
 
 @dataclass(frozen=True)
@@ -280,11 +271,9 @@ class MacroSeriesProvider:
                 if self._fetcher is not None:
                     out[key] = self._fetcher(key)
                     continue
-                # `client_for` rend un `HttpSeriesClient`, qui ne DÉCLARE pas `fetch_catalog`
-                # bien que ses sept sous-classes l'implémentent (cf. `CatalogClient`). Le cast
-                # est donc l'aveu exact de ce trou de contrat, pas un contournement silencieux.
-                client = cast(CatalogClient, client_for(key))
-                out[key] = client.fetch_catalog(key)
+                # `fetch_catalog` est désormais DÉCLARÉ sur `HttpSeriesClient` (D-064) :
+                # plus de `cast`, le typage vérifie l'appel.
+                out[key] = client_for(key).fetch_catalog(key)
             except SeriesBlocked as exc:
                 # Refus de POLITIQUE, distinct d'une condition de donnée (D-050) : registre qui a
                 # changé, ou clé d'API absente. Le worker ne meurt PAS — le tuer priverait la

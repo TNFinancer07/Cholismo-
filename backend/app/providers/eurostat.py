@@ -27,7 +27,7 @@ du signal. C'est le risque n°1 signalé sur D1, dont le PMI porte le plus gros 
 from __future__ import annotations
 
 import re
-from typing import Mapping, Optional
+from typing import Any, Mapping, Optional
 from urllib.parse import quote
 
 from . import connectors as cx
@@ -115,14 +115,10 @@ class EurostatClient(HttpSeriesClient):
         """Même chose, I/O en thread (§7). Le refus de politique est levé AVANT le thread."""
         return await self._run_async(dataset, data_url(dataset, filters))
 
-    def fetch_catalog(self, catalog_key: str, **filters: object) -> SeriesResult:
-        """Chemin normal : `unrate_ez` plutôt que `une_rt_m` + `geo=EA20`. Les filtres du
-        registre s'appliquent d'office — l'appelant n'a pas à se souvenir que la spec impose
-        `geo=EA20` — et peuvent être complétés (jamais contredits en silence : un filtre passé
-        ici l'emporte, et c'est un choix explicite de l'appelant)."""
-        spec = self._spec_for(catalog_key)
-        merged = {**dict(spec.filters), **filters}
-        return self.fetch(spec.identifier or "", **merged)
+    def _by_identifier(self, identifier: str, **kw: Any) -> SeriesResult:
+        # La fusion des filtres du registre est faite par `fetch_catalog` (classe de base) :
+        # elle valait pour Eurostat seul, elle vaut pour tous.
+        return self.fetch(identifier, **kw)
 
     def _on_unreadable(self, text: str, result: SeriesResult) -> SeriesResult:
         """Un cube non réduit n'est PAS une réponse illisible. Deux causes, deux messages :

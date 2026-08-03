@@ -14,7 +14,7 @@ série à demander, et choisir une échéance par défaut déciderait à la plac
 from __future__ import annotations
 
 import re
-from typing import Optional
+from typing import Any, Optional
 from urllib.parse import quote
 
 from . import connectors as cx
@@ -63,8 +63,8 @@ class YahooClient(HttpSeriesClient):
     async def fetch_async(self, ticker: str, *, contract: Optional[str] = None) -> SeriesResult:
         return await self._run_async(ticker, data_url(ticker, contract=contract))
 
-    def fetch_catalog(self, catalog_key: str, **kw) -> SeriesResult:
-        return self.fetch(self._spec_for(catalog_key).identifier or "", **kw)
+    def _by_identifier(self, identifier: str, **kw: Any) -> SeriesResult:
+        return self.fetch(identifier, **kw)
 
 
 def fetch_series(ticker: str, fetcher: Optional[object] = None, **kw) -> SeriesResult:

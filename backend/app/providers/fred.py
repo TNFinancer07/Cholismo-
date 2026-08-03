@@ -15,7 +15,7 @@ Ce qui reste spécifique, et qui compte :
 """
 from __future__ import annotations
 
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 from .. import config
 from . import connectors as cx
@@ -65,8 +65,8 @@ class FredClient(HttpSeriesClient):
 
     # -- interrogation par la clé métier du registre --
 
-    def fetch_catalog(self, key: str, *, start: Optional[str] = None) -> SeriesResult:
-        return self.fetch(self._spec_for(key).identifier or "", start=start)
+    def _by_identifier(self, identifier: str, **kw: Any) -> SeriesResult:
+        return self.fetch(identifier, **kw)
 
     def _key(self) -> Optional[str]:
         return config.FRED_API_KEY if self._api_key is None else self._api_key
