@@ -38,6 +38,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterator, Optional, TypedDict
 
+from .dialects import DIALECTES, Mapping, to_seconds, to_side
+
 
 class Tick(TypedDict):
     """Forme d'un tick rejoué. `bid_vol`/`ask_vol` sont `Optional` **par le type** : une
@@ -115,9 +117,13 @@ class ReplayEngine:
     """Rejoue un CSV de ticks vers un callback. Un tick émis est un tick VALIDE : tout ce qui
     ne l'est pas est écarté et compté, jamais deviné."""
 
-    def __init__(self, filepath: str, on_tick_callback: Callable[[Tick], Any]) -> None:
+    def __init__(self, filepath: str, on_tick_callback: Callable[[Tick], Any],
+                 mapping: Optional[Mapping] = None) -> None:
         self.filepath = filepath
         self.on_tick_callback = on_tick_callback
+        # Le fichier de l'opérateur n'est JAMAIS renommé ni réécrit : on s'adapte à lui. Sans
+        # correspondance explicite, on lit le tape canonique — comportement d'avant, inchangé.
+        self.mapping = mapping or DIALECTES["cholismo"]
         self._stop = False
 
     def stop(self) -> None:
@@ -138,14 +144,18 @@ class ReplayEngine:
         summary = ReplaySummary()
         precedent: Optional[float] = None
         with open(self.filepath, mode="r", newline="", encoding="utf-8") as f:
-            reader = csv.DictReader(f)
+            reader = csv.DictReader(f, delimiter=self.mapping.delimiter)
             if reader.fieldnames is None:
                 return
-            manquantes = {"timestamp", "price", "volume", "side"} - set(reader.fieldnames)
+            attendues = {self.mapping.columns[r] for r in ("timestamp", "price", "volume", "side")
+                         if r in self.mapping.columns}
+            manquantes = attendues - set(reader.fieldnames)
             if manquantes:
                 raise ValueError(
                     f"colonnes obligatoires absentes du CSV : {', '.join(sorted(manquantes))} — "
-                    "un replay amputé de son prix ou de son horodatage n'est pas un replay.")
+                    "un replay amputé de son prix ou de son horodatage n'est pas un replay. "
+                    "Lancer `python -m app.replay.inspect <fichier>` pour voir ce que le "
+                    "fichier contient vraiment et proposer une correspondance.")
             for row in reader:
                 if summary.emitted >= max_ticks:
                     summary.stopped_early = True
@@ -195,21 +205,24 @@ class ReplayEngine:
 
     def _parse(self, row: dict[str, Any],
                precedent: Optional[float]) -> tuple[Optional[Tick], str]:
-        ts = _timestamp(row.get("timestamp"))
+        col = self.mapping.columns
+        ts = _timestamp(to_seconds(row.get(col["timestamp"]), self.mapping.time_unit))
         if ts is None:
             return None, "horodatage illisible"
         if precedent is not None and ts < precedent:
             # Un tape qui recule fabrique des fenêtres négatives : toutes les mesures d'order
             # flow qui en dépendent deviendraient absurdes tout en restant crédibles.
             return None, "horodatage NON MONOTONE (le tape recule)"
-        price = _float(row.get("price"))
+        price = _float(row.get(col["price"]))
         if price is None or price <= 0:
             return None, "prix illisible ou non positif"
-        volume = _float(row.get("volume"))
+        volume = _float(row.get(col["volume"]))
         if volume is None or volume < 0 or volume != int(volume):
             return None, "volume illisible ou non entier"
-        side = str(row.get("side", "")).strip().upper()
+        side = to_side(row.get(col["side"]), self.mapping.side_values)
         if side not in SIDES:
+            # Jamais de côté par défaut : se tromper de sens INVERSE le delta agresseur, et le
+            # nombre reste parfaitement crédible.
             return None, f"côté inconnu (attendu {'/'.join(SIDES)})"
         tick: Tick = {
             "timestamp": ts,
@@ -217,8 +230,8 @@ class ReplayEngine:
             "volume": int(volume),
             "side": side,
             # `None` et non `0.0` : une profondeur absente est INCONNUE, pas vide (D-055).
-            "bid_vol": _float(row.get("bid_vol")),
-            "ask_vol": _float(row.get("ask_vol")),
+            "bid_vol": _float(row.get(col["bid_vol"])) if "bid_vol" in col else None,
+            "ask_vol": _float(row.get(col["ask_vol"])) if "ask_vol" in col else None,
         }
         return tick, ""
 

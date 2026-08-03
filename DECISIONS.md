@@ -3596,6 +3596,52 @@ Essai réel : terminal démarré en `REPLAY_FILE=…` ×5, contrôle complet exe
 (restart/pause/speed/seek/play), refus explicites sur les trois commandes incomplètes, et les
 prints rejoués vérifiés jusqu'au canal SSE.
 
+## D-060 · Consommer un export tiers — Bookmap, sans connaître son format
+**Le point de départ est un aveu** : je ne connais pas le format d'export de Bookmap. Inventer
+des noms de colonnes aurait été exactement ce que la doctrine C2 interdit depuis D-057 — un
+identifiant qui a l'air vérifié sans l'être. Plutôt que de deviner, on outille la question.
+
+### `python -m app.replay.inspect <export.csv>`
+Lit un échantillon d'un export RÉEL et **montre** : séparateur déduit, colonnes présentes,
+candidats par rôle, unité d'horodatage, valeurs de côté observées. Il ne décide rien, et il
+**refuse de proposer** une correspondance dès qu'un rôle requis est ambigu ou que l'unité de
+temps est indéterminée.
+
+### Les deux pièges d'un export tiers, traités explicitement
+1. **L'unité de temps, pas le nom des colonnes.** Des millisecondes lues comme des secondes
+   placent la séance en l'an 56 000 ; des nanosecondes, bien plus loin. Toutes les fenêtres
+   d'order flow (B1/B4) deviennent alors absurdes **en restant crédibles**. L'unité se déduit de
+   l'ORDRE DE GRANDEUR, se montre avant tout rejeu, et une unité indéterminée bloque la
+   proposition.
+2. **Le sens du côté agresseur.** `Bid` comme côté AGRESSÉ veut dire une **VENTE** — l'inverse
+   de l'intuition, et l'erreur qui inverserait tout le delta agresseur sans qu'aucun nombre ne
+   paraisse suspect. Une valeur de côté non traduite ne reçoit **jamais** de défaut : elle est
+   signalée.
+
+### Le fichier de l'opérateur n'est jamais réécrit
+`Mapping` adapte le moteur au fichier, pas l'inverse. Un export de trades seuls (sans
+profondeur) se rejoue parfaitement — il produit un tape sans carnet, ce qui EST la vérité
+(D-055). Sans correspondance explicite, le format canonique reste le défaut : les 44 tests
+existants passent sans modification.
+
+### Le dialecte Bookmap est marqué `verified=False`
+Ses noms de colonnes viennent de conventions courantes, **pas d'un fichier observé**. Un test
+verrouille ce marquage. Il deviendra `verified=True` le jour où un en-tête réel l'aura confirmé,
+pas avant.
+
+### Deux défauts trouvés sur mon propre travail
+- Le renifleur annonçait `AMBIGU : BidSize, BidSize` — la même colonne comptée deux fois
+  (« bidsize » et « bid_size » se normalisent pareil). Une fausse alerte d'ambiguïté sur une
+  détection correcte, de quoi faire douter d'un bon résultat.
+- Mon garde anti-nom-en-dur (D-059) a refusé `dialects.py`. Il avait tort : « bookmap » y nomme
+  un FORMAT DE FICHIER, pas l'identité de la source live — un opérateur peut rejouer un export
+  Bookmap sur un terminal branché à Rithmic. Le garde est affiné, pas désactivé.
+
+### Vérif
+**24 tests** → **1099 passed**, ruff clean, mypy strict clean (7 fichiers). Démonstration sur un
+export fictif « à la Bookmap » (`;`, millisecondes, `Ask`/`Bid`) : reconnu, correspondance
+proposée, rejoué avec `Ask→BUY` et `Bid→SELL`.
+
 ### Reste ouvert (sans blocage)
 Six lignes de catalogue à relever (3 clés SDMX en une session, la clé du Bund€i qui débloque
 aussi `rdiff`), quatre connecteurs sur sept n'ont pas encore leur client d'interrogation

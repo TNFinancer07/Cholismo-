@@ -120,10 +120,15 @@ def test_aucun_nom_de_plateforme_ne_reste_CODE_EN_DUR_dans_app():
     échapperait à la constante et casserait le prochain changement de plateforme."""
     import pathlib
     racine = pathlib.Path(__file__).resolve().parent.parent / "app"
+    # `dialects.py` est exempté et c'est un vrai distinguo, pas une commodité : « bookmap » y
+    # nomme un FORMAT DE FICHIER (la disposition des colonnes d'un export), pas l'identité de
+    # la source live. Les confondre serait l'inverse du problème que ce garde protège — un
+    # opérateur peut très bien rejouer un export Bookmap sur un terminal branché à Rithmic.
+    exemptes = {"config.py", "dialects.py"}
     coupables = []
     for f in racine.rglob("*.py"):
         texte = f.read_text(encoding="utf-8")
         for interdit in ('"bookmap"', "'bookmap'", '"sierra_chart"', "'sierra_chart'"):
-            if interdit in texte and f.name != "config.py":
+            if interdit in texte and f.name not in exemptes:
                 coupables.append(f"{f.relative_to(racine)} → {interdit}")
     assert not coupables, "nom de plateforme en dur hors config : " + ", ".join(coupables)
