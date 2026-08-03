@@ -8,13 +8,14 @@ Comportement figé :
 """
 import math
 
+from app import config
 from app.heatmap import latest_column
 from app.meta import Freshness, MetaField
 
 
 def _ob(bids, asks, fresh=Freshness.FRESH):
     return MetaField(value={"bids": bids, "asks": asks}, last_update_ts=0.0,
-                     source="sierra_chart", freshness=fresh)
+                     source=config.MICROSTRUCTURE_SOURCE, freshness=fresh)
 
 
 def test_builds_current_column_when_fresh():

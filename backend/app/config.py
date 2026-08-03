@@ -292,3 +292,10 @@ FRED_API_KEY = os.getenv("FRED_API_KEY", "")
 REPLAY_FILE = os.getenv("REPLAY_FILE", "")
 REPLAY_SPEED = float(os.getenv("REPLAY_SPEED", "1.0"))
 REPLAY_AUTOPLAY = os.getenv("REPLAY_AUTOPLAY", "1") not in ("0", "false", "False")
+
+# --- Fournisseur de microstructure (D-059) ---
+# Nom de la source qui possède le carnet, le tape et les niveaux de volume. Il était codé en dur
+# à vingt endroits ; changer de plateforme demandait un renommage global, et une occurrence
+# oubliée aurait fait vieillir un champ vers ABSENT sans que rien ne l'explique.
+# Bookmap par défaut ; `MICROSTRUCTURE_SOURCE=sierra_chart` (ou `rithmic`, …) suffit à changer.
+MICROSTRUCTURE_SOURCE = os.getenv("MICROSTRUCTURE_SOURCE", "bookmap")

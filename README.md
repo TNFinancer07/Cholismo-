@@ -95,7 +95,7 @@ Custom** (sliders VIX/CHOP/CVD/GEX/RMS), ou par API :
 ```bash
 curl -X POST localhost:8000/scenario -H 'content-type: application/json' \
      -d '{"name":"vix_spike"}'                 # Phase 0 doit passer BLOQUÉ
-curl -X POST localhost:8000/sources/sierra_chart/toggle \
+curl -X POST localhost:8000/sources/bookmap/toggle \
      -H 'content-type: application/json' -d '{"up":false}'   # S1 → STALE puis ABSENT
 ```
 Le mock injecte en continu les **pathologies réelles** (ticks manquants, retards, NaN,

@@ -24,7 +24,7 @@ from .base import MarketDataSource
 
 # Simulated upstream sources -> the fields they own.
 SOURCES = {
-    "sierra_chart": ["svs_score", "cvd", "absorption", "aggressor_ratio",
+    config.MICROSTRUCTURE_SOURCE: ["svs_score", "cvd", "absorption", "aggressor_ratio",
                      "vpoc", "vah", "val", "lvn", "chop", "order_book", "tape", "session_prev"],
     "cboe": ["vix", "vvix", "vol_term_structure"],
     "cme": ["nq_es", "zn", "dxy_alt"],
@@ -95,16 +95,16 @@ class MockDataSource(MarketDataSource):
         aggressor = max(0.0, min(1.0, self._drift("aggr", base["aggressor"], vol, 0.02)))
         es = self._drift("es", base["es"], vol, 2.0)
 
-        await self._emit(state, "sierra_chart", "svs_score", round(svs, 1), patho)
-        await self._emit(state, "sierra_chart", "cvd", round(cvd, 0), patho)
-        await self._emit(state, "sierra_chart", "absorption", rng.random() < 0.3, patho)
-        await self._emit(state, "sierra_chart", "aggressor_ratio", round(aggressor, 3), patho)
-        await self._emit(state, "sierra_chart", "chop", round(chop, 1), patho)
+        await self._emit(state, config.MICROSTRUCTURE_SOURCE, "svs_score", round(svs, 1), patho)
+        await self._emit(state, config.MICROSTRUCTURE_SOURCE, "cvd", round(cvd, 0), patho)
+        await self._emit(state, config.MICROSTRUCTURE_SOURCE, "absorption", rng.random() < 0.3, patho)
+        await self._emit(state, config.MICROSTRUCTURE_SOURCE, "aggressor_ratio", round(aggressor, 3), patho)
+        await self._emit(state, config.MICROSTRUCTURE_SOURCE, "chop", round(chop, 1), patho)
         vpoc = self._drift("vpoc_offset", 0.0, vol, 3.0)
-        await self._emit(state, "sierra_chart", "vpoc", round(es + vpoc, 2), patho)
-        await self._emit(state, "sierra_chart", "vah", round(es + 12 + vol, 2), patho)
-        await self._emit(state, "sierra_chart", "val", round(es - 12 - vol, 2), patho)
-        await self._emit(state, "sierra_chart", "lvn",
+        await self._emit(state, config.MICROSTRUCTURE_SOURCE, "vpoc", round(es + vpoc, 2), patho)
+        await self._emit(state, config.MICROSTRUCTURE_SOURCE, "vah", round(es + 12 + vol, 2), patho)
+        await self._emit(state, config.MICROSTRUCTURE_SOURCE, "val", round(es - 12 - vol, 2), patho)
+        await self._emit(state, config.MICROSTRUCTURE_SOURCE, "lvn",
                          [round(es - 20 - 6 * k, 2) for k in range(3)], patho)
 
         # Order book ES — 10 niveaux autour du mid, tick 0.25 (D-025). Pathologies :
@@ -118,7 +118,7 @@ class MockDataSource(MarketDataSource):
                  max(1, int(rng.gauss(60, 35)))] for k in range(depth)]
         asks = [[round(mid + half_spread + 0.25 * k, 2),
                  max(1, int(rng.gauss(60, 35)))] for k in range(depth)]
-        await self._emit(state, "sierra_chart", "order_book",
+        await self._emit(state, config.MICROSTRUCTURE_SOURCE, "order_book",
                          {"bids": bids, "asks": asks}, patho)
 
         # Tape / Time & Sales — 1 à 4 prints par tick autour du mid, sens agresseur biaisé
@@ -134,10 +134,10 @@ class MockDataSource(MarketDataSource):
                 price = math.nan  # pathologie : écartée en aval (jamais un prix inventé)
             self._tape.append({"ts": time.time(), "price": round(price, 2),
                                "size": size, "side": side, "seq": self._tape_seq})
-        await self._emit(state, "sierra_chart", "tape", list(self._tape), patho)
+        await self._emit(state, config.MICROSTRUCTURE_SOURCE, "tape", list(self._tape), patho)
         # niveaux Volume Profile de la VEILLE (source, D-041) : POC/VAH/VAL stables autour du prix.
         prev_poc = round(round((es - 3.0) / 0.25) * 0.25, 2)
-        await self._emit(state, "sierra_chart", "session_prev",
+        await self._emit(state, config.MICROSTRUCTURE_SOURCE, "session_prev",
                          {"poc": prev_poc, "vah": round(prev_poc + 6.0, 2), "val": round(prev_poc - 9.0, 2)}, patho)
 
         vix = max(9.0, self._drift("vix", base["vix"], vol, 0.5))

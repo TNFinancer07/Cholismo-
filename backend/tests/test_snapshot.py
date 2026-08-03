@@ -15,6 +15,7 @@ import json
 import os
 import time
 
+from app import config
 from app.meta import Freshness, MetaField
 from app.schema import (ContextSchema, CvdLevel, CvdState, LiquiditySweep,
                         LiquiditySweepAlert)
@@ -26,7 +27,7 @@ def _wired(now: float) -> ContextSchema:
     s = ContextSchema()
     s.s1_state.order_book = MetaField(
         value={"bids": [[5000.0, 40.0]], "asks": [[5000.5, 30.0]]},
-        last_update_ts=now, source="sierra_chart", freshness=Freshness.FRESH)
+        last_update_ts=now, source=config.MICROSTRUCTURE_SOURCE, freshness=Freshness.FRESH)
     s.s1_state.cvd_by_level = CvdState(
         levels=[CvdLevel(price=5000.0, delta=12.0, buy=20.0, sell=8.0)],
         total_delta=12.0, since_ts=now, reset_reason="NFP — emplois US")

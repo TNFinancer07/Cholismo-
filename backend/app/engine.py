@@ -58,13 +58,13 @@ log = logging.getLogger("cholismo.engine")
 _FAST = (config.FAST_STALE_SECONDS, config.FAST_ABSENT_SECONDS)
 _SLOW = (config.SLOW_STALE_SECONDS, config.SLOW_ABSENT_SECONDS)
 FIELD_SPEC: dict[str, tuple[str, float, float]] = {
-    "svs_score": ("sierra_chart", *_FAST), "cvd": ("sierra_chart", *_FAST),
-    "absorption": ("sierra_chart", *_FAST), "aggressor_ratio": ("sierra_chart", *_FAST),
-    "vpoc": ("sierra_chart", *_FAST), "vah": ("sierra_chart", *_FAST),
-    "val": ("sierra_chart", *_FAST), "lvn": ("sierra_chart", *_FAST),
-    "chop": ("sierra_chart", *_FAST), "order_book": ("sierra_chart", *_FAST),
-    "tape": ("sierra_chart", *_FAST),
-    "session_prev": ("sierra_chart", *_FAST),  # niveaux POC/VAH/VAL de la veille (source, D-041)
+    "svs_score": (config.MICROSTRUCTURE_SOURCE, *_FAST), "cvd": (config.MICROSTRUCTURE_SOURCE, *_FAST),
+    "absorption": (config.MICROSTRUCTURE_SOURCE, *_FAST), "aggressor_ratio": (config.MICROSTRUCTURE_SOURCE, *_FAST),
+    "vpoc": (config.MICROSTRUCTURE_SOURCE, *_FAST), "vah": (config.MICROSTRUCTURE_SOURCE, *_FAST),
+    "val": (config.MICROSTRUCTURE_SOURCE, *_FAST), "lvn": (config.MICROSTRUCTURE_SOURCE, *_FAST),
+    "chop": (config.MICROSTRUCTURE_SOURCE, *_FAST), "order_book": (config.MICROSTRUCTURE_SOURCE, *_FAST),
+    "tape": (config.MICROSTRUCTURE_SOURCE, *_FAST),
+    "session_prev": (config.MICROSTRUCTURE_SOURCE, *_FAST),  # niveaux POC/VAH/VAL de la veille (source, D-041)
     "vix": ("cboe", *_FAST), "vvix": ("cboe", *_FAST),
     "eurusd": ("fx_feed", *_SLOW), "dx": ("fx_feed", *_SLOW), "dxy": ("fx_feed", *_FAST),
     "dxy_alt": ("cme", *_FAST),

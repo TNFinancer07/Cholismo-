@@ -15,6 +15,7 @@ import time
 
 import pytest
 
+from app import config
 from app.datasource.mock import MockDataSource
 from app.engine import TAPE_WINDOW, Engine
 from app.meta import Freshness
@@ -44,7 +45,7 @@ def test_mock_emits_rolling_well_formed_prints():
         state = RedisState()
         try:
             await state.set_scenario({"name": "calme", "force_session": "OVERLAP_NY"})
-            await state.set_source_up("sierra_chart", True)
+            await state.set_source_up(config.MICROSTRUCTURE_SOURCE, True)
             mock = MockDataSource()
             raw = None
             for _ in range(30):
@@ -73,7 +74,7 @@ def test_engine_exposes_tape_most_recent_first_and_ages_it():
         engine = Engine(MockDataSource(), state)
         try:
             await state.set_scenario({"name": "calme", "force_session": "OVERLAP_NY"})
-            await state.set_source_up("sierra_chart", True)
+            await state.set_source_up(config.MICROSTRUCTURE_SOURCE, True)
             t0 = time.time()
             for _ in range(30):
                 await engine.ds.tick_fast(state)
@@ -87,12 +88,12 @@ def test_engine_exposes_tape_most_recent_first_and_ages_it():
             seqs = [p["seq"] for p in tape.value]
             assert seqs == sorted(seqs, reverse=True), "affichage : plus récent en tête"
 
-            await state.set_source_up("sierra_chart", False)
+            await state.set_source_up(config.MICROSTRUCTURE_SOURCE, False)
             await engine._assemble_fast(t0 + 20)     # > FAST_ABSENT_SECONDS
             tape = engine.schema.s1_state.tape
             assert tape.freshness == Freshness.ABSENT and tape.value is None
         finally:
-            await state.set_source_up("sierra_chart", True)
+            await state.set_source_up(config.MICROSTRUCTURE_SOURCE, True)
             await state.close()
     _run(scenario())
 
@@ -109,7 +110,7 @@ def test_malformed_prints_are_dropped_and_empty_tape_is_withheld():
                 {"ts": now, "price": float("nan"), "size": 4, "side": "SELL", "seq": 2},
                 {"ts": now, "price": 5000.0, "size": 0, "side": "BUY", "seq": 3},
                 {"ts": now, "price": 5000.0, "size": 3, "side": "XX", "seq": 4},
-            ], "sierra_chart", ts=now)
+            ], config.MICROSTRUCTURE_SOURCE, ts=now)
             await engine._assemble_fast(now)
             tape = engine.schema.s1_state.tape
             assert tape.freshness == Freshness.FRESH
@@ -119,7 +120,7 @@ def test_malformed_prints_are_dropped_and_empty_tape_is_withheld():
             await state.write_raw("tape", [
                 {"ts": now, "price": -1, "size": 4, "side": "BUY", "seq": 5},
                 {"ts": now, "price": 5000.0, "size": float("inf"), "side": "SELL", "seq": 6},
-            ], "sierra_chart", ts=now)
+            ], config.MICROSTRUCTURE_SOURCE, ts=now)
             await engine._assemble_fast(now)
             tape = engine.schema.s1_state.tape
             assert tape.freshness == Freshness.ABSENT and tape.value is None
@@ -142,7 +143,7 @@ def test_burst_is_bounded_to_window_and_ordered(monkeypatch):
             burst = [{"ts": now, "price": 5000.0 + (s % 8) * 0.25, "size": 1 + s % 5,
                       "side": "BUY" if s % 2 else "SELL", "seq": s} for s in range(1, 5001)]
             _r.Random(1).shuffle(burst)
-            await state.write_raw("tape", burst, "sierra_chart", ts=now)
+            await state.write_raw("tape", burst, config.MICROSTRUCTURE_SOURCE, ts=now)
             await engine._assemble_fast(now)
             tape = engine.schema.s1_state.tape
             assert tape.freshness == Freshness.FRESH
@@ -166,7 +167,7 @@ def test_duplicate_seq_is_deduped_stable_react_keys():
                 {"ts": now, "price": 5000.0, "size": 3, "side": "BUY", "seq": 5},
                 {"ts": now, "price": 5000.5, "size": 7, "side": "SELL", "seq": 5},  # doublon
                 {"ts": now, "price": 5001.0, "size": 2, "side": "BUY", "seq": 6},
-            ], "sierra_chart", ts=now)
+            ], config.MICROSTRUCTURE_SOURCE, ts=now)
             await engine._assemble_fast(now)
             tape = engine.schema.s1_state.tape
             seqs = [p["seq"] for p in tape.value]
@@ -188,7 +189,7 @@ def test_one_structurally_broken_print_does_not_discard_the_window():
                 {"ts": now, "price": "oops", "size": 3, "side": "SELL", "seq": 2},  # ValueError
                 {"size": 3, "side": "BUY", "seq": 3},                                # KeyError price
                 {"ts": now, "price": 5001.0, "size": 2, "side": "SELL", "seq": 4},
-            ], "sierra_chart", ts=now)
+            ], config.MICROSTRUCTURE_SOURCE, ts=now)
             await engine._assemble_fast(now)
             tape = engine.schema.s1_state.tape
             assert tape.freshness == Freshness.FRESH

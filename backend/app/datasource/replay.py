@@ -42,7 +42,7 @@ from .base import MarketDataSource
 # Le tape publié est une fenêtre glissante, comme celui de la source mock : le champ EST la
 # fenêtre, et le moteur order flow lit dedans.
 TAPE_WINDOW = 200
-# Nom de source déclaré dans Redis. Volontairement DISTINCT de `sierra_chart` : un opérateur
+# Nom de source déclaré dans Redis. Volontairement DISTINCT de la source de microstructure live : un opérateur
 # doit pouvoir lire, sans rien ouvrir, que ces prints viennent d'un enregistrement et non du
 # marché. Un replay qui se fait passer pour du direct est le pire état possible de ce terminal.
 SOURCE_NAME = "replay"
