@@ -14,6 +14,7 @@ import { LsrSentimentPanel } from '@/panels/zoneA/LsrSentimentPanel'
 import { YieldDifferentialsPanel } from '@/panels/zoneA/YieldDifferentialsPanel'
 import { StrategiesPanel } from '@/panels/zoneB/StrategiesPanel'
 import { ScenarioPanel } from '@/panels/harness/ScenarioPanel'
+import { ReplayPanel } from '@/panels/harness/ReplayPanel'
 import { S1S2Panel } from '@/panels/zoneB/S1S2Panel'
 import { OrderBookPanel } from '@/panels/zoneB/OrderBookPanel'
 import { TapePanel } from '@/panels/zoneB/TapePanel'
@@ -51,6 +52,7 @@ export const PANEL_REGISTRY: Record<PanelId, PanelDef> = {
   YLD: { id: 'YLD', label: 'Taux & différentiels', component: YieldDifferentialsPanel },
   S1S: { id: 'S1S', label: 'Stratégies exécution Sony', component: StrategiesPanel },
   MOCK: { id: 'MOCK', label: 'Scénarios & pathologies', component: ScenarioPanel },
+  REPLAY: { id: 'REPLAY', label: 'Replay (play/pause/vitesse/seek)', component: ReplayPanel },
   B1: { id: 'B1', label: 'États S1 · S2', component: S1S2Panel },
   OB: { id: 'OB', label: "Carnet d'ordres ES", component: OrderBookPanel },
   TP: { id: 'TP', label: 'Tape · Time & Sales', component: TapePanel },

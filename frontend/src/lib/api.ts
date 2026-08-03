@@ -1,6 +1,8 @@
 /** Client REST — toutes les barrières (Phase 0, C5, fenêtre C3) sont re-vérifiées côté
  *  serveur ; l'UI ne fait que refléter et demander. Aucun endpoint ne passe d'ordre. */
 
+import type { ReplayCommand, ReplayState } from '@/types/replay'
+
 export const API_BASE = '/api'
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -36,6 +38,11 @@ export const api = {
     request<{ present: boolean }>(`/selfcheck/${operator}`),
   ackAudit: (operator: string) =>
     request('/streak/audit-ack', { method: 'POST', body: JSON.stringify({ operator }) }),
+  /** Mode Replay (D-058). Lève si le terminal n'est pas en replay — le backend renvoie 409
+   *  avec le motif, et l'UI le montre plutôt que d'afficher des boutons inertes. */
+  replayState: () => request<ReplayState>('/replay'),
+  replayControl: (cmd: ReplayCommand) =>
+    request<ReplayState>('/replay', { method: 'POST', body: JSON.stringify(cmd) }),
   calibration: () => request<unknown>('/calibration'),
   orchestrator: () => request<unknown>('/orchestrator'),
   scenario: () => request<unknown>('/scenario'),
