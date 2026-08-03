@@ -3596,6 +3596,74 @@ Essai réel : terminal démarré en `REPLAY_FILE=…` ×5, contrôle complet exe
 (restart/pause/speed/seek/play), refus explicites sur les trois commandes incomplètes, et les
 prints rejoués vérifiés jusqu'au canal SSE.
 
+## D-061 · Le tape d'essai fabrique enfin de la microstructure — et dit ce qu'il ne peut pas
+**Constat de départ, jamais formulé jusqu'ici.** Le générateur produisait des prints
+indépendants : un tape statistiquement plausible, mais sans aucun des phénomènes que le Niveau 2
+mesure. **B1, B3 et B4 n'étaient donc exercés que sur des scènes écrites à la main dans leurs
+propres tests.** Rejouer mille ticks de bruit ne les faisait pas réagir — donc ne prouvait rien,
+ni dans un sens ni dans l'autre. Le mock était propre là où ça comptait le plus (CLAUDE §4).
+
+### Sept scènes scriptées (`app/replay/scenes.py`), intercalées dans le bruit
+`sweep` (B4), `wall_refill` / `wall_fail` (B1), `absorption` (B1), `accumulation` (B2),
+`rejection` / `double_bottom` (B3). Chacune rend sa **vérité terrain** — bornes, niveau de mur,
+instant de sweep — écrite dans un sidecar `<tape>.truth.json`, **jamais dans le CSV** : une
+colonne « scène » ferait fuiter la réponse dans la donnée. Aucune pathologie n'est injectée dans
+une scène (une ligne écartée au milieu d'un sweep en ferait un demi-sweep).
+
+**Ce que ça prouve, et ce que ça ne prouve pas.** Une scène scriptée peut INFIRMER : un mur qu'on
+a fait recharger et qui ne produit aucun B1 est un défaut. Elle ne peut pas VALIDER : elle dit que
+le calculateur réagit à ce qu'on a écrit, pas qu'il mesure le marché. Seul un vrai tape le dira.
+Les attentes sont donc qualitatives (signe, ordre de grandeur) — réencoder la valeur exacte du
+calculateur ferait un test qui se vérifie lui-même.
+
+### Trois scènes n'existent que parce que la première version des tests était fausse
+La suite a été éprouvée en **mutant le calculateur** (11 mutations : signes inversés, rapports
+retournés, gardes retirées). Trois ont survécu, et chacune a révélé une scène trop complaisante :
+- **B1 inversé passait.** Un mur qui se recharge intégralement donne ≈ 1 dans les deux sens.
+  → `wall_fail` (rechargement PARTIEL) casse la symétrie.
+- **B2 compté par PRINTS au lieu du volume passait.** Toutes mes scènes étaient unilatérales.
+  → `accumulation` (30 petites ventes contre 5 gros achats) fait diverger les deux lectures.
+- **B3 daté de la PREMIÈRE touche de l'extrême passait.** → `double_bottom`.
+
+Deux mutations survivantes se sont révélées **couvertes ailleurs** (suite du calculateur), et une
+troisième a montré un vrai trou : un sweep hors fenêtre rendait `None` par une autre garde, donc
+retirer le contrôle de fenêtre ne changeait rien d'**observable**. Le motif est désormais asserté
+(`test_B4_sweep_HORS_FENETRE_rend_None_ET_le_DIT`) — la leçon des `providers` : un mauvais motif
+envoie chercher au mauvais endroit.
+
+### `python -m app.replay.portes <fichier>` — et le constat inconfortable
+Compagnon de `inspect` : celui-ci dit « ton fichier est-il lisible ? », celui-là « ce tape
+peut-il faire parler B1-B4 ? ». Sur un export réel (sans vérité terrain), il balaie le fichier à
+la fenêtre RÉELLE du terminal et compte combien de fois chaque porte sait répondre.
+
+**Résultat sur notre propre tape : B2/B3/B4 répondent 100 % du temps, B1 seulement 3 %.** Motif :
+`trou d'observation de 3.33s dans le carnet (> 2s)`. La cause n'est pas le calculateur — c'est
+que **le replay ne publie un carnet que lorsqu'un print tombe**, donc tout creux de séance de plus
+de 2 s devient un trou d'observation, et B1 refuse (à raison, §3) de mesurer une déplétion qu'il
+n'a pas vue. Conséquence à dire franchement : **B1 n'est pas exploitable depuis un tape seul, il
+lui faut un vrai flux L2.** Un tape CSV ne porte pas les mises à jour de carnet entre deux
+trades ; prétendre le contraire inventerait de la donnée.
+
+### Défauts trouvés en maltraitant mon propre code (`/devil`)
+- **Un nom de scène mal orthographié était silencieusement ignoré** — `scenes=("sweeep", …)`
+  produisait un tape sans sweep sans rien dire ; on aurait mesuré B4 dessus et conclu que la
+  porte était cassée. Un défaut inventé de toutes pièces par une faute de frappe. → `ValueError`.
+- **Un `.truth.json` corrompu emportait tout le diagnostic** par une trace de pile, alors que le
+  tape, lui, est intact. → section omise avec le motif, balayage conservé.
+- Tape trop court pour ses scènes → dit dans le bilan, plus silencieux.
+- `_Book` renommé **`TapeBook`** (public) : l'outil de diagnostic et les tests s'en servent, et
+  une deuxième reconstruction du carnet finirait par diverger de celle du terminal.
+
+### Vérif
+**26 tests** (dont 11 mutations du calculateur rejouées à la main) → **1128 passed**, ruff clean,
+mypy strict clean (9 fichiers), 125 vitest, tsc strict vert. Essai manuel : générateur CLI,
+`main_test`, et `portes` exécutés bout à bout sur un tape de 888 ticks.
+
+`app.orderflow.*` et `app.volume_profile` entrent dans le graphe mypy avec `portes.py` ; ils sont
+**exemptés explicitement** dans `pyproject.toml` plutôt qu'annotés au passage — mêler un refactor
+du module de calcul le plus chargé du dépôt à une feature est précisément ce que la Loop 3
+interdit.
+
 ## D-060 · Consommer un export tiers — Bookmap, sans connaître son format
 **Le point de départ est un aveu** : je ne connais pas le format d'export de Bookmap. Inventer
 des noms de colonnes aurait été exactement ce que la doctrine C2 interdit depuis D-057 — un

@@ -23,6 +23,10 @@ strict = true
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
-# Dépendances non typées traversées par les imports — hors périmètre de cette extension.
-module = ["app.config", "app.redis_state"]
+# Dépendances non typées TRAVERSÉES par les imports — hors périmètre de cette extension.
+# `app.orderflow.*` et `app.volume_profile` sont entrés dans le graphe avec `app/replay/portes.py`
+# (D-061) : l'outil de diagnostic appelle `compute_snapshot`. Les annoter au passage mêlerait un
+# refactor à une feature (§13, Loop 3) sur le module de calcul le plus chargé du dépôt. Ils
+# restent donc exemptés ICI, et leur propre suite les couvre (70 tests).
+module = ["app.config", "app.redis_state", "app.orderflow.*", "app.volume_profile"]
 ignore_errors = true

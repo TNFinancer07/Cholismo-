@@ -253,10 +253,15 @@ def test_B4_sans_volume_AVANT_rend_None():
     assert s.post_sweep_aggression_ratio is None
 
 
-def test_B4_sweep_HORS_FENETRE_rend_None():
+def test_B4_sweep_HORS_FENETRE_rend_None_ET_le_DIT():
+    """Le motif compte autant que la valeur : un sweep hors fenêtre tombe aussi dans la garde de
+    durée minimale (durée négative de part et d'autre), qui rend `None` pour une tout autre
+    raison. Sans cette assertion, retirer le contrôle de fenêtre ne changeait rien d'observable
+    et envoyait le lecteur chercher au mauvais endroit (trouvé par mutation, D-061)."""
     s = _snap(prints=[_print(-2, 5000.0, 10, "BUY")],
               sweep={"ts": T0 - config.ORDERFLOW_WINDOW_S - 60})
     assert s.post_sweep_aggression_ratio is None
+    assert any("hors de la fenêtre" in m for m in s.missing), s.missing
 
 
 def test_B4_sweep_sans_horodatage_utilisable_rend_None():

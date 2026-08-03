@@ -26,3 +26,5 @@ dump.rdb
 *.tsbuildinfo
 backend/data/snapshots/
 backend/app/replay/sample_orderbook.csv
+# vérité terrain des scènes — régénérée avec le tape, jamais versionnée (D-061)
+backend/app/replay/*.truth.json

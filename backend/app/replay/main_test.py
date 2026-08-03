@@ -36,6 +36,11 @@ def main(argv: list[str] | None = None) -> int:
           + ("" if args.propre else f" · pathologies semées : {sum(bilan['seme'].values())}"))
     for nom, n in sorted(bilan["seme"].items()):
         print(f"     {n:>3}× {nom}")
+    for scene in bilan["scenes"]:
+        print(f"     scène {scene['porte']} · {scene['nom']}")
+    if bilan["scenes"]:
+        print("     → `python -m app.replay.portes <fichier>` mesure ce que ces scènes "
+              "font dire aux portes B1-B4.")
 
     vus: list[Tick] = []
 

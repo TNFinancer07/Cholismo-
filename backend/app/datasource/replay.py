@@ -92,9 +92,15 @@ class ReplayState:
 
 
 @dataclass
-class _Book:
+class TapeBook:
     """Meilleure limite reconstruite depuis le tape. Un CSV de tape ne porte pas dix niveaux :
-    prétendre le contraire fabriquerait une profondeur que personne n'a observée."""
+    prétendre le contraire fabriquerait une profondeur que personne n'a observée.
+
+    **Publique, et volontairement la seule.** L'outillage de diagnostic (`app.replay.portes`) et
+    les tests s'en servent aussi : une deuxième reconstruction écrite ailleurs finirait par
+    diverger de celle-ci, et on mesurerait alors les portes sur un carnet que le terminal ne voit
+    jamais.
+    """
     bid: Optional[float] = None
     ask: Optional[float] = None
     bid_vol: Optional[float] = None
@@ -136,7 +142,7 @@ class ReplayDataSource(MarketDataSource):
         self._clock = clock
         self._max_ticks = max_ticks
         self._tape: deque[dict[str, Any]] = deque(maxlen=tape_window)
-        self._book = _Book()
+        self._book = TapeBook()
         self._seq = 0
         self._ticks: list[Tick] = []      # indexé en mémoire : `seek` exige l'accès direct
         self._summary: Optional[ReplaySummary] = None
@@ -206,7 +212,7 @@ class ReplayDataSource(MarketDataSource):
                             else self._ticks[-1]["timestamp"])
         self.state.finished = position >= len(self._ticks)
         self._tape.clear()
-        self._book = _Book()
+        self._book = TapeBook()
         self._wall = None
         return self.state
 
