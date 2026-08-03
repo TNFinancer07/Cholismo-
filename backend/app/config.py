@@ -16,6 +16,13 @@ GEX_STALE_SECONDS = float(os.getenv("GEX_STALE_SECONDS", "180"))  # AUTORITÉ �
 # --- Phase 0 / risk thresholds (AUTORITÉ TASKS §2.3 unless noted) ---
 CHOP_CRIT = 61.8          # AUTORITÉ — CHOP >= 61.8 crit
 VIX_CRIT = 30.0           # AUTORITÉ — VIX > 30 crit
+# ARBITRAGE TRANCHÉ (D-062, par le propriétaire de la spec) : ce seuil est un VETO D'EXÉCUTION
+# et reste DÉLIBÉRÉMENT distinct de l'hystérésis D4 (`strategies/youssef.HYSTERESIS`, entrées
+# 18/26/37), qui module le SIZING. Les deux ne répondent pas à la même question, et un VIX à 32
+# est donc un veto Phase 0 tout en n'étant qu'ORANGE au sens D4 — ce n'est pas une incohérence
+# à corriger. Ne PAS aligner ces nombres « pour la cohérence » : le faire relèverait un veto de
+# sécurité au niveau d'un multiplicateur, ou l'inverse. Verrouillé par
+# `tests/test_external_sources.py::test_les_DEUX_systemes_de_seuils_VIX_restent_INDEPENDANTS`.
 RMS_WARN = 3.0            # AUTORITÉ — RMS >= 3 warn
 RMS_CRIT = 5.0            # PLACEHOLDER — crit level, D-005
 STREAK_AUDIT_THRESHOLD = 8  # AUTORITÉ — forced audit at 8 (PRD §C2)

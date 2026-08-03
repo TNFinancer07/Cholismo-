@@ -3623,15 +3623,28 @@ en pure délégation — l'API voulue, une seule source de vérité.
 Tout le pipeline aval fonctionne sans avoir été prévenu, et la couche de fraîcheur fait son
 travail parce que l'horodatage publié est celui de l'**observation**, jamais `now`.
 
-### Le constat gênant, posé plutôt qu'enfoui
+### L'écart entre les deux seuils VIX — ARBITRAGE TRANCHÉ
 Le dépôt porte **deux systèmes de seuils VIX qui ne coïncident pas** : `VIX_CRIT = 30`
 (AUTORITÉ, veto dur) et l'hystérésis D4 (ORANGE 26 → RED 37). **Un VIX à 32 est un veto Phase 0
-mais seulement ORANGE au sens D4.** Ce n'est pas nécessairement une contradiction — un veto
-d'exécution et un multiplicateur de sizing ne répondent pas à la même question — mais personne ne
-l'avait écrit. `get_vix_regime()` rend donc `tier` ET `veto` **séparément** et n'invente pas un
-troisième jeu de seuils qui les aurait « conciliés » en douce. Un test par AST interdit tout
-littéral numérique de comparaison dans le module. **Arbitrage à trancher par le propriétaire de
-la spec.**
+mais seulement ORANGE au sens D4.** Personne ne l'avait écrit ; je l'ai soulevé sans le résoudre.
+
+**Décision du propriétaire de la spec : les deux restent SÉPARÉS.** `VIX_CRIT` est un veto
+d'**exécution** (« a-t-on le droit d'entrer ? ») ; l'hystérésis D4 module le **sizing** (« de
+combien réduit-on la taille ? »). Deux questions distinctes, deux seuils distincts — l'écart
+n'est pas une incohérence à corriger, c'est la conception.
+
+Conséquence pratique : **ne jamais aligner ces nombres « pour la cohérence »**, ce qui
+rabaisserait un veto de sécurité au rang d'un multiplicateur de taille (ou l'inverse). Trois
+verrous plutôt qu'un commentaire :
+1. `test_les_DEUX_systemes_de_seuils_VIX_restent_INDEPENDANTS` — échoue si `VIX_CRIT` prend la
+   valeur d'un seuil D4, ou si la bande « veto sans RED » disparaît. **Vérifié en mutant
+   `VIX_CRIT` à 26 puis à 37 : le test tombe dans les deux cas.**
+2. `test_les_deux_faits_restent_DEUX_champs_jamais_un_mot_unique` — interdit qu'un `HIGH_VOL`
+   unique réapparaisse et efface l'information que les deux couches ne s'accordent pas.
+3. Un test par AST interdit tout littéral numérique de comparaison dans `app/external/vix.py`.
+
+Un commentaire à `config.VIX_CRIT` pointe vers ces verrous — c'est là qu'un futur lecteur
+regardera avant d'être tenté d'« harmoniser ».
 
 ### La promotion Tier-1 — un fail-OPEN corrigé
 `build_macro_calendar` écarte tout événement dont l'`impact` n'est pas lisible. Correct pour du
@@ -3684,9 +3697,9 @@ replay** (où le module est seul à écrire ces champs) : NFP à +60 s → `MACR
 
 ### Reste ouvert
 Le format Finnhub à confirmer (`scripts/validation_externe.py` sur une machine réseau), puis
-`verified=True`. L'écart `VIX_CRIT` / hystérésis D4 à arbitrer. `EXTERNAL_DATA=1` avec la source
-mock provoque un conflit d'écriture sur `vix` — signalé par un WARNING au démarrage, non résolu :
-le mode visé est replay/live.
+`verified=True`. `EXTERNAL_DATA=1` avec la source mock provoque un conflit d'écriture sur `vix` —
+signalé par un WARNING au démarrage, non résolu : le mode visé est replay/live.
+(L'écart `VIX_CRIT` / hystérésis D4 a été **tranché** — voir ci-dessus, il n'est plus ouvert.)
 
 ## D-061 · Le tape d'essai fabrique enfin de la microstructure — et dit ce qu'il ne peut pas
 **Constat de départ, jamais formulé jusqu'ici.** Le générateur produisait des prints

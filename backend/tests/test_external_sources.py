@@ -443,13 +443,41 @@ def test_l_HYSTERESIS_a_bien_des_zones_mortes():
 
 
 def test_un_VIX_a_32_est_un_VETO_mais_seulement_ORANGE():
-    """Le constat gênant, posé plutôt qu'enfoui : `VIX_CRIT = 30` (AUTORITÉ) et l'hystérésis D4
-    (ORANGE 26 → RED 37) ne coïncident pas. Les fusionner en un mot perdrait justement
-    l'information qu'ils ne s'accordent pas."""
+    """**Comportement VOULU, tranché par le propriétaire de la spec (D-062).** `VIX_CRIT = 30`
+    est un veto d'EXÉCUTION ; l'hystérésis D4 (ORANGE 26 → RED 37) module le SIZING. Les deux
+    ne répondent pas à la même question, donc ils ne coïncident pas — et c'est très bien."""
     r = get_vix_regime(32.0, previous_tier="YELLOW")
-    assert r.veto is True                                  # > VIX_CRIT
-    assert r.tier == "ORANGE"                              # pas encore RED au sens D4
+    assert r.veto is True                                  # > VIX_CRIT : interdiction d'entrer
+    assert r.tier == "ORANGE"                              # pas encore RED au sens du sizing
     assert r.tier != "RED"
+
+
+def test_les_DEUX_systemes_de_seuils_VIX_restent_INDEPENDANTS():
+    """Verrou de la décision. Ce test échoue si quelqu'un « harmonise » les nombres pour faire
+    disparaître l'écart : aligner `VIX_CRIT` sur un seuil D4 relèverait un veto de SÉCURITÉ au
+    rang d'un multiplicateur de taille, ou rabaisserait l'inverse. L'écart est la décision.
+    """
+    from app.strategies.youssef import HYSTERESIS
+
+    seuils_d4 = {b for paire in HYSTERESIS.values() for b in paire.values()}
+    assert config.VIX_CRIT not in seuils_d4, (
+        f"VIX_CRIT={config.VIX_CRIT} a été aligné sur un seuil D4 — arbitrage D-062 rompu")
+    # La BANDE d'écart doit continuer d'exister : au-dessus du veto, sous l'entrée RED.
+    assert config.VIX_CRIT < HYSTERESIS["orange_red"]["entry"]
+    bande = [v for v in (30.5, 32.0, 35.0)
+             if get_vix_regime(v, previous_tier="YELLOW").veto
+             and get_vix_regime(v, previous_tier="YELLOW").tier != "RED"]
+    assert bande == [30.5, 32.0, 35.0], "la bande veto-sans-RED a disparu"
+
+
+def test_les_deux_faits_restent_DEUX_champs_jamais_un_mot_unique():
+    """Un « HIGH_VOL » unique perdrait exactement l'information que les deux couches ne
+    s'accordent pas — c'est-à-dire ce que la décision D-062 demande de préserver."""
+    r = get_vix_regime(32.0, previous_tier="YELLOW")
+    assert isinstance(r.tier, str) and isinstance(r.veto, bool)
+    for fusionne in ("level", "regime", "state", "severity"):
+        assert not hasattr(r, fusionne), f"champ fusionné réapparu : {fusionne}"
+    assert {"tier", "veto"} <= set(r.as_dict())
 
 
 def test_le_veto_suit_EXACTEMENT_le_seuil_AUTORITE():

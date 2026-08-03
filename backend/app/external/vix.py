@@ -5,17 +5,23 @@
 n'existait pas, c'est une **source** : le champ `vix` n'était rempli que par le mock, et en
 replay il vieillissait vers ABSENT. Ce module est la source manquante.
 
-### Le constat gênant qu'il faut poser d'emblée
-Le dépôt porte **deux systèmes de seuils VIX qui ne coïncident pas** :
-- `VIX_CRIT = 30.0` — **AUTORITÉ**, veto dur : Phase 0, orchestrateur, scoring, live_mode ;
-- l'hystérésis D4 — GREEN→YELLOW 18, YELLOW→ORANGE 26, ORANGE→RED 37 (sorties 14 / 22 / 33).
+### Deux systèmes de seuils, séparés PAR DÉCISION (arbitrage tranché, D-062)
+Le dépôt porte deux jeux de seuils VIX qui ne coïncident pas :
+- `VIX_CRIT = 30.0` — **AUTORITÉ**, **veto d'EXÉCUTION** : Phase 0, orchestrateur, scoring,
+  live_mode ;
+- l'hystérésis D4 — GREEN→YELLOW 18, YELLOW→ORANGE 26, ORANGE→RED 37 (sorties 14 / 22 / 33),
+  qui module le **SIZING**.
 
-Un VIX à 32 est donc **un veto Phase 0 mais seulement ORANGE** au sens D4. Ce n'est pas
-forcément une contradiction (un veto d'exécution et un multiplicateur de sizing ne répondent pas
-à la même question), mais c'est un écart réel que personne n'avait écrit. `get_vix_regime()`
-rend donc **les deux faits séparément** — `tier` ET `veto` — et n'invente surtout pas un
-troisième jeu de seuils qui aurait « concilié » les deux en douce. Arbitrage à trancher par le
-propriétaire de la spec ; en attendant, les deux couches gardent chacune la sienne, inchangée.
+Un VIX à 32 est donc **un veto Phase 0 tout en n'étant qu'ORANGE** au sens D4. **Le propriétaire
+de la spec a tranché : les deux restent séparés**, parce qu'ils ne répondent pas à la même
+question — « a-t-on le droit d'entrer ? » n'est pas « de combien réduit-on la taille ? ». Ce
+n'est donc PAS une incohérence à corriger, et aligner ces nombres « pour la cohérence »
+relèverait un veto de sécurité au niveau d'un multiplicateur (ou l'inverse).
+
+`get_vix_regime()` rend en conséquence **les deux faits séparément** — `tier` ET `veto` — et
+n'invente aucun troisième jeu de seuils qui les aurait conciliés en douce. Deux tests
+verrouillent la décision : l'un interdit tout littéral de comparaison dans ce module (par AST),
+l'autre interdit que l'un des deux systèmes devienne dérivé de l'autre.
 
 ### Trois sources, par ordre d'honnêteté décroissante
 1. `FredVix` — VIXCLS chez FRED, ligne **C1** déjà au registre (D-057), client déjà écrit. Sa
