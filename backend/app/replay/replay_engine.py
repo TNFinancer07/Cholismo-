@@ -36,7 +36,19 @@ import csv
 import math
 import time
 from dataclasses import dataclass, field
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Iterator, Optional, TypedDict
+
+
+class Tick(TypedDict):
+    """Forme d'un tick rejoué. `bid_vol`/`ask_vol` sont `Optional` **par le type** : une
+    profondeur absente est INCONNUE, jamais 0 (D-055) — et le vérificateur l'impose désormais
+    à tous les consommateurs, pas seulement les tests."""
+    timestamp: float
+    price: float
+    volume: int
+    side: str
+    bid_vol: Optional[float]
+    ask_vol: Optional[float]
 
 # Un tape de session tient dans quelques centaines de milliers de prints. Au-delà, ce n'est plus
 # un enregistrement de séance : c'est un fichier qu'on n'a pas voulu lire, et le charger
@@ -103,7 +115,7 @@ class ReplayEngine:
     """Rejoue un CSV de ticks vers un callback. Un tick émis est un tick VALIDE : tout ce qui
     ne l'est pas est écarté et compté, jamais deviné."""
 
-    def __init__(self, filepath: str, on_tick_callback: Callable[[dict], Any]):
+    def __init__(self, filepath: str, on_tick_callback: Callable[[Tick], Any]) -> None:
         self.filepath = filepath
         self.on_tick_callback = on_tick_callback
         self._stop = False
@@ -111,6 +123,44 @@ class ReplayEngine:
     def stop(self) -> None:
         """Demande l'arrêt : le replay s'interrompt entre deux ticks, jamais au milieu d'un."""
         self._stop = True
+
+    def iter_ticks(self, *,
+                   max_ticks: int = MAX_TICKS) -> Iterator[tuple[Tick, ReplaySummary]]:
+        """Itérateur PUR de ticks validés — aucune cadence, aucun `sleep`.
+
+        C'est cette forme qu'utilise `ReplayDataSource` : le terminal a déjà sa boucle et son
+        horloge, et laisser le replay dormir gèlerait la boucle d'événements (§7). Deux horloges
+        qui se battent, c'est un replay qui n'a plus rien à voir avec le fichier.
+
+        Rend `(tick, summary)` : le bilan se lit AU FIL de l'eau, sinon un consommateur qui
+        s'arrête avant la fin n'apprend jamais ce qui a été écarté.
+        """
+        summary = ReplaySummary()
+        precedent: Optional[float] = None
+        with open(self.filepath, mode="r", newline="", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            if reader.fieldnames is None:
+                return
+            manquantes = {"timestamp", "price", "volume", "side"} - set(reader.fieldnames)
+            if manquantes:
+                raise ValueError(
+                    f"colonnes obligatoires absentes du CSV : {', '.join(sorted(manquantes))} — "
+                    "un replay amputé de son prix ou de son horodatage n'est pas un replay.")
+            for row in reader:
+                if summary.emitted >= max_ticks:
+                    summary.stopped_early = True
+                    summary._note("plafond de ticks atteint")
+                    return
+                tick, motif = self._parse(row, precedent)
+                if tick is None:
+                    summary._note(motif or "ligne illisible")
+                    continue
+                precedent = tick["timestamp"]
+                if summary.first_ts is None:
+                    summary.first_ts = precedent
+                summary.last_ts = precedent
+                summary.emitted += 1
+                yield tick, summary
 
     def start(self, speed_delay: float = 0.0, *, speed: Optional[float] = None,
               max_ticks: int = MAX_TICKS) -> ReplaySummary:
@@ -125,45 +175,26 @@ class ReplayEngine:
         summary = ReplaySummary()
         self._stop = False
         precedent: Optional[float] = None
-        # `newline=""` est exigé par le module csv (sinon un champ multiligne casse le parsing) ;
-        # l'encodage est explicite, sinon il dépend de la machine qui lit — un CSV écrit sous
-        # Linux et rejoué sous Windows n'aurait pas le même sens.
-        with open(self.filepath, mode="r", newline="", encoding="utf-8") as f:
-            reader = csv.DictReader(f)
-            if reader.fieldnames is None:
-                return summary                              # fichier vide : rien à rejouer
-            manquantes = {"timestamp", "price", "volume", "side"} - set(reader.fieldnames)
-            if manquantes:
-                raise ValueError(
-                    f"colonnes obligatoires absentes du CSV : {', '.join(sorted(manquantes))} — "
-                    "un replay amputé de son prix ou de son horodatage n'est pas un replay.")
-            for row in reader:
-                if self._stop:
-                    summary.stopped_early = True
-                    break
-                if summary.emitted >= max_ticks:
-                    summary.stopped_early = True
-                    summary._note("plafond de ticks atteint")
-                    break
-                tick, motif = self._parse(row, precedent)
-                if tick is None:
-                    summary._note(motif or "ligne illisible")
-                    continue
-                self._cadence(tick["timestamp"], precedent, speed_delay, speed)
-                precedent = tick["timestamp"]
-                summary.first_ts = summary.first_ts if summary.first_ts is not None \
-                    else tick["timestamp"]
-                summary.last_ts = tick["timestamp"]
-                summary.emitted += 1
-                # L'exception du CALLBACK n'est pas rattrapée : c'est un défaut du
-                # consommateur, pas une ligne pourrie du fichier. L'avaler laisserait un bug
-                # applicatif passer pour une donnée manquante.
-                self.on_tick_callback(tick)
+        # UNE seule logique de parsing (`iter_ticks`), deux façons de la cadencer.
+        for tick, summary in self.iter_ticks(max_ticks=max_ticks):
+            self._cadence(tick["timestamp"], precedent, speed_delay, speed)
+            precedent = tick["timestamp"]
+            # L'exception du CALLBACK n'est pas rattrapée : c'est un défaut du consommateur,
+            # pas une ligne pourrie du fichier. L'avaler laisserait un bug applicatif passer
+            # pour une donnée manquante.
+            self.on_tick_callback(tick)
+            # Le test d'arrêt est APRÈS la livraison, pas avant : le tester en tête ferait
+            # avancer le générateur d'un cran de plus, et le bilan compterait un tick que le
+            # consommateur n'a jamais reçu.
+            if self._stop:
+                summary.stopped_early = True
+                break
         return summary
 
     # -- internes --
 
-    def _parse(self, row: dict, precedent: Optional[float]) -> tuple[Optional[dict], str]:
+    def _parse(self, row: dict[str, Any],
+               precedent: Optional[float]) -> tuple[Optional[Tick], str]:
         ts = _timestamp(row.get("timestamp"))
         if ts is None:
             return None, "horodatage illisible"
@@ -180,7 +211,7 @@ class ReplayEngine:
         side = str(row.get("side", "")).strip().upper()
         if side not in SIDES:
             return None, f"côté inconnu (attendu {'/'.join(SIDES)})"
-        return {
+        tick: Tick = {
             "timestamp": ts,
             "price": price,
             "volume": int(volume),
@@ -188,7 +219,8 @@ class ReplayEngine:
             # `None` et non `0.0` : une profondeur absente est INCONNUE, pas vide (D-055).
             "bid_vol": _float(row.get("bid_vol")),
             "ask_vol": _float(row.get("ask_vol")),
-        }, ""
+        }
+        return tick, ""
 
     @staticmethod
     def _cadence(ts: float, precedent: Optional[float], speed_delay: float,

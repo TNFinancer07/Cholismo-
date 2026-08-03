@@ -14,6 +14,7 @@ from .account_provider import MockAccountProvider, NT8FileAccountProvider
 from .ai.tasks import AITasks
 from .api import router
 from .datasource.mock import MockDataSource
+from .datasource.replay import ReplayDataSource
 from .macro_news import MacroNewsProvider
 from .risk_sizer import APEX_EOD_50K, apex_eod_account
 from .engine import Engine
@@ -46,7 +47,16 @@ async def lifespan(app: FastAPI):
     # la protection de facto reste le couplage news du détecteur D-028 + le blackout humain.
     app.state.news_provider = (MacroNewsProvider(config.MACRO_NEWS_FEED_URL)
                                if config.MACRO_NEWS_FEED_URL else None)
-    app.state.engine = Engine(MockDataSource(), app.state.redis,
+    # Le mode replay se choisit au démarrage, par la couture unique (§4) : le moteur ne sait
+    # pas laquelle des trois sources est branchée. `REPLAY_FILE` absent = source mock.
+    if config.REPLAY_FILE:
+        app.state.datasource = ReplayDataSource(config.REPLAY_FILE, speed=config.REPLAY_SPEED,
+                                                autoplay=config.REPLAY_AUTOPLAY)
+        log.warning("MODE REPLAY : %s — les prints sont REJOUÉS, pas du direct (source=replay)",
+                    config.REPLAY_FILE)
+    else:
+        app.state.datasource = MockDataSource()
+    app.state.engine = Engine(app.state.datasource, app.state.redis,
                               account_provider=app.state.account_provider,
                               news_provider=app.state.news_provider)
     if isinstance(app.state.account_provider, NT8FileAccountProvider):

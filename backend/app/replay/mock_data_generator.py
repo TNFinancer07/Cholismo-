@@ -30,6 +30,7 @@ import argparse
 import csv
 import random
 from pathlib import Path
+from typing import Any
 
 COLONNES = ["timestamp", "price", "volume", "side", "bid_vol", "ask_vol"]
 DEFAUT = Path(__file__).with_name("sample_orderbook.csv")
@@ -37,11 +38,12 @@ DEBUT_TS = 1_785_600_000.0          # epoch fixe : aucune horloge lue, le fichie
 
 
 def generer(chemin: Path = DEFAUT, n: int = 500, *, propre: bool = False,
-            graine: int = 42, prix_initial: float = 5000.0, tick: float = 0.25) -> dict:
+            graine: int = 42, prix_initial: float = 5000.0,
+            tick: float = 0.25) -> dict[str, Any]:
     """Écrit le CSV et rend le compte de ce qui a été semé, pathologie par pathologie."""
     rng = random.Random(graine)
     seme: dict[str, int] = {}
-    lignes: list[dict] = []
+    lignes: list[dict[str, str]] = []
     ts, prix = DEBUT_TS, prix_initial
 
     for i in range(n):

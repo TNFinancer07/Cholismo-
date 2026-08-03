@@ -4,6 +4,6 @@
 fabrique un fichier d'essai qui, conformément à CLAUDE §4, injecte les PATHOLOGIES réelles —
 un mock trop propre est un piège.
 """
-from .replay_engine import MAX_TICKS, SIDES, ReplayEngine, ReplaySummary
+from .replay_engine import MAX_TICKS, SIDES, ReplayEngine, ReplaySummary, Tick
 
-__all__ = ["ReplayEngine", "ReplaySummary", "MAX_TICKS", "SIDES"]
+__all__ = ["ReplayEngine", "ReplaySummary", "Tick", "MAX_TICKS", "SIDES"]

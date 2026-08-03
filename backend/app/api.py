@@ -17,6 +17,7 @@ from sse_starlette.sse import EventSourceResponse
 from . import config, journal, live_mode, projections, recap, settings
 from .datasource import scenarios
 from .datasource.mock import SOURCES
+from .datasource.replay import ReplayDataSource
 from .event_store import get_store
 from .orchestrator import orchestrator_payload
 from .recon import parse_ninjatrader_csv, reconcile
@@ -133,6 +134,62 @@ class ScenarioBody(BaseModel):
     sliders: Optional[dict[str, float]] = None
     simulated_streak: Optional[int] = None
     force_session: Optional[str] = "OVERLAP_NY"  # null => real clock (D-020)
+
+
+# =============================================================================================
+# Contrôle du mode Replay (Étape 2) — n'existe QUE si une ReplayDataSource est branchée.
+# =============================================================================================
+
+
+class ReplayControlBody(BaseModel):
+    """Une commande à la fois, explicitement nommée. Un endpoint « set » générique laisserait
+    passer `speed=0`, qui est une pause qui ne dit pas son nom."""
+    action: str                                  # play · pause · restart · speed · seek
+    speed: Optional[float] = None
+    position: Optional[int] = None
+    ts: Optional[float] = None
+    fraction: Optional[float] = None
+
+
+def _replay_source(request: Request):
+    """La source de replay, ou un 409 qui DIT pourquoi. Renvoyer un 404 ferait croire à une
+    route absente alors que c'est le terminal qui n'est pas en mode replay."""
+    source = getattr(request.app.state, "datasource", None)
+    if not isinstance(source, ReplayDataSource):
+        raise HTTPException(
+            409, "le terminal n'est pas en mode replay — démarrer avec REPLAY_FILE=<tape.csv> "
+                 "pour brancher une ReplayDataSource à la place de la source mock.")
+    return source
+
+
+@router.get("/replay")
+async def get_replay(request: Request) -> dict[str, Any]:
+    return _replay_source(request).state.as_dict()
+
+
+@router.post("/replay")
+async def control_replay(body: ReplayControlBody, request: Request) -> dict[str, Any]:
+    source = _replay_source(request)
+    action = (body.action or "").strip().lower()
+    if action == "play":
+        source.play()
+    elif action == "pause":
+        source.pause()
+    elif action == "restart":
+        source.restart()
+    elif action == "speed":
+        if body.speed is None:
+            raise HTTPException(400, "action « speed » sans valeur : préciser `speed`.")
+        source.set_speed(body.speed)
+    elif action == "seek":
+        if body.position is None and body.ts is None and body.fraction is None:
+            raise HTTPException(400, "action « seek » sans cible : préciser `position`, `ts` "
+                                     "ou `fraction`.")
+        source.seek(position=body.position, ts=body.ts, fraction=body.fraction)
+    else:
+        raise HTTPException(400, f"action inconnue : {body.action!r} — attendu play, pause, "
+                                 "restart, speed ou seek.")
+    return source.state.as_dict()
 
 
 @router.get("/scenario")

@@ -18,7 +18,7 @@ import argparse
 from pathlib import Path
 
 from .mock_data_generator import DEFAUT, generer
-from .replay_engine import ReplayEngine
+from .replay_engine import ReplayEngine, Tick
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -37,14 +37,17 @@ def main(argv: list[str] | None = None) -> int:
     for nom, n in sorted(bilan["seme"].items()):
         print(f"     {n:>3}× {nom}")
 
-    vus: list[dict] = []
+    vus: list[Tick] = []
 
-    def on_tick(tick: dict) -> None:
+    def on_tick(tick: Tick) -> None:
         vus.append(tick)
         if len(vus) <= args.afficher:
-            profondeur = " ".join(
-                f"{cote}={'inconnue' if tick[cle] is None else f'{tick[cle]:.1f}'}"
-                for cote, cle in (("bid", "bid_vol"), ("ask", "ask_vol")))
+            # Accès par clé LITTÉRALE : le `TypedDict` refuse l'indexation dynamique, et il a
+            # raison — c'est ce qui garantit que `bid_vol` est bien Optional partout.
+            def profond(valeur: float | None) -> str:
+                return "inconnue" if valeur is None else f"{valeur:.1f}"
+
+            profondeur = f"bid={profond(tick['bid_vol'])} ask={profond(tick['ask_vol'])}"
             print(f"     {len(vus):>3}  t={tick['timestamp']:.3f}  {tick['side']:<4} "
                   f"{tick['volume']:>3} @ {tick['price']:>8.2f}   {profondeur}")
 

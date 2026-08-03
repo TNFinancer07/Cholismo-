@@ -3531,6 +3531,71 @@ format — précisément ce qu'un mock ne peut pas révéler.
 absence de série, y compris les pannes réseau — la confusion même que ce paquet passe son temps
 à défaire. Corrigée avant commit.
 
+## D-058 · ReplayDataSource — le replay branché sur la couture du terminal
+**Trois décisions de conception, chacune tranchée contre une facilité tentante.**
+
+### 1. Le sens du flux : le terminal reste le seul à cadencer
+`MarketDataSource` est TIRÉ (le moteur appelle `tick_fast`), `ReplayEngine.start()` POUSSE avec
+ses propres `sleep`. Les brancher tels quels mettrait **deux horloges en concurrence** et
+gèlerait la boucle d'événements (§7). L'itérateur PUR (`iter_ticks`) a donc été extrait du
+moteur — même parsing, zéro cadence — et la source avance une **horloge virtuelle** du temps
+réel écoulé × vitesse. Un test le verrouille en inspectant l'AST : ni `sleep` ni `start` dans le
+module. Le refactor d'extraction a changé un comportement observable au premier essai (le
+générateur avançait le compteur avant le test d'arrêt, `emitted` valait 6 au lieu de 5) — le
+test `stop` l'a attrapé, le test d'arrêt est passé APRÈS la livraison.
+
+### 2. Un replay ne publie que ce qu'un tape contient
+Un tape porte des prints et, quand le fichier les donne, une profondeur au meilleur limite. Il
+ne contient **ni VIX, ni GEX, ni score SVS, ni matrice Bridgewater**. Ces champs ne sont donc
+pas écrits : ils vieillissent visiblement vers STALE puis ABSENT, exactement comme une source
+coupée. Fabriquer un SVS depuis un tape rejoué aurait été le chiffre inventé qui a l'air d'une
+mesure (§3). **Un replay dit ce qu'il sait et se tait sur le reste** — et le canal LENT n'écrit
+rien du tout.
+
+### 3. Trois choix qui protègent l'opérateur
+- **La source s'ANNONCE** : nom `replay` (et non `sierra_chart`), drapeau `REPLAY` sur chaque
+  écriture, avertissement au démarrage. Un replay qui se fait passer pour du direct est le pire
+  état possible de ce terminal. Vérifié bout à bout jusqu'au SSE : `freshness FRESH · source
+  replay · flags ['REPLAY']`.
+- **Horodatages REBASÉS sur maintenant**, écarts du fichier préservés. Publier les horodatages
+  bruts d'une séance ancienne ferait tout juger périmé — le terminal afficherait ABSENT partout.
+  Le décalage appliqué est exposé dans l'état, jamais tu.
+- **Profondeur inconnue ≠ carnet vide** (D-055) : si `bid_vol`/`ask_vol` manquent, **aucun**
+  `order_book` n'est publié. Un carnet à zéro annoncerait une absence de liquidité jamais
+  observée. Le `TypedDict Tick` rend ces deux champs `Optional` **par le type**, donc le
+  vérificateur l'impose à tous les consommateurs, pas seulement aux tests.
+
+### Contrôle — et ce qu'il refuse
+`GET/POST /replay` : play · pause · restart · speed · seek (position / ts / fraction).
+- `speed=0` est **borné à 0.01**, pas accepté : ce serait une pause qui ne dit pas son nom, et
+  l'UI afficherait « LECTURE » sur un flux arrêté.
+- Le temps passé **en pause n'est pas rattrapé** : reprendre après dix minutes déverserait dix
+  minutes de tape d'un coup.
+- `seek` **remet le tape et le carnet à zéro** : les garder ferait cohabiter des prints des deux
+  côtés du saut, et toute mesure de fenêtre (B1/B4) porterait sur un temps qui n'a jamais existé.
+- Hors mode replay, les routes rendent **409 avec le motif**, pas 404 : un 404 ferait croire à
+  une route absente alors que c'est le terminal qui n'est pas en replay.
+
+### Typage strict — outillé, pas affirmé
+`mypy --strict` introduit et **câblé dans `pyproject.toml` sur les modules concernés seulement**.
+L'activer partout d'un coup produirait un bruit qu'on apprendrait à ignorer, ce qui est pire que
+pas de vérificateur du tout. Il a trouvé **3 défauts réels dans le code neuf** (`dict` nus) que
+la relecture n'avait pas vus. Résultat : `Success: no issues found in 5 source files`. Cinq
+erreurs pré-existantes subsistent dans `config.py`/`redis_state.py` — hors périmètre, neutralisées
+par un override explicite plutôt que masquées.
+
+### Incident d'environnement (sans perte)
+Le conteneur a été recyclé en cours de tâche : l'arbre local est revenu à `ebe5b9c` et le `.venv`
+avait disparu. **Le distant portait `e62c26d`** — les dix commits de D-057 et l'Étape 1 étaient
+intacts. Réaligné par `fetch` + `reset --hard` sur le distant, venv reconstruit ; rien n'a été
+reconstruit à la main. C'est l'argument du « pousser tôt » qui a payé.
+
+### Vérif
+**44 tests** (18 moteur + 26 source) → **1073 passed**, ruff clean, mypy strict clean.
+Essai réel : terminal démarré en `REPLAY_FILE=…` ×5, contrôle complet exercé par HTTP
+(restart/pause/speed/seek/play), refus explicites sur les trois commandes incomplètes, et les
+prints rejoués vérifiés jusqu'au canal SSE.
+
 ### Reste ouvert (sans blocage)
 Six lignes de catalogue à relever (3 clés SDMX en une session, la clé du Bund€i qui débloque
 aussi `rdiff`), quatre connecteurs sur sept n'ont pas encore leur client d'interrogation

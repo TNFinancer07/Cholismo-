@@ -285,3 +285,10 @@ ORDERFLOW_MAX_BOOK_GAP_S = float(os.getenv("ORDERFLOW_MAX_BOOK_GAP_S", "2.0"))
 # Vide par défaut = aucune requête FRED n'est construite (fail-closed : on ne part pas chercher
 # une série qui reviendra en erreur d'authentification et se lirait comme une panne de source).
 FRED_API_KEY = os.getenv("FRED_API_KEY", "")
+
+# --- Mode Replay local (Étape 2) ---
+# Chemin d'un tape CSV. Vide = source mock. Renseigné, le terminal rejoue l'enregistrement à la
+# place du marché — et le dit : source `replay`, drapeau `REPLAY` sur chaque écriture.
+REPLAY_FILE = os.getenv("REPLAY_FILE", "")
+REPLAY_SPEED = float(os.getenv("REPLAY_SPEED", "1.0"))
+REPLAY_AUTOPLAY = os.getenv("REPLAY_AUTOPLAY", "1") not in ("0", "false", "False")
