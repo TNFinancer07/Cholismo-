@@ -254,6 +254,12 @@ def evaluate_lsr(i: LsrInputs) -> Optional[dict]:
         return None
     if not is_long and flip > 1.0 - t.b2_tape_flip_threshold:
         return None
+    # -- F3-ATR : PORTÉE (`lsr_frontiers.f3_atr_blocked`) mais PAS CÂBLÉE ICI — voir D-071.
+    # Mesuré, pas supposé : le tampon de prints du footprint est borné à `FOOTPRINT_MAX_PRINTS`
+    # (≈ 80 s de tape à la cadence du mock), et un ATR-14 sur bougies de 60 s exige 15 bougies,
+    # soit ~14 minutes d'historique. Sur 400 ticks de démo : 1 bougie produite, 0 ATR calculable,
+    # donc 100 % des snapshots bloqués. La brancher rendrait le moteur DÉFINITIVEMENT muet.
+    # Ce qui manque n'est pas la règle, c'est une SOURCE d'ATR — tranche séparée.
     # -- F4-like : fenêtre de liquidité (rend le spread, dont A3 a besoin) --
     spread_ticks = _f4_liquidity(i.book, t, tick)
     if spread_ticks is None:

@@ -92,17 +92,29 @@ def test_pertes_successives_la_taille_decroit_jusqu_au_blocage_f8():
                           tick_value=MES_TICK_VALUE)
         statuses.append(r.status)
         sizes.append(r.contracts if r.contracts is not None else 0)
-    # 50000→buffer 1000→20 ; 49600→600→12 ; 49300→300→6 ; 49100→100→2 ;
-    # 49020→20→0 (F8) ; 49001→1→0 (F8) ; 48990→buffer<0 (F8)
-    assert sizes == [20, 12, 6, 2, 0, 0, 0]
-    assert statuses == ["APPROVED"] * 4 + ["REJECTED"] * 3
+    # 50000→frontière 1000→20 ; 49600→600→12 ; 49300→300→6 ;
+    # 49100→perte 900 = 90 % de la frontière du jour → **F2 coupe la séance** (D-071) ;
+    # 49020, 49001, 48990 → idem, la journée est finie.
+    # AVANT F2, la 4e ligne rendait encore 2 contrats : on continuait à trader avec 10 % de marge.
+    # C'est exactement ce que le coupe-circuit existe pour empêcher.
+    assert sizes == [20, 12, 6, 0, 0, 0, 0]
+    assert statuses == ["APPROVED"] * 3 + ["REJECTED"] * 4
     assert all(a >= b for a, b in zip(sizes, sizes[1:]))    # décroissance monotone
 
 
 def test_f8_taille_zero_rejette_insufficient_buffer():
+    """98 % de la frontière du jour consommée : c'est F2 qui parle en premier, et son motif est
+    PLUS précis qu'« INSUFFICIENT_BUFFER ». Le buffer n'est pas « un peu juste », la séance est
+    finie — deux situations qui n'appellent pas le même geste."""
     r = size_position(_apex(equity=49_020.0), stop_distance_ticks=8, tick_value=MES_TICK_VALUE)
-    assert r.status == "REJECTED" and r.reason == "INSUFFICIENT_BUFFER"
+    assert r.status == "REJECTED" and r.reason == "F2_DAILY_CIRCUIT_BREAKER"
     assert r.contracts is None                              # jamais un 0 déguisé en taille
+
+    # INSUFFICIENT_BUFFER reste le motif quand la frontière est encore SAINE mais que le stop
+    # est trop large pour un seul contrat — 50 % consommés, 100 $ de risque, 250 $/contrat.
+    maigre = size_position(_apex(equity=49_500.0), stop_distance_ticks=200,
+                           tick_value=MES_TICK_VALUE)
+    assert maigre.status == "REJECTED" and maigre.reason == "INSUFFICIENT_BUFFER"
 
 
 def test_f8_buffer_nul_ou_negatif_rejette():
@@ -113,11 +125,12 @@ def test_f8_buffer_nul_ou_negatif_rejette():
 
 
 def test_frontiere_exacte_un_contrat():
-    # buffer 100 → risque 20 $ ; stop 16 ticks (20 $) → exactement 1 contrat, approuvé
-    r = size_position(_apex(equity=49_100.0), stop_distance_ticks=16, tick_value=MES_TICK_VALUE)
+    """La frontière du dernier contrat, mesurée SOUS le seuil F2 (sinon c'est F2 qu'on teste).
+    Perte 500 = 50 % → frontière restante 500 → risque 100 $ ; stop 80 ticks = 100 $ → 1 contrat."""
+    r = size_position(_apex(equity=49_500.0), stop_distance_ticks=80, tick_value=MES_TICK_VALUE)
     assert r.status == "APPROVED" and r.contracts == 1
-    # un cent de moins de risque → 0.99… contrat → F8
-    r2 = size_position(_apex(equity=49_099.0), stop_distance_ticks=16, tick_value=MES_TICK_VALUE)
+    # un dollar de risque en moins → 0.99… contrat → refus
+    r2 = size_position(_apex(equity=49_499.0), stop_distance_ticks=80, tick_value=MES_TICK_VALUE)
     assert r2.status == "REJECTED"
 
 

@@ -3,15 +3,21 @@
 Port Python de la couche compte du moteur LSR v1.2 (`frontiers.ts`/`risksizer.ts`, externe au
 dépôt). Trois idées, toutes FAIL-CLOSED :
 
-1. **Le capital tradable n'est PAS l'équité — c'est la DISTANCE VERS LA MORT.**
-   `buffer = min(equity − drawdown_floor, equity − (day_start − DLL))` : la plus proche des deux
-   frontières (plancher de campagne / limite de perte du jour) est la seule qui compte. Sur un
-   Apex 50K EOD à l'ouverture : `min(2500, 1000) = 1000` → le DLL est la frontière contraignante
-   (conséquence de sizing du doc LSR : mécaniquement plus serré qu'une firme sans DLL).
+1. **Le capital tradable n'est PAS l'équité — c'est la DISTANCE VERS LA MORT.** La plus proche
+   des deux frontières (plancher de campagne / limite de perte du jour) est la seule qui compte.
+   Sur un Apex 50K EOD à l'ouverture : `min(2500, 1000) = 1000` → le DLL contraint (conséquence
+   de sizing du doc LSR : mécaniquement plus serré qu'une firme sans DLL).
+   Depuis **D-071**, le calcul qui fait foi est `lsr_frontiers.derive_account_frontiers`, port de
+   `frontiers.ts`. `compute_buffer` survit pour l'AFFICHAGE seul : il est SIGNÉ, donc il sait
+   dire « tu es passé SOUS la ligne » (−500) là où la frontière bornée dit 0. Il ne dimensionne
+   plus rien — il ajoutait le profit du jour à l'allocation quotidienne, donc allouait **50 % de
+   risque en plus après une matinée gagnante**.
 
-2. **Règle stricte du 1/5e** : risque alloué au prochain trade = `buffer / 5` (doc v1.1,
-   `bufferDivisor`). Contrats = `floor(risque / (ticks_de_stop × valeur_tick))` — floor, jamais
-   d'arrondi vers le haut : on ne s'endette pas d'un demi-contrat d'optimisme.
+2. **Règle stricte du 1/5e**, plafonnée au capital : risque du prochain trade =
+   `min(1 % × capital_initial, frontière_du_jour_restante / 5)` (D-068 + D-071). Contrats =
+   `floor(risque / (ticks_de_stop × valeur_tick))`, puis `floor(× multiplicateur VIX)` (D-070) —
+   floor aux deux étapes, jamais d'arrondi vers le haut : on ne s'endette pas d'un demi-contrat
+   d'optimisme.
 
 3. **F8 coupe-circuit — trois raisons de rejet, ZÉRO exception** (la fonction rend toujours un
    `SizerResult`, jamais elle ne lève — le chemin d'échec est une donnée, pas un crash) :
@@ -19,6 +25,10 @@ dépôt). Trois idées, toutes FAIL-CLOSED :
    - `INVALID_INPUT` : entrée corrompue — non-finie, ticks ≤ 0, valeur de tick ≤ 0, grandeurs de
      compte nulles/négatives (un floor NÉGATIF élargirait le buffer : la corruption deviendrait
      du levier, trouvé au /devil) ;
+   - `F2_DAILY_CIRCUIT_BREAKER` (D-071) : 80 % de la frontière du jour consommée — la séance
+     est FINIE. Motif distinct d'`INSUFFICIENT_BUFFER` à dessein : « il ne reste pas de quoi
+     faire un lot » et « arrête-toi pour aujourd'hui » n'appellent pas le même geste ;
+   - `VIX_SUSPENDED` (D-070) : régime de volatilité au-delà du blocage dur ;
    - `SIZE_SANITY_CAP` : taille > `RISK_MAX_CONTRACTS` (plafond de plausibilité v1 provisional —
      une équité corrompue mais finie produit un `floor()` astronomique parfaitement cohérent
      pour la garde D-045, qui vérifie l'ordre des niveaux, pas la vraisemblance d'une taille).
@@ -54,6 +64,8 @@ from . import config
 # corrigée d'un seul côté : le sizer et la géométrie dimensionneraient alors deux trades
 # différents pour le même plan.
 from . import lsr_tuning
+from .lsr_frontiers import (derive_account_frontiers,
+                            f2_daily_circuit_breaker)
 from .lsr_tuning import INSTRUMENT_SPECS  # noqa: F401  (ré-export : API historique du module)
 
 
@@ -253,15 +265,24 @@ def size_position(account: AccountState, stop_distance_ticks: Any, tick_value: A
     if not isinstance(buffer_divisor, int) or isinstance(buffer_divisor, bool) or buffer_divisor <= 0:
         return SizerResult(status="REJECTED", reason="INVALID_INPUT")
 
+    # La frontière du jour BORNÉE (D-071) fait foi pour le sizing : `compute_buffer` ajoutait le
+    # profit du jour à l'allocation quotidienne et donnait donc PLUS de risque après une bonne
+    # matinée. `buffer` reste rendu tel quel dans le résultat — signé, pour l'affichage.
+    frontiers = derive_account_frontiers(account)
     buffer = compute_buffer(account)
-    if buffer <= 0:
+    if frontiers.frontiere_jour_restante <= 0:
         return SizerResult(status="REJECTED", reason="INSUFFICIENT_BUFFER",
                            buffer=buffer, risk_allowed=None)
+    # F2 — coupe-circuit du jour (D-071). Placé AVANT le calcul de taille : au-delà de 80 % de la
+    # frontière consommée, il n'y a pas de « petite taille prudente », il y a une séance finie.
+    f2 = f2_daily_circuit_breaker(frontiers)
+    if f2 is not None:
+        return SizerResult(status="REJECTED", reason=f2, buffer=buffer, risk_allowed=None)
     # Formule EXACTE du moteur de référence (`risksizer.ts`) : `min(0.01 × capital, buffer / 5)`.
     # Les deux termes sont des frontières distinctes — le buffer protège du breach, le plafond
     # protège d'un sizing qui grossit avec le compte. Le plus SERRÉ des deux gagne (D-068).
     risk_allowed = min(config.RISK_FRACTION_OF_CAPITAL * account.initial_capital,
-                       buffer / buffer_divisor)
+                       frontiers.frontiere_jour_restante / buffer_divisor)
     risk_per_contract = float(stop_distance_ticks) * float(tick_value)
     contracts = math.floor(risk_allowed / risk_per_contract)
     # Modificateur de régime VIX (D-070) — APRÈS le floor du sizing brut, comme la référence :

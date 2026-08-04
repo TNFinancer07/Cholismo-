@@ -3694,6 +3694,64 @@ produit un nombre mort. Il part avec F6.
 19 tests neufs → **1332 passed**, ruff clean, mypy strict clean. Essai réel sur le stack de démo :
 VIX 13.13 lu de bout en bout, ticket 53 contrats, `APPROVED`.
 
+## D-071 · F2, les frontières de compte — et pourquoi F3-ATR ne peut PAS être câblée
+
+Port de `lsr-engine/src/frontiers.ts` et des gates F2 / F3-ATR. Deux livrés, un refusé avec ses
+chiffres.
+
+### La divergence trouvée en portant — elle n'était dans aucune liste
+`compute_buffer` calcule `equity − (day_start − DLL)`. Sur une matinée **gagnante**, ce terme vaut
+`DLL + profit` : il dépasse le DLL. La référence, elle, plafonne l'allocation quotidienne au DLL
+quoi qu'il arrive (`max(0, DLL − perte_du_jour)`).
+
+À +500 $ sur un Apex 50K, le Python allouait `1500/5 = 300 $` de risque là où la référence alloue
+`1000/5 = 200 $` — **50 % de plus, précisément après une bonne matinée**, c'est-à-dire au moment
+où on se croit bon. `frontiere_jour_restante` fait foi pour le sizing depuis D-071.
+
+`compute_buffer` survit et ce n'est pas un doublon : il est **signé**, donc il sait afficher
+« tu es passé SOUS la ligne » (−500) là où la frontière bornée dirait « tu es dessus » (0). L'un
+affiche, l'autre dimensionne, et un test balaye 14 combinaisons pour vérifier qu'ils ne peuvent
+pas se contredire sur la seule question qui compte : reste-t-il de quoi trader ?
+
+### F2 — le refus que le Python ne savait pas prononcer
+Au-delà de 80 % de la frontière du jour consommée, la séance est finie. Avant, le sizer continuait
+à sortir 2 contrats avec 100 $ de marge sur 1 000 : il a raison arithmétiquement, et tort
+complètement. Quatre tests existants ont changé de verdict — c'est le signe que la règle mord.
+
+Le motif est **distinct** d'`INSUFFICIENT_BUFFER` : « il ne reste pas de quoi faire un lot » et
+« arrête-toi pour aujourd'hui » n'appellent pas le même geste, et le HUD doit les séparer.
+
+### F3-ATR — écrite, testée, PAS câblée. Voici les chiffres.
+La règle est portée (`f3_atr_blocked`, fail-closed sur ATR manquant — le piège est que
+`None > None` est faux, donc une comparaison naïve laisserait passer une volatilité **jamais
+mesurée** comme si elle avait été jugée calme).
+
+Elle n'est pas branchée dans `evaluate_lsr`, et la raison est mesurée, pas supposée :
+
+| observation | valeur |
+|---|---|
+| tampon de prints du footprint (`FOOTPRINT_MAX_PRINTS`) | 800 ≈ **80 s** de tape |
+| bougies produites sur 400 ticks de démo | **1** |
+| bougies requises pour un ATR-14 sur 60 s | **15** (~14 min d'historique) |
+| snapshots bloqués si on branche la gate | **100 %** |
+
+Cholismo **n'a pas d'ATR à donner à F3**. La brancher rendrait le moteur définitivement muet : un
+fail-closed qui ne protège de rien puisqu'il refuse tout. Ce qui manque n'est pas la règle, c'est
+une SOURCE (historique OHLC borné, indépendant du tampon d'affichage). Tranche séparée.
+
+Un test verrouille ce raisonnement **et échouera** le jour où le tampon suffira — il rappellera
+alors de câbler la gate. Un refus qui s'auto-annule quand sa cause disparaît.
+
+### Restent à porter (item 2 du chantier de parité)
+F6 (cooldown après 2 pertes), F7-resubmit (900 s), F8 (campagne : 0.6/0.8/24 h/3/10 trades), A5b
+(confluence renforcée au 1er trade), scale-out (clip 50 %), prix d'annulation. Les quatre premiers
+exigent un `LsrRuntimeState` que le Python n'a pas — il doit être une **projection** du Decision
+Log (§2.5), pas un champ mutable. Les deux derniers sont purs et courts.
+
+### Vérif
+21 tests neufs, 4 tests existants mis à jour (F2 les fait changer de verdict) → **1353 passed**,
+ruff clean.
+
 ## D-065 · Outiller le relevé C2 — et une correction à D-063
 `python -m app.providers.releve` prépare la séance de catalogue. Il pose trois questions dans
 l'ordre : **est-ce que ça répond** (appel réel, échec classé par cause), **est-ce lisible**

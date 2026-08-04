@@ -76,12 +76,19 @@ def test_pnl_du_jour_positif():
 # --- Statuts de rejet : le ticket dit POURQUOI ----------------------------------------------
 
 def test_buffer_mort_status_insufficient_buffer_sans_contrats():
-    # stop de référence 3 ticks = 3.75 $/contrat → il faut buffer/5 ≥ 3.75, donc buffer ≥ 18.75
-    assert account_view(_acc(equity=49_020.0), vix=CALME)["next_ticket"]["contracts"] == 1   # buffer 20 : 1 lot
-    v = account_view(_acc(equity=49_010.0), vix=CALME)                # buffer 10 → risque 2 $ → < 1 contrat
-    assert v["status"] == "INSUFFICIENT_BUFFER"
+    """Le HUD dit POURQUOI il n'y a pas de ticket. Depuis D-071 il sait faire la différence :
+    à 98 % de la frontière du jour consommée c'est **F2** (la séance est finie), pas « buffer
+    un peu juste ». Le buffer, lui, reste affiché — il est vrai."""
+    v = account_view(_acc(equity=49_010.0), vix=CALME)
+    assert v["status"] == "F2_DAILY_CIRCUIT_BREAKER"
     assert v["next_ticket"]["contracts"] is None           # jamais un 0 déguisé en taille
     assert v["buffer"] == 10.0                             # la valeur RESTE affichable (vraie)
+
+    # Frontière encore SAINE (50 % consommés) mais stop de référence trop large pour un lot :
+    # là c'est bien INSUFFICIENT_BUFFER — 200 ticks × 1.25 = 250 $ pour 100 $ de risque alloué.
+    juste = account_view(_acc(equity=49_500.0), vix=CALME, reference_stop_ticks=200)
+    assert juste["status"] == "INSUFFICIENT_BUFFER"
+    assert juste["next_ticket"]["contracts"] is None
 
 
 def test_buffer_negatif_status_insufficient_buffer():
