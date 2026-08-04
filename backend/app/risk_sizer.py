@@ -66,6 +66,10 @@ class AccountState(BaseModel):
     Seuls les modèles EOD sont représentables (F1 structurel) : `drawdown_floor` est donc
     STATIQUE en intraday, et `daily_loss_limit` pause la journée sans tuer le compte."""
     account_type: Literal["EOD_TRAILING", "EOD_STATIC"] = "EOD_TRAILING"
+    # REQUIS, sans défaut (D-068) : le plafond « 1 % du capital » du moteur de référence ne peut
+    # pas se calculer sans lui. Le rendre optionnel laisserait construire un compte dont le
+    # sizer retomberait EN SILENCE sur `buffer / 5` — exactement la divergence qu'on corrige.
+    initial_capital: float
     current_equity: float
     day_start_equity: float
     drawdown_floor: float
@@ -101,8 +105,8 @@ def apex_eod_account(preset: ApexEodPreset, current_equity: Optional[float] = No
     """Construit l'état d'un compte Apex EOD depuis un preset. Défauts : compte neuf."""
     equity = current_equity if current_equity is not None else preset.initial_capital
     day_start = day_start_equity if day_start_equity is not None else equity
-    return AccountState(account_type="EOD_TRAILING", current_equity=equity,
-                        day_start_equity=day_start,
+    return AccountState(account_type="EOD_TRAILING", initial_capital=preset.initial_capital,
+                        current_equity=equity, day_start_equity=day_start,
                         drawdown_floor=preset.initial_capital - preset.max_drawdown,
                         daily_loss_limit=preset.daily_loss_limit)
 
@@ -200,8 +204,9 @@ def size_position(account: AccountState, stop_distance_ticks: Any, tick_value: A
     """Dimensionne le prochain trade — règle du 1/5e sur le buffer, floor strict, F8 fail-closed.
     Rend TOUJOURS un `SizerResult` (zéro exception) : entrée corrompue → `INVALID_INPUT` ;
     buffer ≤ 0 ou taille < 1 → `INSUFFICIENT_BUFFER`."""
-    if not all(_finite(v) for v in (account.current_equity, account.day_start_equity,
-                                    account.drawdown_floor, account.daily_loss_limit)):
+    if not all(_finite(v) for v in (account.initial_capital, account.current_equity,
+                                    account.day_start_equity, account.drawdown_floor,
+                                    account.daily_loss_limit)):
         return SizerResult(status="REJECTED", reason="INVALID_INPUT")
     # Grandeurs de compte NULLES/NÉGATIVES = corruption de flux, pas une frontière de risque :
     # aucun compte prop réel ne porte ça. Piège précis : un floor NÉGATIF (corrompu) ÉLARGIRAIT
@@ -209,6 +214,10 @@ def size_position(account: AccountState, stop_distance_ticks: Any, tick_value: A
     if account.current_equity <= 0 or account.day_start_equity <= 0:
         return SizerResult(status="REJECTED", reason="INVALID_INPUT")
     if account.daily_loss_limit <= 0 or account.drawdown_floor < 0:
+        return SizerResult(status="REJECTED", reason="INVALID_INPUT")
+    # Un capital nul ou négatif ferait un plafond nul ou NÉGATIF : le `min()` traverserait alors
+    # le floor et la corruption deviendrait un refus systématique — ou du levier à l'envers.
+    if account.initial_capital <= 0:
         return SizerResult(status="REJECTED", reason="INVALID_INPUT")
     if not _finite(stop_distance_ticks) or stop_distance_ticks <= 0:
         return SizerResult(status="REJECTED", reason="INVALID_INPUT")
@@ -221,7 +230,11 @@ def size_position(account: AccountState, stop_distance_ticks: Any, tick_value: A
     if buffer <= 0:
         return SizerResult(status="REJECTED", reason="INSUFFICIENT_BUFFER",
                            buffer=buffer, risk_allowed=None)
-    risk_allowed = buffer / buffer_divisor
+    # Formule EXACTE du moteur de référence (`risksizer.ts`) : `min(0.01 × capital, buffer / 5)`.
+    # Les deux termes sont des frontières distinctes — le buffer protège du breach, le plafond
+    # protège d'un sizing qui grossit avec le compte. Le plus SERRÉ des deux gagne (D-068).
+    risk_allowed = min(config.RISK_FRACTION_OF_CAPITAL * account.initial_capital,
+                       buffer / buffer_divisor)
     risk_per_contract = float(stop_distance_ticks) * float(tick_value)
     contracts = math.floor(risk_allowed / risk_per_contract)
     if contracts < 1:

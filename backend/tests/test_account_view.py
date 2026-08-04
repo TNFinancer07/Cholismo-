@@ -86,7 +86,7 @@ def test_buffer_negatif_status_insufficient_buffer():
 
 
 def test_etat_corrompu_status_invalid_input():
-    v = account_view(AccountState(account_type="EOD_TRAILING", current_equity=50_000.0,
+    v = account_view(AccountState(account_type="EOD_TRAILING", initial_capital=50_000.0, current_equity=50_000.0,
                                   day_start_equity=50_000.0, drawdown_floor=-500.0,
                                   daily_loss_limit=DLL))
     assert v["status"] == "INVALID_INPUT"
@@ -94,7 +94,7 @@ def test_etat_corrompu_status_invalid_input():
 
 
 def test_taille_implausible_status_size_sanity_cap():
-    v = account_view(AccountState(account_type="EOD_TRAILING", current_equity=10_000_000.0,
+    v = account_view(AccountState(account_type="EOD_TRAILING", initial_capital=50_000.0, current_equity=10_000_000.0,
                                   day_start_equity=10_000_000.0, drawdown_floor=FLOOR,
                                   daily_loss_limit=1_000_000.0))
     assert v["status"] == "SIZE_SANITY_CAP"
@@ -102,7 +102,7 @@ def test_taille_implausible_status_size_sanity_cap():
 
 
 def test_equite_non_finie_invalid_input_sans_valeurs_affichables():
-    v = account_view(AccountState(account_type="EOD_TRAILING", current_equity=math.nan,
+    v = account_view(AccountState(account_type="EOD_TRAILING", initial_capital=50_000.0, current_equity=math.nan,
                                   day_start_equity=50_000.0, drawdown_floor=FLOOR,
                                   daily_loss_limit=DLL))
     assert v["status"] == "INVALID_INPUT"

@@ -211,7 +211,9 @@ class NT8FileAccountProvider:
             if first is None:
                 return None
             day_start = first[0]
-        state = AccountState(account_type="EOD_TRAILING", current_equity=equity,
+        state = AccountState(account_type="EOD_TRAILING",
+                             initial_capital=self._preset.initial_capital,
+                             current_equity=equity,
                              day_start_equity=day_start, drawdown_floor=self._floor,
                              daily_loss_limit=self._preset.daily_loss_limit)
         return state, mtime

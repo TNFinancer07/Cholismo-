@@ -45,7 +45,7 @@ def test_preset_apex_50k_construit_l_etat_attendu():
 
 def test_modele_intraday_trail_non_representable_f1_structurel():
     with pytest.raises(ValidationError):
-        AccountState(account_type="INTRADAY_TRAILING", current_equity=50_000.0,
+        AccountState(account_type="INTRADAY_TRAILING", initial_capital=50_000.0, current_equity=50_000.0,
                      day_start_equity=50_000.0, drawdown_floor=47_500.0,
                      daily_loss_limit=1_000.0)
 
@@ -135,7 +135,7 @@ def test_entrees_corrompues_invalid_input_zero_exception():
 
 def test_equite_non_finie_invalid_input():
     for bad in (math.nan, math.inf):
-        acc = AccountState(account_type="EOD_TRAILING", current_equity=bad,
+        acc = AccountState(account_type="EOD_TRAILING", initial_capital=50_000.0, current_equity=bad,
                            day_start_equity=50_000.0, drawdown_floor=47_500.0,
                            daily_loss_limit=1_000.0)
         r = size_position(acc, stop_distance_ticks=8, tick_value=MES_TICK_VALUE)
@@ -178,7 +178,8 @@ def test_devil_grandeurs_de_compte_nulles_ou_negatives_invalid_input():
     """Équité/ouverture ≤ 0, DLL ≤ 0, plancher < 0 : aucun compte prop réel ne porte ça —
     c'est de la corruption de flux, pas une frontière de risque."""
     def acc(**over):
-        base = dict(account_type="EOD_TRAILING", current_equity=50_000.0,
+        base = dict(account_type="EOD_TRAILING", initial_capital=50_000.0,
+                    current_equity=50_000.0,
                     day_start_equity=50_000.0, drawdown_floor=47_500.0,
                     daily_loss_limit=1_000.0)
         base.update(over)
@@ -196,7 +197,7 @@ def test_devil_grandeurs_de_compte_nulles_ou_negatives_invalid_input():
 def test_devil_plancher_negatif_n_elargit_jamais_le_buffer():
     """Le piège précis : floor = −500 (corrompu) donnait to_floor = 50 500 → buffer 1000 →
     APPROVED sur un état corrompu. Doit être INVALID_INPUT."""
-    acc = AccountState(account_type="EOD_TRAILING", current_equity=50_000.0,
+    acc = AccountState(account_type="EOD_TRAILING", initial_capital=50_000.0, current_equity=50_000.0,
                        day_start_equity=50_000.0, drawdown_floor=-500.0,
                        daily_loss_limit=1_000.0)
     r = size_position(acc, stop_distance_ticks=8, tick_value=MES_TICK_VALUE)
@@ -217,12 +218,12 @@ def test_devil_equite_absurde_ne_produit_jamais_une_taille_astronomique():
       (1e308 − 1e9 == 1e308 → buffer 0) → INSUFFICIENT_BUFFER avant même le plafond ;
     - équité 10M (plausible mais hors cible) : buffer fini → floor() = 400 000 contrats,
       ticket parfaitement « cohérent » pour la garde D-045 → SIZE_SANITY_CAP tranche."""
-    r = size_position(AccountState(account_type="EOD_TRAILING", current_equity=1e308,
+    r = size_position(AccountState(account_type="EOD_TRAILING", initial_capital=50_000.0, current_equity=1e308,
                                    day_start_equity=1e308, drawdown_floor=47_500.0,
                                    daily_loss_limit=1e9),
                       stop_distance_ticks=1, tick_value=0.5)
     assert r.status == "REJECTED" and r.contracts is None   # absorption → buffer 0 → F8
-    r2 = size_position(AccountState(account_type="EOD_TRAILING", current_equity=10_000_000.0,
+    r2 = size_position(AccountState(account_type="EOD_TRAILING", initial_capital=50_000.0, current_equity=10_000_000.0,
                                     day_start_equity=10_000_000.0, drawdown_floor=47_500.0,
                                     daily_loss_limit=1_000_000.0),
                        stop_distance_ticks=1, tick_value=0.5)
@@ -238,7 +239,7 @@ def test_devil_invariant_global_jamais_approuve_sans_au_moins_un_contrat():
     tvs = [-1.25, 0.0, 0.5, 1.25, 5_000.0, math.inf, None]
     n_approved = 0
     for eq in equities:
-        acc = AccountState(account_type="EOD_TRAILING", current_equity=eq,
+        acc = AccountState(account_type="EOD_TRAILING", initial_capital=50_000.0, current_equity=eq,
                            day_start_equity=50_000.0, drawdown_floor=47_500.0,
                            daily_loss_limit=1_000.0)
         for st in ticks:
@@ -250,3 +251,63 @@ def test_devil_invariant_global_jamais_approuve_sans_au_moins_un_contrat():
                 else:
                     assert r.contracts is None
     assert n_approved > 0                                   # le balayage exerce aussi le chemin vert
+
+
+# =============================================================================================
+# Le plafond « 1 % du capital initial » — alignement LSR v1.2 (D-068)
+# =============================================================================================
+
+
+def test_le_risque_est_PLAFONNE_a_1_pourcent_du_capital_initial():
+    """Formule du moteur de référence (`risksizer.ts`) : `min(0.01 × capital, buffer / 5)`.
+
+    Le Python n'appliquait QUE `buffer / 5` : dès que la frontière du jour dépasse 5 % du capital
+    initial, il allouait plus de risque que le moteur v1.2. Invisible sur Apex 50K (le DLL borne
+    le buffer à 1 000 → 200 $ < 500 $), la divergence s'ouvre au premier preset sans DLL serré.
+    """
+    from app.risk_sizer import AccountState, size_position
+
+    # Firme SANS DLL contraignant : buffer = 5 000, donc buffer/5 = 1 000 > 1 % de 50 000 = 500.
+    acc = AccountState(account_type="EOD_TRAILING", initial_capital=50_000.0,
+                       current_equity=50_000.0, day_start_equity=50_000.0,
+                       drawdown_floor=45_000.0, daily_loss_limit=100_000.0)
+    r = size_position(acc, stop_distance_ticks=8, tick_value=1.25)
+    assert r.status == "APPROVED"
+    assert r.risk_allowed == pytest.approx(500.0)     # le PLAFOND mord, pas le buffer
+    assert r.contracts == 50                          # floor(500 / 10)
+
+
+def test_sur_APEX_50K_le_plafond_ne_mord_PAS_et_le_buffer_reste_contraignant():
+    """Contrôle négatif : sur le preset réel, c'est le DLL qui borne (200 $ < 500 $). Sans ce
+    test, un plafond qui mordrait partout passerait pour un plafond qui marche."""
+    from app.risk_sizer import APEX_EOD_50K, apex_eod_account, size_position
+
+    r = size_position(apex_eod_account(APEX_EOD_50K), stop_distance_ticks=8, tick_value=1.25)
+    assert r.status == "APPROVED"
+    assert r.risk_allowed == pytest.approx(200.0)     # buffer 1 000 / 5, sous le plafond de 500
+    assert r.contracts == 20
+
+
+def test_un_capital_initial_CORROMPU_est_refuse_comme_les_autres_grandeurs():
+    """Un capital nul ou négatif ferait un plafond nul ou NÉGATIF : la corruption deviendrait
+    un refus systématique, ou pire un `min()` négatif qui traverse le floor."""
+    from app.risk_sizer import AccountState, size_position
+
+    for mauvais in (0.0, -1.0, math.nan, math.inf):
+        acc = AccountState(account_type="EOD_TRAILING", initial_capital=mauvais,
+                           current_equity=50_000.0, day_start_equity=50_000.0,
+                           drawdown_floor=47_500.0, daily_loss_limit=1_000.0)
+        assert size_position(acc, 8, 1.25).reason == "INVALID_INPUT", mauvais
+
+
+def test_initial_capital_est_STRUCTURELLEMENT_requis():
+    """Même philosophie que F1 : le rendre optionnel laisserait construire un compte dont le
+    plafond ne peut pas se calculer, et le sizer retomberait en silence sur `buffer / 5`."""
+    from pydantic import ValidationError
+
+    from app.risk_sizer import AccountState
+
+    with pytest.raises(ValidationError):
+        AccountState(account_type="EOD_TRAILING", current_equity=50_000.0,   # volontairement
+                     day_start_equity=50_000.0, drawdown_floor=47_500.0,      # SANS initial_capital
+                     daily_loss_limit=1_000.0)
