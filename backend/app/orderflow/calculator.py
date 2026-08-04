@@ -26,9 +26,12 @@ première passe, isolée dans ce module et documentée pour être discutée :
 - **B3 `rejection_delta_ratio`** — delta net (acheteur − vendeur) des prints POSTÉRIEURS à
   l'extrême de la fenêtre, normalisé par le volume total. Signe = sens du rejet : positif = le bas
   a été rejeté (l'acheteur a repris la main), négatif = le haut. Borné [−1, 1] par construction.
-- **B4 `post_sweep_aggression_ratio`** — débit d'agression APRÈS le sweep divisé par le débit
-  AVANT (volume/seconde de part et d'autre). C'est bien une VITESSE : 100 lots en 1 s ne se lit
-  pas comme 100 lots en 30 s.
+- **B4 `post_sweep_aggression_ratio`** — **essoufflement** : débit d'agression APRÈS le sweep
+  divisé par le débit PENDANT la rafale qui l'a déclenché (volume/seconde de part et d'autre).
+  Sémantique LSR v1.2 (D-067) : un sweep est un excès BREF ; si l'agression se maintient après
+  lui, ce n'était pas un excès mais une initiative — ratio BAS = essoufflement = réversion
+  jouable. La version d'origine divisait par le débit d'AVANT et mesurait l'inverse (une
+  accélération), sous le même nom.
 
 **Fail-closed, porte par porte (§3).** Chaque grandeur vaut `None` **avec son motif** dans
 `missing` dès que ses entrées ne suffisent pas. Aucune valeur par défaut : ni 0, ni 1, ni 0,5 —
@@ -287,7 +290,25 @@ def _b3_rejection_delta(prints: Sequence[tuple], min_coverage: float, min_volume
 
 
 def _b4_post_sweep(prints: Sequence[tuple], sweep: Any, now: float, floor_ts: float,
-                   min_span: float, missing: list[str]) -> Optional[float]:
+                   min_span: float, missing: list[str],
+                   sweep_window_s: float = 0.0) -> Optional[float]:
+    """B4 — **essoufflement** post-sweep : débit d'agression APRÈS ÷ débit PENDANT le sweep.
+
+    Sémantique alignée sur LSR v1.2 (D-067). La version précédente divisait par le débit
+    d'AVANT le sweep et mesurait donc une ACCÉLÉRATION (> 1 sur un vrai sweep — 23,8 sur la
+    scène scriptée D-061). Le même nom désignait deux grandeurs de sens opposé : le seuil v1.2
+    « rejeter si > 0,30 » appliqué à l'ancienne mesure aurait fermé le moteur sur tout setup.
+
+    La question posée est celle du moteur v1.2 : **l'excès s'est-il essoufflé ?** Un sweep est
+    un excès bref ; si l'agression se MAINTIENT après lui, ce n'était pas un excès mais une
+    initiative — le piège de la continuation. Ratio bas = essoufflement = réversion jouable.
+
+    La fenêtre « pendant » n'est pas inventée : c'est celle du détecteur lui-même
+    (`graph/liquidity_sweep.BURST_WINDOW_S`, reprise dans `config.ORDERFLOW_SWEEP_WINDOW_S`).
+    L'alerte est horodatée à l'instant de détection, donc la rafale qui la déclenche occupe
+    `(sweep_ts − fenêtre, sweep_ts]`. Prendre une autre durée reviendrait à mesurer un sweep que
+    personne n'a détecté.
+    """
     sweep_ts = sweep.get("ts") if isinstance(sweep, dict) else None
     if not _finite(sweep_ts):
         missing.append(_motif("B4", "aucun sweep horodaté"))
@@ -295,24 +316,41 @@ def _b4_post_sweep(prints: Sequence[tuple], sweep: Any, now: float, floor_ts: fl
     if not (floor_ts <= sweep_ts <= now):
         missing.append(_motif("B4", "sweep hors de la fenêtre d'analyse"))
         return None
-    before = [p for p in prints if p[0] < sweep_ts]
-    after = [p for p in prints if p[0] >= sweep_ts]
-    span_before, span_after = sweep_ts - floor_ts, now - sweep_ts
-    if min(span_before, span_after) < min_span:
-        # Un débit mesuré sur quelques millisecondes est du bruit multiplié par mille.
-        missing.append(_motif("B4", f"durée insuffisante de part et d'autre du sweep "
-                                    f"({min(span_before, span_after):.3g}s < {min_span:g}s)"))
+    # Durée de la rafale : celle portée par l'alerte si le détecteur la fournit, sinon celle de
+    # sa propre fenêtre de mesure. Jamais devinée.
+    span_sweep = sweep.get("window_s") if isinstance(sweep, dict) else None
+    if not _finite(span_sweep) or span_sweep <= 0:
+        span_sweep = sweep_window_s
+    if not _finite(span_sweep) or span_sweep <= 0:
+        missing.append(_motif("B4", "durée de rafale inconnue — l'essoufflement se mesure "
+                                    "CONTRE le sweep, pas contre rien"))
         return None
-    vol_before, vol_after = sum(p[2] for p in before), sum(p[2] for p in after)
-    if not (_finite(vol_before) and _finite(vol_after)):
+    debut_sweep = sweep_ts - float(span_sweep)
+    if debut_sweep < floor_ts:
+        # La rafale déborde la fenêtre d'analyse : son volume serait tronqué, donc son débit
+        # sous-estimé, donc B4 surévalué — un rejet fabriqué par le cadrage.
+        missing.append(_motif("B4", f"la rafale ({span_sweep:g}s) déborde la fenêtre d'analyse "
+                                    "— débit du sweep tronqué, mesure refusée"))
+        return None
+    span_after = now - sweep_ts
+    if span_after < min_span:
+        # Un débit mesuré sur quelques millisecondes est du bruit multiplié par mille.
+        missing.append(_motif("B4", f"durée insuffisante après le sweep "
+                                    f"({span_after:.3g}s < {min_span:g}s)"))
+        return None
+    vol_sweep = sum(p[2] for p in prints if debut_sweep < p[0] <= sweep_ts)
+    vol_after = sum(p[2] for p in prints if p[0] > sweep_ts)
+    if not (_finite(vol_sweep) and _finite(vol_after)):
         missing.append(_motif("B4", "volume non fini (débordement) — aucune mesure"))
         return None
-    rate_before, rate_after = vol_before / span_before, vol_after / span_after
-    if rate_before <= 0:
+    rate_sweep, rate_after = vol_sweep / float(span_sweep), vol_after / span_after
+    if rate_sweep <= 0:
         # Diviser par un débit nul donnerait « ∞ » ou un nombre géant présenté comme une mesure.
-        missing.append(_motif("B4", "aucun volume avant le sweep — accélération non mesurable"))
+        # Et un sweep sans volume PENDANT le sweep n'est pas un sweep.
+        missing.append(_motif("B4", "aucun volume pendant la rafale — ce n'est pas un sweep, "
+                                    "l'essoufflement n'a rien contre quoi se mesurer"))
         return None
-    return rate_after / rate_before
+    return rate_after / rate_sweep
 
 
 # --- ATR ----------------------------------------------------------------------------------------
@@ -361,6 +399,7 @@ def compute_snapshot(*, now: Any, prints: Any = (), books: Any = (), bars: Any =
                      min_volume: float = None,                        # type: ignore[assignment]
                      min_span: float = None,                          # type: ignore[assignment]
                      max_book_gap_s: float = None,                    # type: ignore[assignment]
+                     sweep_window_s: float = None,                    # type: ignore[assignment]
                      ) -> OrderFlowSnapshot:
     """Calcule un `OrderFlowSnapshot`. Ne lève JAMAIS : toute entrée inexploitable dégrade la
     grandeur concernée en `None` motivé, sans toucher aux autres (§3)."""
@@ -446,6 +485,8 @@ def compute_snapshot(*, now: Any, prints: Any = (), books: Any = (), bars: Any =
     min_span = (min_span if min_span is not None else config.ORDERFLOW_MIN_SPAN_S)
     max_gap = (max_book_gap_s if max_book_gap_s is not None
                else config.ORDERFLOW_MAX_BOOK_GAP_S)
+    sweep_span = (sweep_window_s if sweep_window_s is not None
+                  else config.ORDERFLOW_SWEEP_WINDOW_S)
     return OrderFlowSnapshot(
         now=now, window_s=window_s,
         wall_refill_ratio=_publishable(
@@ -456,7 +497,8 @@ def compute_snapshot(*, now: Any, prints: Any = (), books: Any = (), bars: Any =
         rejection_delta_ratio=_publishable(
             _b3_rejection_delta(kept, coverage, min_volume, missing), "B3", missing),
         post_sweep_aggression_ratio=_publishable(
-            _b4_post_sweep(kept, sweep, now, floor_ts, min_span, missing), "B4", missing),
+            _b4_post_sweep(kept, sweep, now, floor_ts, min_span, missing,
+                           sweep_span), "B4", missing),
         volume_profile=profile,
         atr_fast_period=atr_fast, atr_slow_period=atr_slow,
         atr_fast=_publishable(_atr(bars, atr_fast, missing), "ATR", missing),

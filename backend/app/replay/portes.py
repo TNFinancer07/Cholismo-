@@ -36,7 +36,7 @@ from .dialects import DIALECTES
 from .replay_engine import ReplayEngine, ReplaySummary, Tick
 
 PORTES = (("B1", "rechargement de mur"), ("B2", "fraction agresseur acheteur"),
-          ("B3", "rejet d'extrême"), ("B4", "accélération post-sweep"))
+          ("B3", "rejet d'extrême"), ("B4", "essoufflement post-sweep"))
 LARGEUR = 100
 
 
@@ -102,11 +102,16 @@ def section_scenes(chemin: Path, prints: list[dict[str, Any]],
     print("           mesurés sur LEUR fenêtre, avec mur et sweep issus de la vérité terrain\n")
     for s in scenes:
         est_sweep = s["nom"] == "sweep"
-        now = s["debut_ts"] + 1.1 if est_sweep else s["fin_ts"]
-        fenetre = 3.0 if est_sweep else s["fin_ts"] - s["debut_ts"] + 0.01
+        # Le marqueur de sweep est la FIN de la rafale, pas son début : le détecteur horodate son
+        # alerte à l'instant où il CONSTATE la rafale (D-067). Le placer au début mettrait toute
+        # la rafale « après », et B4 mesurerait une agression soutenue là où il y a un excès.
+        now = s["fin_ts"] + 1.2 if est_sweep else s["fin_ts"]
+        fenetre = 8.0 if est_sweep else s["fin_ts"] - s["debut_ts"] + 0.01
         snap = compute_snapshot(now=now, prints=prints, books=books, window_s=fenetre,
                                 wall_price=s["wall_price"], wall_side=s["wall_side"],
-                                sweep={"ts": s["debut_ts"]} if est_sweep else None)
+                                sweep=({"ts": s["fin_ts"],
+                                        "window_s": s["fin_ts"] - s["debut_ts"]}
+                                       if est_sweep else None))
         v = valeurs(snap)[s["porte"]]
         rendu = f"{v:.3f}" if v is not None else f"MUETTE — {_motif(snap, s['porte'])}"
         glyphe = "✓" if v is not None else "✕"
@@ -133,7 +138,7 @@ def section_balayage(ticks: list[Tick], prints: list[dict[str, Any]],
         instants += 1
         snap = compute_snapshot(now=now, prints=prints, books=books, window_s=fenetre,
                                 wall_price=ticks[k]["price"], wall_side="BID",
-                                sweep={"ts": now - fenetre / 2})
+                                sweep={"ts": now - fenetre / 2})   # rafale = fenêtre par défaut
         for porte, valeur in valeurs(snap).items():
             if valeur is not None:
                 compte[porte] += 1

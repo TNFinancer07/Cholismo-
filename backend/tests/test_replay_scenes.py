@@ -168,18 +168,20 @@ def test_le_bruit_SEUL_reste_possible_et_le_dit(tmp_path):
 
 
 # =============================================================================================
-# 2. B4 — un sweep accélère l'agression
+# 2. B4 — un sweep s'ESSOUFFLE (sémantique LSR v1.2, D-067)
 # =============================================================================================
 #
-# Le piège trouvé en construisant ce test : sur le tape BRUYANT, B4 dépasse 2 à 8 instants sur
-# 59, et culmine à 14 — non par accélération, mais parce qu'un « trou de séance » vide la
-# fenêtre AVANT et fait exploser un rapport de débits. Une assertion « B4 > 2 » serait donc
-# passée pour la mauvaise raison. La comparaison ci-dessous est CONTRÔLÉE : deux fichiers de
-# même graine, identiques jusqu'à l'insertion, donc à fenêtre AVANT rigoureusement égale. Seul
-# l'après diffère.
+# La mesure a changé de sens : B4 divise désormais par le débit PENDANT la rafale, pas par celui
+# d'AVANT. La question n'est plus « ça accélère ? » mais « l'excès est-il retombé ? ». Un sweep
+# est bref ; une agression qui se MAINTIENT après lui est une initiative, pas un excès — c'est le
+# piège de la continuation, et le seuil v1.2 (rejeter si > 0,30) existe pour l'écarter.
+#
+# Le marqueur de sweep est donc la FIN de la rafale : le détecteur horodate son alerte à l'instant
+# où il CONSTATE la rafale. Le placer au début mettrait toute la rafale « après » et inverserait
+# la lecture (mesuré : 4,61 au début contre 0,03 à la fin, sur la même scène).
 
 
-def test_un_SWEEP_accelere_l_agression_la_ou_la_verite_le_dit(tmp_path):
+def test_un_SWEEP_s_ESSOUFFLE_la_ou_la_verite_le_dit(tmp_path):
     avec, verite = _tape(tmp_path, "avec.csv")
     sans, _ = _tape(tmp_path, "sans.csv", scenes=())
     sw = _scene(verite, "sweep")
@@ -189,39 +191,46 @@ def test_un_SWEEP_accelere_l_agression_la_ou_la_verite_le_dit(tmp_path):
     commun = next(i for i, (x, y) in enumerate(zip(lignes_a, lignes_s)) if x != y)
     assert commun > 50, "les deux tapes doivent partager leur préfixe pour que la comparaison tienne"
 
+    rafale = sw["fin_ts"] - sw["debut_ts"]
     mesures = {}
     for nom, chemin in (("avec", avec), ("sans", sans)):
         _, prints, books = _charger(chemin)
-        mesures[nom] = compute_snapshot(now=sw["debut_ts"] + 1.1, prints=prints, books=books,
-                                        window_s=3.0, tick=TICK, sweep={"ts": sw["debut_ts"]})
+        mesures[nom] = compute_snapshot(
+            now=sw["fin_ts"] + 1.2, prints=prints, books=books, window_s=8.0, tick=TICK,
+            sweep={"ts": sw["fin_ts"], "window_s": rafale})
 
     b4_avec = mesures["avec"].post_sweep_aggression_ratio
     b4_sans = mesures["sans"].post_sweep_aggression_ratio
     assert b4_avec is not None and b4_sans is not None
-    # À fenêtre AVANT identique, seule la rafale explique l'écart.
-    assert b4_avec > 5 * b4_sans, f"B4 avec={b4_avec:.2f} sans={b4_sans:.2f}"
-    assert mesures["avec"].tape_aggressor_buy_fraction > 0.85      # rafale ACHETEUSE
-    assert mesures["sans"].tape_aggressor_buy_fraction < 0.8
+    # Le sweep scripté s'essouffle NETTEMENT : il passe le seuil v1.2 (rejeter si > 0,30).
+    assert b4_avec < 0.30, f"B4 sur le sweep = {b4_avec:.3f}"
+    # À rafale de même durée, le bruit ne s'essouffle pas : il n'a jamais été un excès.
+    assert b4_sans > b4_avec, f"B4 avec={b4_avec:.3f} sans={b4_sans:.3f}"
+    # B2 se mesure sur la RAFALE, pas sur les 8 s dont B4 a besoin pour voir l'après. Sur la
+    # fenêtre large, la fraction acheteuse est mécaniquement diluée par le bruit alentour (0,82
+    # contre 0,74 pour le bruit : l'écart ne discrimine plus). Deux portes, deux fenêtres.
+    assert _sur_la_scene(avec, sw).tape_aggressor_buy_fraction > 0.85   # rafale ACHETEUSE
 
 
-def test_le_BRUIT_seul_n_a_pas_de_debit_qui_accelere(tmp_path):
-    """Le contrôle négatif, et la raison pour laquelle le test précédent compare deux fichiers.
+def test_le_BRUIT_seul_ne_s_ESSOUFFLE_pas(tmp_path):
+    """Le contrôle négatif — celui qui rend le gate v1.2 discriminant plutôt que décoratif.
 
-    Instant par instant, le bruit peut afficher un B4 élevé (fenêtre AVANT vidée par un trou de
-    séance). Mais il n'a pas de tendance : sa MÉDIANE est à 1, c'est-à-dire « même débit avant
-    et après ». C'est cela qu'un sweep contredit.
+    Le bruit n'est pas un excès : il n'a rien à retomber. Sa MÉDIANE reste bien au-dessus du
+    seuil de 0,30, donc le gate le REJETTE — alors qu'il laisse passer le sweep scripté à 0,03.
+    Sans ce contrôle, un seuil qui accepterait tout passerait pour un seuil qui marche.
     """
     chemin, _ = _tape(tmp_path, "bruit.csv", scenes=())
     ticks, prints, books = _charger(chemin)
     vals = []
     for k in range(20, len(ticks) - 20, 7):
         ts = ticks[k]["timestamp"]
-        snap = compute_snapshot(now=ts + 1.2, prints=prints, books=books, window_s=3.0,
-                                tick=TICK, sweep={"ts": ts})
+        snap = compute_snapshot(now=ts + 1.2, prints=prints, books=books, window_s=8.0,
+                                tick=TICK, sweep={"ts": ts, "window_s": 0.35})
         if snap.post_sweep_aggression_ratio is not None:
             vals.append(snap.post_sweep_aggression_ratio)
     assert len(vals) > 20
-    assert 0.5 < statistics.median(vals) < 1.6, f"médiane {statistics.median(vals):.2f}"
+    mediane = statistics.median(vals)
+    assert mediane > 0.30, f"le bruit passerait le gate v1.2 : médiane {mediane:.3f}"
 
 
 # =============================================================================================
@@ -384,15 +393,17 @@ def test_le_SIGNE_de_B3_suit_le_sens_du_rejet(tmp_path):
 
 
 def test_a_la_fenetre_REELLE_le_sweep_reste_visible(tmp_path):
-    """B4 survit à la dilution : une rafale de quelques centaines de ms pèse encore sur un débit
-    moyenné sur 30 s. C'est la porte la plus robuste des quatre."""
+    """B4 survit à la dilution : l'essoufflement se mesure CONTRE la rafale, pas contre la
+    fenêtre — allonger la fenêtre d'analyse ne dilue donc pas le rapport. C'est ce qui fait de
+    B4 la porte la plus robuste des quatre."""
     chemin, verite = _tape(tmp_path)
     sw = _scene(verite, "sweep")
     _, prints, books = _charger(chemin)
-    snap = compute_snapshot(now=sw["debut_ts"] + 1.1, prints=prints, books=books,
-                            window_s=30.0, tick=TICK, sweep={"ts": sw["debut_ts"]})
+    snap = compute_snapshot(now=sw["fin_ts"] + 1.2, prints=prints, books=books,
+                            window_s=30.0, tick=TICK,
+                            sweep={"ts": sw["fin_ts"], "window_s": sw["fin_ts"] - sw["debut_ts"]})
     assert snap.post_sweep_aggression_ratio is not None
-    assert snap.post_sweep_aggression_ratio > 2.0
+    assert snap.post_sweep_aggression_ratio < 0.30
 
 
 def test_a_la_fenetre_REELLE_B1_se_TAIT_plutot_que_d_inventer(tmp_path):

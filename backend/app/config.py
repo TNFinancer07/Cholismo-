@@ -301,6 +301,11 @@ BOOK_HISTORY_MAX = int(os.getenv("BOOK_HISTORY_MAX", "120"))
 # Au-delà, la déplétion n'a pas été observée : elle est INFÉRÉE à travers un trou de cécité
 # (coupure de flux). Un trou n'est pas une observation (/devil D-056). 8 échantillons à 4 Hz.
 ORDERFLOW_MAX_BOOK_GAP_S = float(os.getenv("ORDERFLOW_MAX_BOOK_GAP_S", "2.0"))
+# B4 (D-067) — durée de la RAFALE qui constitue le sweep, dénominateur de l'essoufflement.
+# Valeur reprise du détecteur (`graph/liquidity_sweep.BURST_WINDOW_S`) : l'alerte est horodatée
+# à l'instant de détection, donc la rafale occupe `(ts − fenêtre, ts]`. En prendre une autre
+# reviendrait à mesurer un sweep que personne n'a détecté. Verrouillé par test.
+ORDERFLOW_SWEEP_WINDOW_S = float(os.getenv("ORDERFLOW_SWEEP_WINDOW_S", "2.0"))
 
 # --- Sources macro de Youssef — registre + connecteurs (D-057) ---
 # FRED est le socle (~30 lignes sur 5 dimensions) : un endpoint, un format, une clé GRATUITE.

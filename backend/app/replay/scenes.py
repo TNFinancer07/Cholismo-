@@ -109,8 +109,9 @@ def sweep(ts: float, prix: float, tick: float, rng: random.Random,
         ask, bid = (280.0, 300.0) if monte else (300.0, 280.0)
     return _borner(Scene(
         nom="sweep", porte="B4", direction=direction, lignes=lignes,
-        attendu="débit d'agression APRÈS > débit AVANT (B4 > 1) et B2 très déséquilibré "
-                f"du côté {'acheteur' if monte else 'vendeur'}"))
+        attendu="excès BREF : l'agression s'essouffle après la rafale (B4 bas, sous le seuil "
+                f"v1.2 de 0,30) et B2 très déséquilibré du côté "
+                f"{'acheteur' if monte else 'vendeur'}"))
 
 
 def _mur(nom: str, profondeurs: list[float], attendu: str, ts: float, prix: float,

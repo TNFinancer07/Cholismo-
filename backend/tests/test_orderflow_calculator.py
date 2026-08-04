@@ -229,16 +229,56 @@ def test_B3_prix_plat_rend_None():
 
 
 # =============================================================================================
-# B4 — vitesse d'agression post-sweep (postSweepAggressionRatio)
+# B4 — ESSOUFFLEMENT post-sweep (postSweepAggressionRatio, sémantique LSR v1.2 — D-067)
 # =============================================================================================
 
-def test_B4_mesure_une_ACCELERATION_de_debit():
-    """Les débits se mesurent sur les DEUX moitiés de la fenêtre d'analyse, pas sur l'écart entre
-    prints (qu'un seul print ancien suffirait à fausser). Fenêtre 10 s, sweep à T0, `now` = T0+2 :
-    avant = 8 s, après = 2 s. 80 lots avant → 10/s ; 200 lots après → 100/s → ×10."""
-    prints = [_print(-4, 5000.0, 80, "SELL"), _print(1, 5000.0, 200, "BUY")]
-    s = _snap(now=T0 + 2.0, window_s=10.0, prints=prints, sweep={"ts": T0})
-    assert s.post_sweep_aggression_ratio == pytest.approx(10.0)
+def test_B4_mesure_un_ESSOUFFLEMENT_pas_une_acceleration():
+    """Le dénominateur est le débit PENDANT la rafale, pas celui d'AVANT (D-067).
+
+    La question v1.2 est « l'excès s'est-il essoufflé ? » : un sweep est bref, et une agression
+    qui se MAINTIENT après lui n'était pas un excès mais une initiative — le piège de la
+    continuation. Rafale de 2 s à 100 lots → 50/s ; 20 lots sur les 2 s suivantes → 10/s → 0,20.
+    """
+    prints = [_print(-1, 5000.0, 100, "SELL"), _print(1, 5000.0, 20, "BUY")]
+    s = _snap(now=T0 + 2.0, window_s=10.0, prints=prints,
+              sweep={"ts": T0, "window_s": 2.0})
+    assert s.post_sweep_aggression_ratio == pytest.approx(0.2)
+
+
+def test_B4_une_agression_SOUTENUE_donne_un_ratio_ELEVE():
+    """Le contrôle de sens : même rafale, mais l'agression continue après. C'est le cas que le
+    seuil v1.2 (rejeter si > 0,30) existe pour écarter."""
+    prints = [_print(-1, 5000.0, 100, "SELL"), _print(1, 5000.0, 300, "BUY")]
+    s = _snap(now=T0 + 2.0, window_s=10.0, prints=prints,
+              sweep={"ts": T0, "window_s": 2.0})
+    assert s.post_sweep_aggression_ratio == pytest.approx(3.0)
+
+
+def test_B4_sans_DUREE_de_rafale_utilisable_rend_None():
+    """L'essoufflement se mesure CONTRE le sweep : sans sa durée, il n'a rien contre quoi se
+    mesurer. Retomber sur une durée par défaut inventée fabriquerait un ratio."""
+    prints = [_print(-1, 5000.0, 100, "SELL"), _print(1, 5000.0, 20, "BUY")]
+    s = _snap(now=T0 + 2.0, window_s=10.0, prints=prints,
+              sweep={"ts": T0, "window_s": 0}, sweep_window_s=0)
+    assert s.post_sweep_aggression_ratio is None
+    assert any("B4" in m and "rafale" in m for m in s.missing)
+
+
+def test_B4_refuse_une_rafale_qui_DEBORDE_la_fenetre_d_analyse():
+    """Volume de rafale tronqué = débit sous-estimé = B4 surévalué : un rejet fabriqué par le
+    cadrage, pas par le marché."""
+    prints = [_print(-1, 5000.0, 100, "SELL"), _print(1, 5000.0, 20, "BUY")]
+    s = _snap(now=T0 + 2.0, window_s=4.0, prints=prints, sweep={"ts": T0, "window_s": 30.0})
+    assert s.post_sweep_aggression_ratio is None
+    assert any("B4" in m and "déborde" in m for m in s.missing)
+
+
+def test_B4_sans_volume_PENDANT_la_rafale_rend_None():
+    """Un sweep sans volume pendant le sweep n'est pas un sweep."""
+    prints = [_print(1, 5000.0, 50, "BUY")]
+    s = _snap(now=T0 + 2.0, window_s=10.0, prints=prints, sweep={"ts": T0, "window_s": 2.0})
+    assert s.post_sweep_aggression_ratio is None
+    assert any("B4" in m and "pendant la rafale" in m for m in s.missing)
 
 
 def test_B4_sans_sweep_rend_None():
@@ -536,8 +576,11 @@ def test_devil2_B4_refuse_une_fenetre_de_quelques_MILLISECONDES():
 
 def test_devil2_B4_reste_calculee_au_dessus_du_plancher_de_duree():
     span = config.ORDERFLOW_MIN_SPAN_S
-    prints = [_print(-3 * span, 5000.0, 100, "SELL"), _print(-span / 2, 5000.0, 100, "BUY")]
-    s = _snap(now=T0, window_s=6 * span, prints=prints, sweep={"ts": T0 - span})
+    # Le print de la rafale est DANS `(sweep_ts − fenêtre, sweep_ts]` : la borne basse est
+    # STRICTE, et l'y poser pile l'exclurait (ma première version tombait dans ce piège).
+    prints = [_print(-2 * span, 5000.0, 100, "SELL"), _print(-span / 2, 5000.0, 100, "BUY")]
+    s = _snap(now=T0, window_s=8 * span, prints=prints,
+              sweep={"ts": T0 - span, "window_s": 2 * span})
     assert s.post_sweep_aggression_ratio is not None
 
 
