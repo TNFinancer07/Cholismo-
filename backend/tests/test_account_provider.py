@@ -123,7 +123,7 @@ def _wire_setup(eng, now):
     s1.tape = _fresh([{"ts": now - 1.0 + 0.1 * k, "price": 4998.0 + 0.25 * (k % 4),
                        "size": 5.0, "side": "SELL", "seq": k} for k in range(10)], now)
     s1.order_book = _fresh({"bids": [[4999.75, 70.0], [4999.5, 70.0], [4999.25, 70.0]],
-                            "asks": [[5000.25, 70.0], [5000.5, 70.0], [5000.75, 70.0]]}, now)
+                            "asks": [[5000.0, 70.0], [5000.25, 70.0], [5000.5, 70.0]]}, now)
     s1.order_flow.absorption = _fresh(True, now)
     s1.order_flow.aggressor_ratio = _fresh(0.72, now)
     s1.structure.vpoc = _fresh(5000.0, now)

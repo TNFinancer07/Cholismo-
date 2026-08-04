@@ -3596,6 +3596,49 @@ Essai réel : terminal démarré en `REPLAY_FILE=…` ×5, contrôle complet exe
 (restart/pause/speed/seek/play), refus explicites sur les trois commandes incomplètes, et les
 prints rejoués vérifiés jusqu'au canal SSE.
 
+## D-069 · Une table de calibration PAR INSTRUMENT — la fin des seuils écrits deux fois
+
+Les seuils microstructure du moteur LSR vivaient en scalaires `config.LSR_*`, alors que le
+moteur de référence (`lsr-engine/src/config.ts`) les tient **par instrument**. Deux conséquences,
+toutes deux mesurées :
+
+1. **MNQ n'était pas représentable.** Un seuil unique force à choisir la valeur fausse pour l'un
+   des deux : exiger 150 de profondeur top-3 sur MNQ (carnet plus fin) n'émettrait jamais rien ;
+   tolérer 2 ticks de spread sur MES (carnet dense, 1 tick la quasi-totalité de la séance)
+   laisserait passer des marchés disloqués.
+2. **Deux valeurs divergeaient vraiment du moteur de référence** : `f4MaxSpreadTicks` (1 côté TS,
+   2 côté Python) et `b1MinWallRefillRatio` (0.40 contre 0.50). Le Python refusait donc des murs
+   que la référence valide, et acceptait des spreads qu'elle refuse.
+
+`app/lsr_tuning.py` porte la table (MES + MNQ) et les `INSTRUMENT_SPECS` CME. Les neuf constantes
+correspondantes ont **disparu** de `config.py` — un test le vérifie nommément, parce que le motif
+qu'on corrige n'est pas « une mauvaise valeur » mais « la même valeur à deux endroits », qui finit
+toujours par n'être corrigée qu'à un seul.
+
+### Pas de variable d'environnement sur la table — délibéré
+Un override d'environnement contournerait en silence le verrou de parité (D-072) : le Python
+jurerait 0.40 pendant que la prod tournerait à 0.55, test vert. Recalibrer = éditer les DEUX
+fichiers.
+
+### Le mock était la vraie cause du seuil relâché
+`LSR_F4_MAX_SPREAD_TICKS = 2` portait ce commentaire : « le mock émet un spread de 2 ticks ».
+Autrement dit une frontière de risque avait été desserrée pour qu'une source d'essai mal calibrée
+produise quelque chose. Le mock cote désormais **1 tick en régime normal** (bid et ask tous deux
+sur la grille, le mid vivant sur un demi-tick), le spread élargi redevenant la pathologie
+occasionnelle qu'il aurait toujours dû être. Mesuré sur 600 carnets : **497 à 1 tick**, 46 à 2,
+41 à 4, 16 croisés/verrouillés ; F4 MES passe **39 %** du temps — c'est la profondeur qui est
+désormais contraignante, pas le spread.
+
+### /devil — le fail-closed silencieux
+`LSR_INSTRUMENT` hors table rend `evaluate_lsr` définitivement muet. Correct, mais une faute de
+frappe dans l'environnement ressemblerait exactement à « aucun setup aujourd'hui ». Le démarrage
+du moteur le dit maintenant en ERROR, en nommant le coupable **et** les instruments admis.
+
+### Vérif
+11 tests neufs → **1302 passed**, ruff clean. Le stop reste pris à la borne HAUTE du buffer de
+bruit (`sl_noise_buffer_max_ticks`) tant que D-070 n'a pas câblé sa version dynamique : c'est le
+choix prudent (stop plus loin = moins de contrats, jamais plus).
+
 ## D-065 · Outiller le relevé C2 — et une correction à D-063
 `python -m app.providers.releve` prépare la séance de catalogue. Il pose trois questions dans
 l'ordre : **est-ce que ça répond** (appel réel, échec classé par cause), **est-ce lisible**

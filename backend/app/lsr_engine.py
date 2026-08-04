@@ -14,15 +14,19 @@ sans calcul résiduel ni allocation conservée. Ordre d'évaluation fail-fast (h
 garde non-finie → déclencheur (sweep frais ET orienté) → B1 (absorption) → B2 (bascule des
 agressifs) → F4 (fenêtre de liquidité) → extrême A3 → géométrie A1/A2 → plan.
 
-Mapping des gates (seuils `config.LSR_*`, v1 provisional « 1re passe ») :
+Mapping des gates (seuils dans `lsr_tuning.PER_INSTRUMENT`, v1 provisional « 1re passe » —
+**par instrument** depuis D-069 : MES et MNQ n'ont ni la même densité de carnet ni la même
+vitesse, un seuil unique serait faux pour l'un des deux) :
 - déclencheur : `BID_SWEEP` (agression vendeuse a balayé le bid) → réversion LONG ;
   `ASK_SWEEP` → SHORT ; alerte sans direction = INORIENTABLE → rejet ;
 - B1-like : `absorption is True` — défense du niveau à l'extrême ;
 - B2-like : bascule des agressifs côté réversion (LONG : part acheteuse ≥ flip ;
   SHORT : ≤ 1 − flip) ;
 - F4-like : spread ≤ max ticks ET profondeur top-3 des DEUX côtés ≥ plancher ;
-- A3 : stop = extrême RÉEL du sweep (min/max des prints de la fenêtre) ∓ buffer — jamais une
-  distance fabriquée sans structure ;
+- A3 : stop = extrême RÉEL du sweep (min/max des prints de la fenêtre) ∓ buffer de bruit —
+  jamais une distance fabriquée sans structure. Le buffer est pris à sa borne HAUTE
+  (`sl_noise_buffer_max_ticks`) tant que D-070 n'a pas câblé sa version dynamique f(spread, ATR) ;
+  la borne haute est le choix prudent (stop plus loin = moins de contrats, jamais plus) ;
 - A1 : entrée LIMIT = extrême ± offset, dans le sens de la réintégration ;
 - A2 : TP borné [min, max] ticks visant VPOC ∓ marge ; VPOC du mauvais côté ou pas de place →
   rejet (un trade sans chemin vers son objectif n'existe pas).
@@ -38,7 +42,8 @@ from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
-from . import config
+from . import config, lsr_tuning
+from .lsr_tuning import InstrumentTuning
 
 
 def _finite(x: Any) -> bool:
@@ -71,6 +76,11 @@ class LsrInputs(BaseModel):
     # bascule au runtime (env relue, réglage event-sourcé, essai) resterait sans effet, et le
     # moteur jurerait « [source] » en mode maison. Trouvé par l'essai, pas par un test.
     orderflow_source: Optional[str] = None
+    # Instrument évalué (D-069) — décide de la CALIBRATION (`lsr_tuning.PER_INSTRUMENT`). Même
+    # doctrine de résolution tardive que `orderflow_source` : `None` = « non spécifié » → lu
+    # dans la config À L'APPEL. Un instrument hors table rend le moteur muet, jamais MES par
+    # défaut : MNQ jugé aux seuils MES n'émettrait rien, et personne ne saurait pourquoi.
+    instrument: Optional[str] = None
 
 
 def build_lsr_inputs(schema, now: float, news_state: Optional[str] = None,
@@ -103,13 +113,15 @@ def build_lsr_inputs(schema, now: float, news_state: Optional[str] = None,
     )
 
 
-def _grid(x: float) -> float:
+def _grid(x: float, tick: float) -> float:
     """Aligne un prix sur la grille de ticks (un niveau hors grille n'est pas exécutable)."""
-    return round(round(x / config.PRICE_TICK) * config.PRICE_TICK, 10)
+    return round(round(x / tick) * tick, 10)
 
 
-def _f4_liquidity_ok(book: Any) -> bool:
-    """F4-like — fenêtre de liquidité : spread borné ET profondeur top-3 des deux côtés."""
+def _f4_liquidity_ok(book: Any, t: InstrumentTuning, tick: float) -> bool:
+    """F4-like — fenêtre de liquidité : spread borné ET profondeur top-3 des deux côtés.
+    Les deux bornes viennent de la calibration de l'INSTRUMENT (D-069) : 1 tick / 150 sur MES
+    (carnet dense), 2 ticks / 60 sur MNQ."""
     if not isinstance(book, dict):
         return False
     bids, asks = book.get("bids"), book.get("asks")
@@ -122,7 +134,7 @@ def _f4_liquidity_ok(book: Any) -> bool:
         # dislocation (CROSSED_BOOK est un signal D-028, pas un terrain d'exécution).
         if not (math.isfinite(best_bid) and math.isfinite(best_ask) and best_ask > best_bid):
             return False
-        if (best_ask - best_bid) / config.PRICE_TICK > config.LSR_F4_MAX_SPREAD_TICKS:
+        if (best_ask - best_bid) / tick > t.f4_max_spread_ticks:
             return False
         # Une profondeur NÉGATIVE est impossible : un carnet qui en porte est corrompu et ne
         # doit pas passer F4 par compensation arithmétique (200 + (−30) ≥ plancher…).
@@ -139,7 +151,7 @@ def _f4_liquidity_ok(book: Any) -> bool:
             depth_ask += sz
     except (TypeError, ValueError, IndexError):
         return False
-    return min(depth_bid, depth_ask) >= config.LSR_F4_MIN_DEPTH
+    return min(depth_bid, depth_ask) >= t.f4_min_cumulative_depth
 
 
 def _sweep_extreme(prints: list, since: float, now: float, is_long: bool) -> Optional[float]:
@@ -168,6 +180,13 @@ def evaluate_lsr(i: LsrInputs) -> Optional[dict]:
     # câblée mais AVEUGLE (SAFETY_UNKNOWN) vaut un verrou (« on ne trade jamais à l'aveugle »).
     if i.news_state in ("HARD_LOCK", "SAFETY_UNKNOWN"):
         return None
+    # -- calibration de l'INSTRUMENT (D-069) : résolue À L'APPEL, jamais à l'import --
+    instrument = i.instrument if i.instrument is not None else config.LSR_INSTRUMENT
+    t = lsr_tuning.tuning(instrument)
+    spec = lsr_tuning.spec(instrument)
+    if t is None or spec is None:
+        return None                                   # instrument non calibré → aucune géométrie
+    tick = spec.tick_size
     # -- déclencheur : sweep FRAIS et ORIENTÉ --
     if not _finite(i.sweep_ts) or not _finite(i.now):
         return None
@@ -191,7 +210,7 @@ def evaluate_lsr(i: LsrInputs) -> Optional[dict]:
         if i.orderflow is None:
             return None
         refill = getattr(i.orderflow, "wall_refill_ratio", None)
-        if not _finite(refill) or refill < config.LSR_B1_REFILL_MIN:
+        if not _finite(refill) or refill < t.b1_min_wall_refill_ratio:
             return None
         flip = getattr(i.orderflow, "tape_aggressor_buy_fraction", None)
     else:
@@ -201,12 +220,12 @@ def evaluate_lsr(i: LsrInputs) -> Optional[dict]:
     # « ultra-fort » (§3 : la corruption ne devient jamais un signal).
     if not _finite(flip) or not (0.0 <= flip <= 1.0):
         return None
-    if is_long and flip < config.LSR_B2_FLIP:
+    if is_long and flip < t.b2_tape_flip_threshold:
         return None
-    if not is_long and flip > 1.0 - config.LSR_B2_FLIP:
+    if not is_long and flip > 1.0 - t.b2_tape_flip_threshold:
         return None
     # -- F4-like : fenêtre de liquidité --
-    if not _f4_liquidity_ok(i.book):
+    if not _f4_liquidity_ok(i.book, t, tick):
         return None
 
     # -- A3 : extrême réel du sweep --
@@ -219,24 +238,23 @@ def evaluate_lsr(i: LsrInputs) -> Optional[dict]:
     # l'ORDRE des niveaux, pas leur positivité — elle laisserait passer un ticket négatif cohérent.
     if not _finite(i.vpoc) or i.vpoc <= 0:
         return None
-    tick = config.PRICE_TICK
     sign = 1.0 if is_long else -1.0
-    entry = _grid(extreme + sign * config.LSR_ENTRY_OFFSET_TICKS * tick)
-    stop = _grid(extreme - sign * config.LSR_SL_BUFFER_TICKS * tick)
-    vpoc = _grid(i.vpoc)
+    entry = _grid(extreme + sign * t.entry_offset_ticks * tick, tick)
+    stop = _grid(extreme - sign * t.sl_noise_buffer_max_ticks * tick, tick)
+    vpoc = _grid(i.vpoc, tick)
     if is_long:
         if vpoc <= entry:
             return None                               # pas de chemin vers l'objectif
-        tp = min(entry + config.LSR_TP_MAX_TICKS * tick, vpoc - config.LSR_TP_VPOC_MARGIN_TICKS * tick)
-        if tp < entry + config.LSR_TP_MIN_TICKS * tick:
+        tp = min(entry + t.tp_max_ticks * tick, vpoc - t.tp_vpoc_margin_ticks * tick)
+        if tp < entry + t.tp_min_ticks * tick:
             return None                               # pas de place avant le VPOC
         if not (stop < entry < tp):
             return None
     else:
         if vpoc >= entry:
             return None
-        tp = max(entry - config.LSR_TP_MAX_TICKS * tick, vpoc + config.LSR_TP_VPOC_MARGIN_TICKS * tick)
-        if tp > entry - config.LSR_TP_MIN_TICKS * tick:
+        tp = max(entry - t.tp_max_ticks * tick, vpoc + t.tp_vpoc_margin_ticks * tick)
+        if tp > entry - t.tp_min_ticks * tick:
             return None
         if not (tp < entry < stop):
             return None
@@ -244,11 +262,11 @@ def evaluate_lsr(i: LsrInputs) -> Optional[dict]:
     side = "LONG" if is_long else "SHORT"
     return {
         "status": "APPROVED",
-        "instrument": config.LSR_INSTRUMENT,
+        "instrument": instrument,
         "direction": side,
         "reason": (f"LSR — {i.sweep_direction} réintégré · "
                    f"{'absorption' if source == 'source' else 'mur rechargé'} · "
                    f"flip {flip:.2f} [{source}] · VPOC {vpoc}"),
-        "executionPlan": {"entryType": "LIMIT", "entryPrice": entry, "stopLoss": _grid(stop),
-                          "takeProfit": _grid(tp), "contracts": config.LSR_CONTRACTS},
+        "executionPlan": {"entryType": "LIMIT", "entryPrice": entry, "stopLoss": _grid(stop, tick),
+                          "takeProfit": _grid(tp, tick), "contracts": config.LSR_CONTRACTS},
     }

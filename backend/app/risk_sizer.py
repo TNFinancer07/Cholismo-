@@ -49,12 +49,11 @@ from typing import Any, Literal, Optional
 from pydantic import BaseModel
 
 from . import config
-
-# Spécifications contractuelles CME (constantes d'échange, non calibrables).
-INSTRUMENT_SPECS: dict[str, dict[str, float]] = {
-    "MES": {"tick_size": 0.25, "tick_value": 1.25},
-    "MNQ": {"tick_size": 0.25, "tick_value": 0.5},
-}
+# Spécifications contractuelles CME — une SEULE table dans le dépôt (D-069), partagée avec le
+# moteur LSR. Les avoir en double, c'est se donner rendez-vous avec une valeur de tick MNQ
+# corrigée d'un seul côté : le sizer et la géométrie dimensionneraient alors deux trades
+# différents pour le même plan.
+from .lsr_tuning import INSTRUMENT_SPECS  # noqa: F401  (ré-export : API historique du module)
 
 
 def _finite(x: Any) -> bool:
@@ -149,7 +148,7 @@ def account_view(account: Optional[AccountState],
                 "next_ticket": {"instrument": inst, "stop_ticks": ticks, "contracts": None,
                                 "risk_allowed": None, "status": "DISCONNECTED"}}
 
-    result = size_position(account, stop_distance_ticks=ticks, tick_value=spec["tick_value"])
+    result = size_position(account, stop_distance_ticks=ticks, tick_value=spec.tick_value)
     fields = {k: (float(v) if _finite(v) else None) for k, v in (
         ("current_equity", account.current_equity),
         ("day_start_equity", account.day_start_equity),
@@ -191,9 +190,9 @@ def size_plan(plan: Any, account: AccountState) -> Optional[dict]:
     entry, stop = ex.get("entryPrice"), ex.get("stopLoss")
     if not (_finite(entry) and _finite(stop)):
         return None
-    stop_ticks = abs(entry - stop) / spec["tick_size"]
+    stop_ticks = abs(entry - stop) / spec.tick_size
     result = size_position(account, stop_distance_ticks=stop_ticks,
-                           tick_value=spec["tick_value"])
+                           tick_value=spec.tick_value)
     if result.status != "APPROVED":
         return None
     return {**plan, "executionPlan": {**ex, "contracts": result.contracts}}

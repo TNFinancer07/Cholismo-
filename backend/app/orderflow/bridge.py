@@ -27,7 +27,7 @@ from __future__ import annotations
 import math
 from typing import Any, Optional
 
-from .. import config
+from .. import config, lsr_tuning
 from .calculator import OrderFlowSnapshot, compute_snapshot
 
 
@@ -120,18 +120,21 @@ def orderflow_shadow(schema: Any, snapshot: OrderFlowSnapshot) -> dict:
         alert = getattr(sweep, "alert", None) if getattr(sweep, "triggered", False) else None
         direction = getattr(alert, "direction", None)
 
+        # Mêmes SEUILS que le moteur, donc même TABLE (D-069) : une comparaison faite à d'autres
+        # seuils décrirait un moteur qui n'existe pas. Instrument non calibré → aucun verdict.
+        t = lsr_tuning.tuning(config.LSR_INSTRUMENT)
         refill = snapshot.wall_refill_ratio
         flip = snapshot.tape_aggressor_buy_fraction
         v1_src = absorption is True if absorption is not None else None
-        v1_ih = (refill >= config.LSR_B1_REFILL_MIN) if _finite(refill) else None
+        v1_ih = (refill >= t.b1_min_wall_refill_ratio) if (t and _finite(refill)) else None
 
         def _b2_verdict(value: Any) -> Optional[bool]:
             """Même règle que la porte B2 du moteur — sinon la comparaison ne dirait rien de la
             décision réelle. Sans direction de sweep, il n'y a pas de verdict à rendre."""
-            if not _finite(value) or not (0.0 <= value <= 1.0) or direction is None:
+            if t is None or not _finite(value) or not (0.0 <= value <= 1.0) or direction is None:
                 return None
-            return (value >= config.LSR_B2_FLIP if direction == "BID_SWEEP"
-                    else value <= 1.0 - config.LSR_B2_FLIP)
+            return (value >= t.b2_tape_flip_threshold if direction == "BID_SWEEP"
+                    else value <= 1.0 - t.b2_tape_flip_threshold)
 
         v2_src, v2_ih = _b2_verdict(ratio), _b2_verdict(flip)
         # Ligne LISIBLE en tête : un dict de valeurs brutes n'est pas un message. Ce qu'un humain

@@ -175,22 +175,17 @@ MC_SEED = int(os.getenv("MC_SEED")) if os.getenv("MC_SEED") else None  # None �
 MC_MAX_WORK = int(os.getenv("MC_MAX_WORK", "2000000"))
 
 # --- LSR v1.2 — couche microstructure (D-046) ---
-# Seuils v1 provisional (calibration « 1re passe » du doc LSR, à figer sur 60 trades réels).
 # ISOLATION : cette couche ne lit QUE la microstructure — les frontières compte (F1/F2/F8),
 # volatilité (F3) et news (F5) vivent dans d'autres couches/services, jamais ici.
+#
+# ⚠ Les seuils PAR INSTRUMENT (spread F4, profondeur, géométrie A1/A2/A3 en ticks, gates B1-B4)
+# ne sont PLUS ici : ils vivent dans `app/lsr_tuning.py`, qui mirroite `lsr-engine/src/config.ts`
+# et est verrouillé par `tests/test_parite_lsr_config.py`. Ne pas les réintroduire ici — une
+# valeur écrite à deux endroits finit toujours par n'être corrigée qu'à un seul (D-069).
+# Ne restent ci-dessous que les grandeurs GLOBALES, indépendantes de l'instrument.
 LSR_INSTRUMENT = os.getenv("LSR_INSTRUMENT", "MES")         # Micro E-mini S&P 500
 LSR_SWEEP_MAX_AGE_S = float(os.getenv("LSR_SWEEP_MAX_AGE_S", "90"))    # fraîcheur du déclencheur
 LSR_EXTREME_WINDOW_S = float(os.getenv("LSR_EXTREME_WINDOW_S", "120"))  # fenêtre de l'extrême (A3)
-LSR_ENTRY_OFFSET_TICKS = int(os.getenv("LSR_ENTRY_OFFSET_TICKS", "1"))  # A1 — sens réintégration
-LSR_SL_BUFFER_TICKS = int(os.getenv("LSR_SL_BUFFER_TICKS", "2"))        # A3 — buffer bruit
-LSR_TP_MIN_TICKS = int(os.getenv("LSR_TP_MIN_TICKS", "3"))              # A2 — TP plancher
-LSR_TP_MAX_TICKS = int(os.getenv("LSR_TP_MAX_TICKS", "5"))              # A2 — TP plafond
-LSR_TP_VPOC_MARGIN_TICKS = int(os.getenv("LSR_TP_VPOC_MARGIN_TICKS", "1"))  # A2 — marge avant VPOC
-LSR_B2_FLIP = float(os.getenv("LSR_B2_FLIP", "0.60"))                   # B2 — bascule agressifs
-# Doc LSR : 1 tick sur MES réel. Le mock émet un half-spread de 0.25 (spread = 2 ticks) en régime
-# normal : 2 = calibration mock v1 provisional, à resserrer à 1 sur feed réel (env-overridable).
-LSR_F4_MAX_SPREAD_TICKS = float(os.getenv("LSR_F4_MAX_SPREAD_TICKS", "2"))
-LSR_F4_MIN_DEPTH = float(os.getenv("LSR_F4_MIN_DEPTH", "150"))          # top-3, chaque côté
 # RiskSizer /5 + modif VIX = couche COMPTE (AccountState), hors D-046 → taille fixe v1.
 LSR_CONTRACTS = int(os.getenv("LSR_CONTRACTS", "1"))
 # F7-like — fenêtre anti-FOMO : après une émission, aucun nouveau manifeste pendant ce délai,
@@ -295,10 +290,9 @@ ORDERFLOW_MIN_SPAN_S = float(os.getenv("ORDERFLOW_MIN_SPAN_S", "1.0"))
 # "inhouse" : elles lisent les mesures calculées chez nous (D-055). Bascule explicite, jamais
 #             implicite : changer la source de vérité du chemin d'émission est une décision.
 LSR_ORDERFLOW_SOURCE = os.getenv("LSR_ORDERFLOW_SOURCE", "source")
-# Seuil B1 in-house : part du mur consommé qui doit être RECHARGÉE pour valider la défense.
-# v1 provisional (PLACEHOLDER §11) — remplace un booléen `absorption` par une mesure continue,
-# donc le seuil est neuf et non calibré : c'est précisément pourquoi le défaut reste "source".
-LSR_B1_REFILL_MIN = float(os.getenv("LSR_B1_REFILL_MIN", "0.5"))
+# Le seuil B1 in-house (part du mur consommé qui doit être RECHARGÉE) est PAR INSTRUMENT depuis
+# D-069 : `lsr_tuning.PER_INSTRUMENT[...].b1_min_wall_refill_ratio` (0.40, valeur du moteur de
+# référence — le Python exigeait 0.50 et refusait donc des murs que la référence valide).
 # Historique de carnet L2 gardé par l'Engine pour B1 (le schéma ne porte que le carnet COURANT ;
 # la heatmap, elle, accumule côté frontend). 120 snapshots ≈ 30 s à 4 Hz.
 BOOK_HISTORY_MAX = int(os.getenv("BOOK_HISTORY_MAX", "120"))

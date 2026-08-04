@@ -18,7 +18,7 @@ from collections import deque
 from datetime import datetime, timezone, timedelta
 from typing import Any, Optional
 
-from . import config, settings
+from . import config, lsr_tuning, settings
 from .datasource.base import MarketDataSource
 from .datasource import scenarios
 from .event_store import get_store
@@ -960,6 +960,14 @@ class Engine:
             await asyncio.sleep(max(0.1, config.SWEEP_TICK_SECONDS - elapsed))
 
     async def start(self) -> None:
+        # Un `LSR_INSTRUMENT` hors de la table de calibration (D-069) rend `evaluate_lsr`
+        # DÉFINITIVEMENT muet — fail-closed correct, mais silencieux : une faute de frappe dans
+        # l'environnement ressemblerait exactement à « aucun setup aujourd'hui ». Le dire une
+        # fois au démarrage est la différence entre un moteur calme et un moteur mort.
+        if lsr_tuning.tuning(config.LSR_INSTRUMENT) is None:
+            log.error("LSR_INSTRUMENT=%r n'est pas calibré (connus : %s) — le moteur LSR "
+                      "n'émettra AUCUN manifeste tant que ce n'est pas corrigé",
+                      config.LSR_INSTRUMENT, ", ".join(sorted(lsr_tuning.PER_INSTRUMENT)))
         self._tasks = [asyncio.create_task(self._fast_loop()),
                        asyncio.create_task(self._slow_loop()),
                        asyncio.create_task(self._sweep_loop())]

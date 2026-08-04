@@ -122,11 +122,18 @@ class MockDataSource(MarketDataSource):
         # moteur détecte et flagge — le mock reste volontairement sale (CLAUDE §4).
         mid = round(es * 4) / 4
         depth = 10 if rng.random() > patho["drop_p"] * 2 else rng.randint(3, 9)
-        half_spread = 0.25 if rng.random() > 0.15 else 0.50
+        # Spread NORMAL = 1 tick (D-069). MES cote bid/ask collés la quasi-totalité de la séance :
+        # le mock émettait 2 ticks en permanence, ce qui avait forcé le seuil F4 à 2 pour que la
+        # démo produise quoi que ce soit — un mock mal calibré ne doit pas relâcher une frontière
+        # de risque. Le spread élargi redevient ce qu'il doit être : une PATHOLOGIE occasionnelle.
+        # Les DEUX meilleurs niveaux restent sur la grille de ticks — un carnet dont le meilleur
+        # bid tombe entre deux ticks n'existe pas ; c'est le mid qui vit sur un demi-tick.
+        spread_ticks = 1 if rng.random() > 0.15 else rng.choice((2, 4))
+        best_bid, best_ask = mid, round(mid + 0.25 * spread_ticks, 2)
         cross_shift = 0.75 if rng.random() < patho["contradict_p"] else 0.0
-        bids = [[round(mid - half_spread - 0.25 * k + cross_shift, 2),
+        bids = [[round(best_bid - 0.25 * k + cross_shift, 2),
                  max(1, int(rng.gauss(60, 35)))] for k in range(depth)]
-        asks = [[round(mid + half_spread + 0.25 * k, 2),
+        asks = [[round(best_ask + 0.25 * k, 2),
                  max(1, int(rng.gauss(60, 35)))] for k in range(depth)]
         await self._emit(state, config.MICROSTRUCTURE_SOURCE, "order_book",
                          {"bids": bids, "asks": asks}, patho)
@@ -137,7 +144,9 @@ class MockDataSource(MarketDataSource):
         for _ in range(rng.randint(1, 4)):
             self._tape_seq += 1
             side = "BUY" if rng.random() < aggressor else "SELL"
-            price = mid + (half_spread if side == "BUY" else -half_spread) \
+            # Un agresseur acheteur paie l'ASK, un vendeur frappe le BID (puis remonte/descend le
+            # carnet s'il balaie plusieurs niveaux) — c'est ce qui rend le tape lisible côté B2.
+            price = (best_ask if side == "BUY" else best_bid) \
                 + 0.25 * rng.randint(0, 2) * (1 if side == "BUY" else -1)
             size = max(1, int(rng.lognormvariate(1.4, 0.9)))
             if rng.random() < patho["nan_p"]:

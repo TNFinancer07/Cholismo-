@@ -13,13 +13,14 @@ séparée, et documentée comme telle.
 import math
 
 from app import config
+from app.lsr_tuning import MES_TUNING as MES
 from app.lsr_engine import LsrInputs, evaluate_lsr
 from app.orderflow import OrderFlowSnapshot
 
 T0 = 1_700_000_000.0
 
 
-def _book(best_bid=4999.75, best_ask=5000.25, size=400):
+def _book(best_bid=4999.75, best_ask=5000.0, size=400):   # 1 tick de spread (F4 MES, D-069)
     return {"bids": [[best_bid - k * 0.25, size] for k in range(5)],
             "asks": [[best_ask + k * 0.25, size] for k in range(5)]}
 
@@ -83,8 +84,8 @@ def test_mode_INHOUSE_B2_rejette_quand_la_mesure_maison_refuse():
 
 
 def test_mode_INHOUSE_B1_utilise_le_RECHARGEMENT_du_mur():
-    au_dessus = _snapshot(wall_refill_ratio=config.LSR_B1_REFILL_MIN + 0.1)
-    en_dessous = _snapshot(wall_refill_ratio=config.LSR_B1_REFILL_MIN - 0.1)
+    au_dessus = _snapshot(wall_refill_ratio=MES.b1_min_wall_refill_ratio + 0.1)
+    en_dessous = _snapshot(wall_refill_ratio=MES.b1_min_wall_refill_ratio - 0.1)
     assert evaluate_lsr(_inputs(orderflow=au_dessus, orderflow_source="inhouse")) is not None
     assert evaluate_lsr(_inputs(orderflow=en_dessous, orderflow_source="inhouse")) is None
 

@@ -17,6 +17,7 @@ import math
 import time
 
 from app import config
+from app.lsr_tuning import MES_TUNING as MES
 from app.datasource.mock import MockDataSource
 from app.engine import Engine
 from app.lsr_engine import LsrInputs, build_lsr_inputs, evaluate_lsr
@@ -46,8 +47,10 @@ def _prints(now, *, low=None, high=None, n=9, side="SELL"):
 
 
 def _book(depth_each=70.0):
+    """Carnet MES nominal : meilleur bid et meilleur ask à 1 TICK l'un de l'autre — c'est ce que
+    cote MES la quasi-totalité de la séance, et c'est le maximum que tolère F4 (D-069)."""
     return {"bids": [[4999.75, depth_each], [4999.5, depth_each], [4999.25, depth_each]],
-            "asks": [[5000.25, depth_each], [5000.5, depth_each], [5000.75, depth_each]]}
+            "asks": [[5000.0, depth_each], [5000.25, depth_each], [5000.5, depth_each]]}
 
 
 def _inputs(now=None, **over) -> LsrInputs:
@@ -74,10 +77,10 @@ def test_long_apres_bid_sweep_geometrie_complete():
     ex = plan["executionPlan"]
     assert ex["entryType"] == "LIMIT" and ex["contracts"] == config.LSR_CONTRACTS
     # A1 : entrée = extrême + offset ; A3 : stop = extrême − buffer ; A2 : TP borné vers VPOC
-    assert ex["entryPrice"] == 4998.0 + config.LSR_ENTRY_OFFSET_TICKS * T
-    assert ex["stopLoss"] == 4998.0 - config.LSR_SL_BUFFER_TICKS * T
-    assert ex["takeProfit"] == min(ex["entryPrice"] + config.LSR_TP_MAX_TICKS * T,
-                                   5000.0 - config.LSR_TP_VPOC_MARGIN_TICKS * T)
+    assert ex["entryPrice"] == 4998.0 + MES.entry_offset_ticks * T
+    assert ex["stopLoss"] == 4998.0 - MES.sl_noise_buffer_max_ticks * T
+    assert ex["takeProfit"] == min(ex["entryPrice"] + MES.tp_max_ticks * T,
+                                   5000.0 - MES.tp_vpoc_margin_ticks * T)
     assert ex["stopLoss"] < ex["entryPrice"] < ex["takeProfit"]
     # aligné au tick
     for k in ("entryPrice", "stopLoss", "takeProfit"):
@@ -91,8 +94,8 @@ def test_short_apres_ask_sweep_geometrie_miroir():
         aggressor_ratio=0.25, vpoc=5000.0))
     assert plan is not None and plan["direction"] == "SHORT"
     ex = plan["executionPlan"]
-    assert ex["entryPrice"] == 5002.0 - config.LSR_ENTRY_OFFSET_TICKS * T
-    assert ex["stopLoss"] == 5002.0 + config.LSR_SL_BUFFER_TICKS * T
+    assert ex["entryPrice"] == 5002.0 - MES.entry_offset_ticks * T
+    assert ex["stopLoss"] == 5002.0 + MES.sl_noise_buffer_max_ticks * T
     assert ex["takeProfit"] < ex["entryPrice"] < ex["stopLoss"]
 
 
@@ -149,8 +152,8 @@ def test_f4_profondeur_insuffisante_silence():
 def test_a2_vpoc_du_mauvais_cote_ou_sans_place_silence():
     assert evaluate_lsr(_inputs(vpoc=4997.0)) is None                    # LONG : VPOC sous l'entrée
     # VPOC si proche que TP < entrée + tpMin → pas de place → rejet
-    close = 4998.0 + config.LSR_ENTRY_OFFSET_TICKS * T + (config.LSR_TP_MIN_TICKS - 1) * T \
-        + config.LSR_TP_VPOC_MARGIN_TICKS * T
+    close = 4998.0 + MES.entry_offset_ticks * T + (MES.tp_min_ticks - 1) * T \
+        + MES.tp_vpoc_margin_ticks * T
     assert evaluate_lsr(_inputs(vpoc=close)) is None
 
 

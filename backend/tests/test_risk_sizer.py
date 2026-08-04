@@ -26,7 +26,7 @@ from app.risk_sizer import (
     size_position,
 )
 
-MES_TICK_VALUE = INSTRUMENT_SPECS["MES"]["tick_value"]     # 1.25 $/tick
+MES_TICK_VALUE = INSTRUMENT_SPECS["MES"].tick_value     # 1.25 $/tick
 
 
 def _apex(equity=50_000.0, day_start=50_000.0) -> AccountState:
