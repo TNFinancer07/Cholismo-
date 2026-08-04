@@ -3752,6 +3752,61 @@ Log (§2.5), pas un champ mutable. Les deux derniers sont purs et courts.
 21 tests neufs, 4 tests existants mis à jour (F2 les fait changer de verdict) → **1353 passed**,
 ruff clean.
 
+## D-072 · Le verrou de parité — le test qui LIT le TypeScript
+
+`tests/test_parite_lsr_config.py` parse `lsr-engine/src/config.ts` et échoue si le Python ne dit
+pas la même chose.
+
+### Pourquoi un test et pas une relecture
+Les huit passes de parité précédentes ont toutes trouvé la même chose : non pas une mauvaise
+valeur, mais **la même valeur écrite à deux endroits**, puis corrigée d'un seul côté. Une
+relecture attrape ça le jour où on la fait. Et une divergence de seuil **ne casse aucun test
+métier** — elle produit des trades légèrement différents, en silence, pendant des semaines.
+
+### Trois propriétés, dans l'ordre d'importance
+1. **Aucune constante du TS ne peut être IGNORÉE.** Chaque clé de `DEFAULT_CONFIG` est soit
+   comparée (table `PORTE`, avec la conversion d'unités écrite explicitement — c'est le seul
+   endroit où ms et secondes se rencontrent, et le cacher ferait disparaître un facteur 1000),
+   soit inscrite au registre `NON_PORTE` **avec son motif et sa dépendance**. Une clé neuve côté
+   TypeScript fait tomber le test tant que personne n'a tranché son sort.
+2. **Ce qui est comparé doit être égal.**
+3. **Le registre ne peut pas pourrir** : une entrée qui a fini par être portée fait tomber le
+   test, pour qu'on la retire au lieu de la laisser mentir.
+
+Le registre `NON_PORTE` compte aujourd'hui **9 entrées** : F6 (×2), F7-resubmit, F8 (×5),
+scale-out. Chacune nomme ce qui la débloquera — pour les huit premières, un `LsrRuntimeState` qui
+doit être une **projection du Decision Log** (§2.5), pas un champ mutable.
+
+### Le parseur dit quand il ne comprend plus
+Un parseur muet passerait tous les autres tests au vert **en ne comparant rien**. Un test exige
+donc un plancher de clés par bloc, et l'absence du fichier de référence est une ERREUR explicite
+(« le RÉPARER, pas le désactiver »), pas un skip.
+
+Pas d'`eval` : l'arithmétique se limite aux sommes de produits (`24 * 60 * 60_000`), ce que
+`config.ts` contient réellement. Exécuter du texte lu sur le disque pour lire un nombre serait
+disproportionné.
+
+### Le verrou s'est attrapé lui-même à sa première exécution
+`INSTRUMENT_SPECS` est IMBRIQUÉ (`MES: { tickSize… }, MNQ: { tickSize… }`). Mon parseur à plat
+gardait la DERNIÈRE valeur de chaque clé homonyme : il comparait MNQ en croyant comparer MES, et
+aurait déclaré la parité sur un instrument jamais vérifié. Corrigé par une lecture imbriquée.
+
+### Vérif — le verrou mord, prouvé par mutation
+Sept mutations, une à la fois, **des deux côtés**, chacune restaurée ensuite :
+
+| mutation | verrou |
+|---|---|
+| TS · `b1MinWallRefillRatio` 0.4 → 0.45 | ✓ détectée |
+| TS · constante globale AJOUTÉE | ✓ détectée |
+| TS · `APEX maxDrawdown` 2500 → 3000 | ✓ détectée |
+| TS · palier VIX 20 → 22 | ✓ détectée |
+| PY · `tp_max_ticks` MNQ 8 → 7 | ✓ détectée |
+| PY · `tick_value` MNQ 0.5 → 0.6 | ✓ détectée |
+| PY · `RISK_BUFFER_DIVISOR` 5 → 4 | ✓ détectée |
+| sources intactes | ✓ vert |
+
+11 tests neufs → **1364 passed**, ruff clean.
+
 ## D-065 · Outiller le relevé C2 — et une correction à D-063
 `python -m app.providers.releve` prépare la séance de catalogue. Il pose trois questions dans
 l'ordre : **est-ce que ça répond** (appel réel, échec classé par cause), **est-ce lisible**
