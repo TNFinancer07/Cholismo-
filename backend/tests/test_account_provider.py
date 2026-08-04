@@ -26,6 +26,11 @@ from app.risk_sizer import APEX_EOD_50K, apex_eod_account, size_plan
 from app.sse import broadcaster
 
 
+# Régime VIX calme (multiplicateur 1.0) — ces tests portent sur le sizing, pas sur
+# le modificateur de volatilité.
+CALME = 12.0
+
+
 def _fresh(value, now):
     return MetaField(value=value, last_update_ts=now, source="test", freshness=Freshness.FRESH)
 
@@ -88,30 +93,30 @@ def test_provider_always_fresh_pour_le_stack_demo():
 
 def test_size_plan_remplace_les_contrats_par_la_regle_du_cinquieme():
     # stop 3 ticks MES (0.75 pt) → 3 × 1.25 = 3.75 $/contrat ; buffer 1000 → 200/3.75 → 53
-    sized = size_plan(_plan(), apex_eod_account(APEX_EOD_50K))
+    sized = size_plan(_plan(), apex_eod_account(APEX_EOD_50K), vix=CALME)
     assert sized is not None and sized["executionPlan"]["contracts"] == 53
     assert sized["executionPlan"]["entryPrice"] == 5448.25  # géométrie intacte
 
 
 def test_size_plan_ne_mute_jamais_le_plan_d_entree():
     plan = _plan()
-    size_plan(plan, apex_eod_account(APEX_EOD_50K))
+    size_plan(plan, apex_eod_account(APEX_EOD_50K), vix=CALME)
     assert plan["executionPlan"]["contracts"] == 1          # l'original n'a pas bougé
 
 
 def test_size_plan_buffer_mort_rend_none():
     dead = apex_eod_account(APEX_EOD_50K, current_equity=48_900.0, day_start_equity=50_000.0)
-    assert size_plan(_plan(), dead) is None
+    assert size_plan(_plan(), dead, vix=CALME) is None
 
 
 def test_size_plan_instrument_inconnu_rend_none():
-    assert size_plan(_plan(instrument="ZN"), apex_eod_account(APEX_EOD_50K)) is None
+    assert size_plan(_plan(instrument="ZN"), apex_eod_account(APEX_EOD_50K), vix=CALME) is None
 
 
 def test_size_plan_malforme_rend_none():
-    assert size_plan(None, apex_eod_account(APEX_EOD_50K)) is None
-    assert size_plan({"status": "APPROVED"}, apex_eod_account(APEX_EOD_50K)) is None
-    assert size_plan(_plan(executionPlan=None), apex_eod_account(APEX_EOD_50K)) is None
+    assert size_plan(None, apex_eod_account(APEX_EOD_50K), vix=CALME) is None
+    assert size_plan({"status": "APPROVED"}, apex_eod_account(APEX_EOD_50K), vix=CALME) is None
+    assert size_plan(_plan(executionPlan=None), apex_eod_account(APEX_EOD_50K), vix=CALME) is None
 
 
 # --- Câblage engine : on ne trade JAMAIS à l'aveugle ----------------------------------------
@@ -127,6 +132,9 @@ def _wire_setup(eng, now):
     s1.order_flow.absorption = _fresh(True, now)
     s1.order_flow.aggressor_ratio = _fresh(0.72, now)
     s1.structure.vpoc = _fresh(5000.0, now)
+    # Sans VIX FRAIS, le sizer est aveugle et n'émet rien (D-070) : le câbler fait partie du
+    # décor minimal d'un setup valide, au même titre que le carnet.
+    eng.schema.s2_state.cascade.vix = _fresh(CALME, now)
 
 
 def _drain_manifests(q):

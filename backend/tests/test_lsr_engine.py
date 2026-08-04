@@ -204,6 +204,8 @@ def _wire_setup(eng, now):
     s1.order_flow.absorption = _fresh(True, now)
     s1.order_flow.aggressor_ratio = _fresh(0.72, now)
     s1.structure.vpoc = _fresh(5000.0, now)
+    # VIX FRAIS obligatoire depuis D-070 : sans lui le sizer est aveugle et rien n'est émis.
+    eng.schema.s2_state.cascade.vix = _fresh(12.0, now)      # régime calme → multiplicateur 1.0
 
 
 def test_pipeline_sweep_vers_manifeste_emis_et_deduplique():

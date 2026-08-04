@@ -21,6 +21,12 @@ from ..schema import (ExecutionStrategy, S1State, S1Strategies, SessionMarker,
 MTL = ZoneInfo("America/Montreal")
 
 # --- AUTORITÉ thresholds (reference/sony) ---
+# ⚠ BORNE DE 20.00 (D-070). Le doc écrit « VIX 15-20 » puis « VIX 20-30 » : 20 appartient aux
+# deux, la borne est ambiguë DANS LA SOURCE. Elle est tranchée EXCLUSIVE en haut du palier
+# 0.75 — donc 0.50 à VIX exactement 20.00 — pour deux raisons : c'est la lecture la plus serrée
+# (§2.4, fail-closed par défaut), et c'est celle du moteur LSR de référence
+# (`lsr-engine/src/config.ts::vixMultiplier`). Deux paliers différents pour le même VIX dans le
+# même terminal seraient indéfendables devant l'opérateur.
 CHOP_BLOCKING = 61.8            # SVS filtre 1B (>= blocks) ; MR gate G4 (<= blocks)
 VIX_SUSPEND = 30.0              # both strategies: session suspended above 30
 SVS_WINDOW = ((9, 30), (11, 0))   # prime 09h30-11h00 (heure locale Montréal)
@@ -31,7 +37,7 @@ def _vix_sizing_tier(vix: float) -> tuple[float, str]:
     """SVS §8 — VIX-tiered sizing (% of calibration size)."""
     if vix < 15:
         return 100.0, "VIX < 15 → 100 %"
-    if vix <= 20:
+    if vix < 20:
         return 75.0, "VIX 15-20 → 75 %"
     if vix <= 30:
         return 50.0, "VIX 20-30 → 50 % (stop élargi autorisé)"
@@ -42,7 +48,7 @@ def _mr_vix_modifier(vix: float) -> tuple[float, str]:
     """MR §2 — modificateur VIX multiplicatif."""
     if vix < 15:
         return 1.0, "VIX < 15 → ×1.0"
-    if vix <= 20:
+    if vix < 20:
         return 0.75, "VIX 15-20 → ×0.75"
     if vix <= 30:
         return 0.50, "VIX 20-30 → ×0.50"

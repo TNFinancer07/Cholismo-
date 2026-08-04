@@ -3639,6 +3639,61 @@ du moteur le dit maintenant en ERROR, en nommant le coupable **et** les instrume
 bruit (`sl_noise_buffer_max_ticks`) tant que D-070 n'a pas câblé sa version dynamique : c'est le
 choix prudent (stop plus loin = moins de contrats, jamais plus).
 
+## D-070 · Le modificateur VIX manquait tout court — et le stop A3 était figé
+
+Deux des cinq divergences numériques annoncées se sont révélées différentes de leur étiquette.
+
+### 1. Ce n'était pas « une borne à 20 », c'était un modificateur ABSENT
+Le moteur de référence fait `contrats = floor(bruts × mult_VIX)`. Le `size_position` Python ne
+l'appliquait **pas du tout** : taille pleine à VIX 28, là où la référence coupe de moitié. La
+divergence de borne (0.75 contre 0.50 à VIX exactement 20.00) n'était que la partie visible.
+
+`lsr_tuning.vix_multiplier` porte les paliers exacts. La borne de 20.00 est **exclusive** en haut
+du palier 0.75 : le doc écrit « 15-20 » puis « 20-30 », 20 appartient aux deux — l'ambiguïté est
+dans la SOURCE, pas dans le code. On tranche pour la lecture la plus serrée (§2.4), qui est aussi
+celle du moteur TS. `sony.py` est aligné sur la même borne : deux paliers différents pour le même
+VIX dans le même terminal seraient indéfendables devant l'opérateur.
+
+**Fail-closed, et dans le bon sens** : un VIX absent, périmé ou non fini rend un multiplicateur de
+**0**, pas 1.0. Un VIX qu'on ne voit pas n'est pas un VIX calme ; le repli inverse donnerait la
+taille MAXIMALE exactement quand on est le plus aveugle.
+
+Conséquence assumée : `size_plan` (le seul chemin d'émission) rend `None` sans VIX observable, et
+le HUD affiche `VIX_BLIND` — motif **distinct** de `VIX_SUSPENDED`, parce que « je ne vois pas la
+volatilité » et « elle est trop haute » appellent deux gestes différents (rebrancher un flux /
+attendre). Le buffer, lui, reste affiché : il est toujours vrai.
+
+Un test AST interdit à tout module de `app/` d'appeler `size_position` sans `vix=`. Sans lui,
+l'oubli ne casserait AUCUN test — il rendrait juste des positions deux fois trop grosses, en
+silence.
+
+### 2. Le buffer de bruit A3 était une constante
+`min(max, max(min, ceil(spread)) + (atr_rapide > atr_lent ? 1 : 0))`. Un stop qui ignore le spread
+se fait sortir par le bruit qu'il est censé absorber. `_f4_liquidity` rend désormais le spread
+qu'il a mesuré plutôt qu'un booléen : deux lectures du carnet, ce serait deux occasions de ne pas
+parler du même carnet. Absence de spread ou d'ATR → **borne haute** : un stop plus loin, c'est
+moins de contrats, jamais plus.
+
+### 3. Le blackout news n'était PAS une divergence — refus argumenté
+`f5DefaultBlackout*Ms` = ±2 min contre `MACRO_PAUSE_WINDOW_S` = 900 s. Ce sont deux portes :
+- **±2 min** = F5 du moteur LSR. Côté Python : `NEWS_LOCK_BEFORE/AFTER_MIN` → `HARD_LOCK` →
+  `evaluate_lsr` rejette. **Déjà aligné à la minute près.**
+- **±15 min** = règle Phase 0 `MACRO_BLACKOUT` (D-040), qui gèle le Go/No-Go HUMAIN, et qui est
+  strictement plus large donc plus prudente.
+
+La ramener à 2 min « pour aligner » rouvrirait 13 minutes de part et d'autre de chaque NFP : un
+DESSERRAGE de discipline déguisé en correction de parité. Les deux restent, et un test interdit
+qu'on les confonde plus tard.
+
+### Reporté à D-071, sciemment
+`f7ResubmitLockoutMs` (900 s) n'est pas un nombre à changer : c'est une machine à états
+(`rejectedSetupIds`, `lockoutUntil`) que le Python n'a pas. L'ajouter en constante seule aurait
+produit un nombre mort. Il part avec F6.
+
+### Vérif
+19 tests neufs → **1332 passed**, ruff clean, mypy strict clean. Essai réel sur le stack de démo :
+VIX 13.13 lu de bout en bout, ticket 53 contrats, `APPROVED`.
+
 ## D-065 · Outiller le relevé C2 — et une correction à D-063
 `python -m app.providers.releve` prépare la séance de catalogue. Il pose trois questions dans
 l'ordre : **est-ce que ça répond** (appel réel, échec classé par cause), **est-ce lisible**

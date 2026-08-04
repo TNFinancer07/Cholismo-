@@ -20,7 +20,8 @@ réels. Ce qui est figé, c'est qu'ils soient les MÊMES des deux côtés — pa
 """
 from __future__ import annotations
 
-from typing import Optional
+import math
+from typing import Any, Optional
 
 from pydantic import BaseModel
 
@@ -117,3 +118,35 @@ def tuning(instrument: Optional[str]) -> Optional[InstrumentTuning]:
 def spec(instrument: Optional[str]) -> Optional[InstrumentSpec]:
     """Spécification d'échange d'un instrument, ou `None` s'il est inconnu (même doctrine)."""
     return INSTRUMENT_SPECS.get(instrument) if instrument else None
+
+
+def vix_multiplier(vix: Any, hard_block: Optional[float] = None) -> float:
+    """Modificateur de sizing selon le régime VIX — port exact de `config.ts::vixMultiplier`.
+
+        [0, 15) → 1.00 · [15, 20) → 0.75 · [20, 30] → 0.50 · (30, ∞) → 0 (suspendu, F3)
+
+    **La borne de 20.00 est EXCLUSIVE en haut du palier 0.75** : à VIX exactement 20.00 le
+    multiplicateur vaut 0.50. Le doc de référence écrit « 15-20 » puis « 20-30 » — 20 appartient
+    aux deux, la borne est donc ambiguë dans la source, pas dans le code. On tranche pour la
+    lecture la plus SERRÉE (§2.4, fail-closed par défaut), et le moteur TypeScript fait pareil.
+
+    FAIL-CLOSED (§3) : un VIX absent, non fini ou d'un mauvais type rend **0.0**, pas 1.0. Un VIX
+    qu'on ne voit pas n'est pas un VIX calme ; le repli inverse donnerait la taille MAXIMALE
+    précisément au moment où on est le plus aveugle."""
+    if isinstance(vix, bool) or not isinstance(vix, (int, float)) or not math.isfinite(vix):
+        return 0.0
+    limite = hard_block if hard_block is not None else _hard_block()
+    if vix > limite:
+        return 0.0
+    if vix < 15:
+        return 1.0
+    if vix < 20:
+        return 0.75
+    return 0.5
+
+
+def _hard_block() -> float:
+    """`VIX_CRIT` lu À L'APPEL : le blocage dur F3 est une frontière de RISQUE, pas une
+    calibration d'instrument — il vit dans `config` et doit rester réglable au runtime."""
+    from . import config
+    return float(config.VIX_CRIT)

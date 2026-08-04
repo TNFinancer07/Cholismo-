@@ -711,7 +711,8 @@ class Engine:
                 account_now = candidate if isinstance(candidate, AccountState) else None
             except Exception:
                 account_now = None
-        self.schema.account_state = AccountStateBlock(**account_view(account_now))
+        self.schema.account_state = AccountStateBlock(
+            **account_view(account_now, vix=self._vix_pour_sizing()))
 
         dump = self.schema.model_dump(mode="json")
         for block in ("session_identity", "s1_state", "bridge_variables",
@@ -931,9 +932,9 @@ class Engine:
             account = None
         if not isinstance(account, AccountState):
             return                                    # équité fossile/absente/corrompue ≠ équité (§3)
-        plan = size_plan(plan, account)
+        plan = size_plan(plan, account, vix=self._vix_pour_sizing())
         if plan is None:
-            return                                    # F8 : le buffer ne porte pas 1 contrat
+            return                  # F8, ou VIX suspendu/aveugle : pas de taille à émettre
         manifest = manifest_from_lsr_plan(plan, now_ms=int(now * 1000))
         if manifest is None:
             return                                    # la frontière D-045 a le dernier mot
@@ -958,6 +959,19 @@ class Engine:
                 log.exception("sweep loop tick failed (fail-closed: no alert emitted)")
             elapsed = time.time() - started
             await asyncio.sleep(max(0.1, config.SWEEP_TICK_SECONDS - elapsed))
+
+    def _vix_pour_sizing(self) -> Optional[float]:
+        """VIX **FRESH** du schéma pour le modificateur de sizing (D-070), ou `None`.
+
+        Un VIX périmé n'est pas un VIX (§3) : il vaut ici « je ne vois pas la volatilité », et
+        `vix_multiplier` en fait 0 — donc le sizer suspend. C'est volontairement plus sévère
+        qu'un blocage à 30 : on ne dimensionne pas sur un régime qu'on ne mesure plus."""
+        meta = getattr(self.schema.s2_state.cascade, "vix", None)
+        if meta is None or meta.freshness != Freshness.FRESH:
+            return None
+        value = meta.value
+        return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) \
+            else None
 
     async def start(self) -> None:
         # Un `LSR_INSTRUMENT` hors de la table de calibration (D-069) rend `evaluate_lsr`

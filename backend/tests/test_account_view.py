@@ -22,6 +22,10 @@ from app.engine import Engine
 from app.redis_state import RedisState
 from app.risk_sizer import APEX_EOD_50K, AccountState, account_view, apex_eod_account
 
+# Régime VIX CALME (multiplicateur 1.0) : ces tests décrivent la projection du BUFFER, pas le
+# modificateur de volatilité — le rendre explicite évite de tester deux règles à la fois.
+CALME = 12.0
+
 FLOOR = APEX_EOD_50K.initial_capital - APEX_EOD_50K.max_drawdown        # 47 500
 DLL = APEX_EOD_50K.daily_loss_limit                                     # 1 000
 
@@ -33,7 +37,7 @@ def _acc(equity=50_000.0, day_start=50_000.0) -> AccountState:
 # --- Projection nominale --------------------------------------------------------------------
 
 def test_vue_nominale_jour_neuf():
-    v = account_view(_acc())
+    v = account_view(_acc(), vix=CALME)
     assert v["status"] == "APPROVED" and v["is_stale"] is False
     assert v["current_equity"] == 50_000.0 and v["day_start_equity"] == 50_000.0
     assert v["drawdown_floor"] == FLOOR and v["daily_loss_limit"] == DLL
@@ -50,7 +54,7 @@ def test_vue_nominale_jour_neuf():
 def test_buffer_initial_est_le_buffer_a_l_ouverture_pas_l_actuel():
     """La jauge se mesure contre le buffer DU JOUR OUVERT — pas contre une constante ni contre
     l'actuel (qui donnerait toujours 100 %)."""
-    v = account_view(_acc(equity=49_500.0, day_start=50_000.0))
+    v = account_view(_acc(equity=49_500.0, day_start=50_000.0), vix=CALME)
     assert v["buffer"] == 500.0                            # min(2000, 500)
     assert v["buffer_initial"] == 1_000.0                  # min(2500, 1000) au day_start
     assert v["day_pnl"] == -500.0
@@ -58,13 +62,13 @@ def test_buffer_initial_est_le_buffer_a_l_ouverture_pas_l_actuel():
 
 def test_buffer_initial_quand_le_floor_contraint_des_l_ouverture():
     """Lendemain difficile : day_start 48 200 → à l'ouverture min(700, 1000) = 700."""
-    v = account_view(_acc(equity=47_900.0, day_start=48_200.0))
+    v = account_view(_acc(equity=47_900.0, day_start=48_200.0), vix=CALME)
     assert v["buffer_initial"] == 700.0
     assert v["buffer"] == 400.0                            # min(400, 700)
 
 
 def test_pnl_du_jour_positif():
-    v = account_view(_acc(equity=50_600.0, day_start=50_000.0))
+    v = account_view(_acc(equity=50_600.0, day_start=50_000.0), vix=CALME)
     assert v["day_pnl"] == 600.0
     assert v["buffer"] == 1_600.0                          # min(3100, 1600) — DLL contraint encore
 
@@ -73,22 +77,22 @@ def test_pnl_du_jour_positif():
 
 def test_buffer_mort_status_insufficient_buffer_sans_contrats():
     # stop de référence 3 ticks = 3.75 $/contrat → il faut buffer/5 ≥ 3.75, donc buffer ≥ 18.75
-    assert account_view(_acc(equity=49_020.0))["next_ticket"]["contracts"] == 1   # buffer 20 : 1 lot
-    v = account_view(_acc(equity=49_010.0))                # buffer 10 → risque 2 $ → < 1 contrat
+    assert account_view(_acc(equity=49_020.0), vix=CALME)["next_ticket"]["contracts"] == 1   # buffer 20 : 1 lot
+    v = account_view(_acc(equity=49_010.0), vix=CALME)                # buffer 10 → risque 2 $ → < 1 contrat
     assert v["status"] == "INSUFFICIENT_BUFFER"
     assert v["next_ticket"]["contracts"] is None           # jamais un 0 déguisé en taille
     assert v["buffer"] == 10.0                             # la valeur RESTE affichable (vraie)
 
 
 def test_buffer_negatif_status_insufficient_buffer():
-    v = account_view(_acc(equity=48_900.0))
+    v = account_view(_acc(equity=48_900.0), vix=CALME)
     assert v["status"] == "INSUFFICIENT_BUFFER" and v["buffer"] < 0
 
 
 def test_etat_corrompu_status_invalid_input():
     v = account_view(AccountState(account_type="EOD_TRAILING", initial_capital=50_000.0, current_equity=50_000.0,
                                   day_start_equity=50_000.0, drawdown_floor=-500.0,
-                                  daily_loss_limit=DLL))
+                                  daily_loss_limit=DLL), vix=CALME)
     assert v["status"] == "INVALID_INPUT"
     assert v["next_ticket"]["contracts"] is None
 
@@ -96,7 +100,7 @@ def test_etat_corrompu_status_invalid_input():
 def test_taille_implausible_status_size_sanity_cap():
     v = account_view(AccountState(account_type="EOD_TRAILING", initial_capital=50_000.0, current_equity=10_000_000.0,
                                   day_start_equity=10_000_000.0, drawdown_floor=FLOOR,
-                                  daily_loss_limit=1_000_000.0))
+                                  daily_loss_limit=1_000_000.0), vix=CALME)
     assert v["status"] == "SIZE_SANITY_CAP"
     assert v["next_ticket"]["contracts"] is None
 
@@ -104,7 +108,7 @@ def test_taille_implausible_status_size_sanity_cap():
 def test_equite_non_finie_invalid_input_sans_valeurs_affichables():
     v = account_view(AccountState(account_type="EOD_TRAILING", initial_capital=50_000.0, current_equity=math.nan,
                                   day_start_equity=50_000.0, drawdown_floor=FLOOR,
-                                  daily_loss_limit=DLL))
+                                  daily_loss_limit=DLL), vix=CALME)
     assert v["status"] == "INVALID_INPUT"
     assert v["current_equity"] is None                      # non finie → JAMAIS affichée (§3)
     assert v["buffer"] is None and v["buffer_initial"] is None
@@ -113,7 +117,7 @@ def test_equite_non_finie_invalid_input_sans_valeurs_affichables():
 # --- Fail-closed : pas de compte = pas de valeurs -------------------------------------------
 
 def test_sans_compte_disconnected_et_aucune_valeur():
-    v = account_view(None)
+    v = account_view(None, vix=CALME)
     assert v["status"] == "DISCONNECTED" and v["is_stale"] is True
     for k in ("current_equity", "day_start_equity", "drawdown_floor", "daily_loss_limit",
               "buffer", "buffer_initial", "day_pnl"):
@@ -124,7 +128,7 @@ def test_sans_compte_disconnected_et_aucune_valeur():
 
 def test_purete_et_non_mutation():
     acc = _acc(equity=49_300.0)
-    a, b = account_view(acc), account_view(acc)
+    a, b = account_view(acc, vix=CALME), account_view(acc, vix=CALME)
     assert a == b
     assert acc.current_equity == 49_300.0
 
@@ -137,8 +141,15 @@ def test_engine_publie_account_state_sur_le_canal_fast():
 
     from app.sse import broadcaster
 
-    async def scenario(provider):
-        eng = Engine(MockDataSource(), RedisState(), account_provider=provider)
+    async def scenario(provider, vix=CALME):
+        state = RedisState()
+        eng = Engine(MockDataSource(), state, account_provider=provider)
+        # Le VIX est un champ du canal RAPIDE, reconstruit depuis Redis à chaque assemblage :
+        # le poser sur le schéma serait écrasé dans la seconde. On l'écrit donc là où le moteur
+        # le lit vraiment — c'est aussi ce qui fait de ce test une preuve de CÂBLAGE.
+        # `vix=None` = « le flux ne porte rien » : on l'écrit EXPLICITEMENT, sinon la valeur du
+        # scénario précédent survivrait dans Redis et le cas aveugle ne serait jamais exercé.
+        await state.write_raw("vix", vix, "cboe")
         q = broadcaster.subscribe("fast")
         while not q.empty():
             q.get_nowait()
@@ -159,3 +170,16 @@ def test_engine_publie_account_state_sur_le_canal_fast():
     absent = asyncio.run(scenario(None))                    # pas de source
     assert absent["account_state"]["status"] == "DISCONNECTED"
     assert absent["account_state"]["current_equity"] is None
+
+    # VIX non câblé/périmé (D-070) : le buffer reste AFFICHÉ — il est vrai — mais le ticket
+    # devient VIX_BLIND sans nombre. Motif distinct de VIX_SUSPENDED : « je ne vois pas » et
+    # « c'est trop haut » n'appellent pas le même geste (rebrancher un flux / attendre).
+    aveugle = asyncio.run(scenario(live, vix=None))
+    assert aveugle["account_state"]["current_equity"] == 49_500.0
+    assert aveugle["account_state"]["buffer"] == 500.0
+    assert aveugle["account_state"]["next_ticket"]["status"] == "VIX_BLIND"
+    assert aveugle["account_state"]["next_ticket"]["contracts"] is None
+
+    # …et à VIX 25 la taille est bien COUPÉE DE MOITIÉ par rapport au régime calme.
+    agite = asyncio.run(scenario(live, vix=25.0))
+    assert agite["account_state"]["next_ticket"]["contracts"] == 13   # floor(26 × 0.50)

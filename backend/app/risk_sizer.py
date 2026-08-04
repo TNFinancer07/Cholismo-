@@ -53,6 +53,7 @@ from . import config
 # moteur LSR. Les avoir en double, c'est se donner rendez-vous avec une valeur de tick MNQ
 # corrigée d'un seul côté : le sizer et la géométrie dimensionneraient alors deux trades
 # différents pour le même plan.
+from . import lsr_tuning
 from .lsr_tuning import INSTRUMENT_SPECS  # noqa: F401  (ré-export : API historique du module)
 
 
@@ -83,6 +84,10 @@ class SizerResult(BaseModel):
     contracts: Optional[int] = None
     buffer: Optional[float] = None
     risk_allowed: Optional[float] = None
+    # Modificateur de régime VIX effectivement appliqué (D-070). Exposé plutôt que fondu dans
+    # `contracts` : sans lui, une taille divisée par deux ressemble à un buffer qui a fondu, et
+    # l'opérateur cherche le problème au mauvais endroit.
+    vix_multiplier: Optional[float] = None
 
 
 class ApexEodPreset(BaseModel):
@@ -118,7 +123,7 @@ def compute_buffer(account: AccountState) -> float:
     return min(to_floor, to_dll)
 
 
-def account_view(account: Optional[AccountState],
+def account_view(account: Optional[AccountState], vix: Any,
                  reference_stop_ticks: int = None,          # type: ignore[assignment]
                  instrument: str = None) -> dict:           # type: ignore[assignment]
     """Projection d'AFFICHAGE de l'état de compte (Zone C HUD, D-051) — PURE, aucune horloge.
@@ -143,12 +148,19 @@ def account_view(account: Optional[AccountState],
     spec = INSTRUMENT_SPECS.get(inst)
     empty = {k: None for k in ("current_equity", "day_start_equity", "drawdown_floor",
                                "daily_loss_limit", "buffer", "buffer_initial", "day_pnl")}
+    # Un VIX non observable ne suspend PAS l'affichage du buffer (il reste vrai) : il suspend le
+    # TICKET, parce qu'aucun ticket ne serait accepté dans cet état. Motif DISTINCT de
+    # `VIX_SUSPENDED` : « je ne vois pas la volatilité » et « la volatilité est trop haute »
+    # appellent deux gestes différents (rebrancher un flux / attendre), le HUD doit les séparer.
+    aveugle = "VIX_BLIND" if not _finite(vix) else None
     if account is None or spec is None:
         return {**empty, "status": "DISCONNECTED", "is_stale": True,
                 "next_ticket": {"instrument": inst, "stop_ticks": ticks, "contracts": None,
                                 "risk_allowed": None, "status": "DISCONNECTED"}}
 
-    result = size_position(account, stop_distance_ticks=ticks, tick_value=spec.tick_value)
+    result = size_position(account, stop_distance_ticks=ticks, tick_value=spec.tick_value,
+                           vix=vix if aveugle is None else None)
+    ticket_status = aveugle or (result.status if result.status == "APPROVED" else result.reason)
     fields = {k: (float(v) if _finite(v) else None) for k, v in (
         ("current_equity", account.current_equity),
         ("day_start_equity", account.day_start_equity),
@@ -168,14 +180,16 @@ def account_view(account: Optional[AccountState],
         "buffer_initial": buffer_open if _finite(buffer_open) else None,
         "day_pnl": day_pnl if _finite(day_pnl) else None,
         "is_stale": False,
-        "status": result.status if result.status == "APPROVED" else result.reason,
-        "next_ticket": {"instrument": inst, "stop_ticks": ticks, "contracts": result.contracts,
+        "status": ticket_status,
+        "next_ticket": {"instrument": inst, "stop_ticks": ticks,
+                        # Aveugle : la CAPACITÉ n'est pas connue, donc aucun nombre affiché (§3).
+                        "contracts": None if aveugle else result.contracts,
                         "risk_allowed": result.risk_allowed,
-                        "status": result.status if result.status == "APPROVED" else result.reason},
+                        "status": ticket_status},
     }
 
 
-def size_plan(plan: Any, account: AccountState) -> Optional[dict]:
+def size_plan(plan: Any, account: AccountState, vix: Any) -> Optional[dict]:
     """Dimensionne un plan LSR APPROVED (contrat D-045/046) via la règle du 1/5e — le stop en
     ticks est dérivé de la GÉOMÉTRIE du plan (`|entrée − stop| / tick_size`), jamais fourni à
     part (une seule source de vérité). Rend un NOUVEAU plan aux contrats remplacés (l'entrée
@@ -187,22 +201,36 @@ def size_plan(plan: Any, account: AccountState) -> Optional[dict]:
     ex = plan.get("executionPlan")
     if spec is None or not isinstance(ex, dict):
         return None
+    # VIX AVEUGLE = pas de ticket (D-070). C'est le chemin d'ÉMISSION : y laisser passer un
+    # `vix=None` reviendrait à dimensionner à taille pleine précisément quand on ne mesure plus
+    # la volatilité — le fail-open exact que le modificateur est censé fermer.
+    if not _finite(vix):
+        return None
     entry, stop = ex.get("entryPrice"), ex.get("stopLoss")
     if not (_finite(entry) and _finite(stop)):
         return None
     stop_ticks = abs(entry - stop) / spec.tick_size
     result = size_position(account, stop_distance_ticks=stop_ticks,
-                           tick_value=spec.tick_value)
+                           tick_value=spec.tick_value, vix=vix)
     if result.status != "APPROVED":
         return None
     return {**plan, "executionPlan": {**ex, "contracts": result.contracts}}
 
 
 def size_position(account: AccountState, stop_distance_ticks: Any, tick_value: Any,
-                  buffer_divisor: int = config.RISK_BUFFER_DIVISOR) -> SizerResult:
+                  buffer_divisor: int = config.RISK_BUFFER_DIVISOR,
+                  vix: Any = None) -> SizerResult:
     """Dimensionne le prochain trade — règle du 1/5e sur le buffer, floor strict, F8 fail-closed.
     Rend TOUJOURS un `SizerResult` (zéro exception) : entrée corrompue → `INVALID_INPUT` ;
-    buffer ≤ 0 ou taille < 1 → `INSUFFICIENT_BUFFER`."""
+    buffer ≤ 0 ou taille < 1 → `INSUFFICIENT_BUFFER` ; VIX au-delà du blocage dur →
+    `VIX_SUSPENDED`.
+
+    **Modificateur de régime VIX (D-070)** : `contrats = floor(bruts × mult_VIX)`, exactement
+    comme `risksizer.ts`. `vix=None` signifie « ce calcul n'applique PAS le modificateur de
+    régime » — c'est la règle du 1/5e prise isolément, utile pour la tester seule. Le chemin de
+    production n'y accède jamais en direct : il passe par `size_plan` / `account_view`, qui
+    EXIGENT un VIX et échouent en silence sans lui. Un test AST interdit à `app/` d'appeler
+    `size_position` sans `vix=` — sinon ce défaut redeviendrait une porte de sortie."""
     if not all(_finite(v) for v in (account.initial_capital, account.current_equity,
                                     account.day_start_equity, account.drawdown_floor,
                                     account.daily_loss_limit)):
@@ -236,15 +264,27 @@ def size_position(account: AccountState, stop_distance_ticks: Any, tick_value: A
                        buffer / buffer_divisor)
     risk_per_contract = float(stop_distance_ticks) * float(tick_value)
     contracts = math.floor(risk_allowed / risk_per_contract)
+    # Modificateur de régime VIX (D-070) — APRÈS le floor du sizing brut, comme la référence :
+    # `floor(floor(risque / risque_par_contrat) × mult)`. Deux floors, jamais d'arrondi vers le
+    # haut à aucune des deux étapes.
+    mult: Optional[float] = None
+    if vix is not None:
+        mult = lsr_tuning.vix_multiplier(vix)
+        if mult <= 0:
+            # Nommer la VOLATILITÉ : une taille coupée sans motif enverrait l'opérateur chercher
+            # un problème de buffer qui n'existe pas.
+            return SizerResult(status="REJECTED", reason="VIX_SUSPENDED", buffer=buffer,
+                               risk_allowed=risk_allowed, vix_multiplier=mult)
+        contracts = math.floor(contracts * mult)
     if contracts < 1:
         return SizerResult(status="REJECTED", reason="INSUFFICIENT_BUFFER",
-                           buffer=buffer, risk_allowed=risk_allowed)
+                           buffer=buffer, risk_allowed=risk_allowed, vix_multiplier=mult)
     # Plafond de PLAUSIBILITÉ (v1 provisional) : une équité corrompue (1e308…) produit un buffer
     # fini, un risque fini, et un floor() astronomique — un ticket à 10^306 contrats serait
     # parfaitement COHÉRENT pour la garde D-045 (elle vérifie l'ordre des niveaux, pas la
     # vraisemblance d'une taille). Au-delà du plafond, la taille n'est pas un signal (§3).
     if contracts > config.RISK_MAX_CONTRACTS:
         return SizerResult(status="REJECTED", reason="SIZE_SANITY_CAP",
-                           buffer=buffer, risk_allowed=risk_allowed)
-    return SizerResult(status="APPROVED", contracts=contracts,
-                       buffer=buffer, risk_allowed=risk_allowed)
+                           buffer=buffer, risk_allowed=risk_allowed, vix_multiplier=mult)
+    return SizerResult(status="APPROVED", contracts=contracts, buffer=buffer,
+                       risk_allowed=risk_allowed, vix_multiplier=mult)

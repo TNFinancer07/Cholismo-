@@ -113,45 +113,75 @@ def build_lsr_inputs(schema, now: float, news_state: Optional[str] = None,
     )
 
 
+def noise_buffer_ticks(spread_ticks: Any, atr_fast: Any, atr_slow: Any,
+                       t: InstrumentTuning) -> int:
+    """A3 — buffer de bruit du stop, DYNAMIQUE. Port de `geometry.ts::noiseBufferTicks` :
+
+        min(max_ticks, max(min_ticks, ceil(spread)) + (atr_rapide > atr_lent ? 1 : 0))
+
+    Trois idées, dans cet ordre : le stop doit au moins absorber le SPREAD (sinon il se fait
+    sortir par le coût d'entrée lui-même) ; il s'élargit d'un tick quand la volatilité est en
+    EXPANSION (ATR rapide au-dessus du lent) ; et il reste borné par la calibration de
+    l'instrument des deux côtés.
+
+    FAIL-CLOSED, mais dans le sens qui protège (§3) : spread ou ATR non observables →
+    **borne haute**. Un stop plus loin, c'est mécaniquement MOINS de contrats — jamais plus.
+    Supposer le calme quand on ne voit rien resserrerait le stop pile au mauvais moment."""
+    if not _finite(spread_ticks) or spread_ticks < 0:
+        return t.sl_noise_buffer_max_ticks
+    base = max(t.sl_noise_buffer_min_ticks, math.ceil(float(spread_ticks)))
+    if not (_finite(atr_fast) and _finite(atr_slow)):
+        return t.sl_noise_buffer_max_ticks           # régime inconnu → on suppose l'expansion
+    extra = 1 if float(atr_fast) > float(atr_slow) else 0
+    return min(t.sl_noise_buffer_max_ticks, base + extra)
+
+
 def _grid(x: float, tick: float) -> float:
     """Aligne un prix sur la grille de ticks (un niveau hors grille n'est pas exécutable)."""
     return round(round(x / tick) * tick, 10)
 
 
-def _f4_liquidity_ok(book: Any, t: InstrumentTuning, tick: float) -> bool:
+def _f4_liquidity(book: Any, t: InstrumentTuning, tick: float) -> Optional[float]:
     """F4-like — fenêtre de liquidité : spread borné ET profondeur top-3 des deux côtés.
     Les deux bornes viennent de la calibration de l'INSTRUMENT (D-069) : 1 tick / 150 sur MES
-    (carnet dense), 2 ticks / 60 sur MNQ."""
+    (carnet dense), 2 ticks / 60 sur MNQ.
+
+    Rend le **spread en ticks** si la fenêtre est ouverte, `None` sinon. Il est rendu plutôt que
+    recalculé plus loin parce que le buffer de bruit A3 en dépend (D-070) : deux lectures du
+    carnet, c'est deux occasions de ne pas parler du même carnet."""
     if not isinstance(book, dict):
-        return False
+        return None
     bids, asks = book.get("bids"), book.get("asks")
     if not (isinstance(bids, list) and bids and isinstance(asks, list) and asks):
-        return False
+        return None
     try:
         best_bid, best_ask = float(bids[0][0]), float(asks[0][0])
         # Marché CROISÉ (bid > ask) ou VERROUILLÉ (bid == ask) : pas de spread tradable — la
         # géométrie ne se construit jamais dessus, même si le détecteur amont a signalé la
         # dislocation (CROSSED_BOOK est un signal D-028, pas un terrain d'exécution).
         if not (math.isfinite(best_bid) and math.isfinite(best_ask) and best_ask > best_bid):
-            return False
-        if (best_ask - best_bid) / tick > t.f4_max_spread_ticks:
-            return False
+            return None
+        spread_ticks = (best_ask - best_bid) / tick
+        if spread_ticks > t.f4_max_spread_ticks:
+            return None
         # Une profondeur NÉGATIVE est impossible : un carnet qui en porte est corrompu et ne
         # doit pas passer F4 par compensation arithmétique (200 + (−30) ≥ plancher…).
         depth_bid = depth_ask = 0.0
         for level in bids[:3]:
             sz = float(level[1])
             if not (math.isfinite(sz) and sz >= 0):
-                return False
+                return None
             depth_bid += sz
         for level in asks[:3]:
             sz = float(level[1])
             if not (math.isfinite(sz) and sz >= 0):
-                return False
+                return None
             depth_ask += sz
     except (TypeError, ValueError, IndexError):
-        return False
-    return min(depth_bid, depth_ask) >= t.f4_min_cumulative_depth
+        return None
+    if min(depth_bid, depth_ask) < t.f4_min_cumulative_depth:
+        return None
+    return spread_ticks
 
 
 def _sweep_extreme(prints: list, since: float, now: float, is_long: bool) -> Optional[float]:
@@ -224,8 +254,9 @@ def evaluate_lsr(i: LsrInputs) -> Optional[dict]:
         return None
     if not is_long and flip > 1.0 - t.b2_tape_flip_threshold:
         return None
-    # -- F4-like : fenêtre de liquidité --
-    if not _f4_liquidity_ok(i.book, t, tick):
+    # -- F4-like : fenêtre de liquidité (rend le spread, dont A3 a besoin) --
+    spread_ticks = _f4_liquidity(i.book, t, tick)
+    if spread_ticks is None:
         return None
 
     # -- A3 : extrême réel du sweep --
@@ -238,9 +269,15 @@ def evaluate_lsr(i: LsrInputs) -> Optional[dict]:
     # l'ORDRE des niveaux, pas leur positivité — elle laisserait passer un ticket négatif cohérent.
     if not _finite(i.vpoc) or i.vpoc <= 0:
         return None
+    # A3 (D-070) — le buffer de bruit est DYNAMIQUE : il absorbe le spread réellement coté et
+    # s'élargit d'un tick en expansion de volatilité. Les ATR viennent du snapshot maison quand
+    # il est là ; sans lui, `noise_buffer_ticks` prend la borne haute (comportement historique).
     sign = 1.0 if is_long else -1.0
+    buffer_ticks = noise_buffer_ticks(spread_ticks,
+                                      getattr(i.orderflow, "atr_fast", None),
+                                      getattr(i.orderflow, "atr_slow", None), t)
     entry = _grid(extreme + sign * t.entry_offset_ticks * tick, tick)
-    stop = _grid(extreme - sign * t.sl_noise_buffer_max_ticks * tick, tick)
+    stop = _grid(extreme - sign * buffer_ticks * tick, tick)
     vpoc = _grid(i.vpoc, tick)
     if is_long:
         if vpoc <= entry:
