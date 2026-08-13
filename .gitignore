@@ -15,7 +15,11 @@ backend/data/*.db
 backend/data/*.db-journal
 backend/data/*.sqlite*
 *.log
+# `.env` seul ne couvrait PAS `.env.production` — or le manuel demande justement de le créer
+# par copie du modèle (D-091). Le modèle, lui, reste versionné : il ne contient aucun secret.
 .env
+.env.*
+!.env.*.example
 
 # OS / editors
 .DS_Store

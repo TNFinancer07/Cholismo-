@@ -3752,6 +3752,81 @@ Log (§2.5), pas un champ mutable. Les deux derniers sont purs et courts.
 21 tests neufs, 4 tests existants mis à jour (F2 les fait changer de verdict) → **1353 passed**,
 ruff clean.
 
+## D-091 · Briques de production — et les identifiants que je REFUSE de mettre dans le template
+
+Trois livrables demandés : `.env.production`, résilience du mode dégradé, `OPERATING_MANUAL.md`.
+Le deuxième était en grande partie déjà tenu ; le premier m'a fait buter sur une demande que je
+n'ai pas honorée telle quelle.
+
+### 1. Les identifiants courtier ne sont pas dans le template — c'est délibéré
+
+La demande listait « Rithmic, ThetaData, Unusual Whales, **Brokers** ». Les trois premiers sont
+des **sources de données** : ils entrent. Le quatrième est un **chemin d'exécution** : il sort.
+
+`CLAUDE §2.1` : « Aucune exécution automatique d'ordre. » Aucun module de ce dépôt ne parle à un
+courtier, et deux tests de garde l'interdisent explicitement (`broker`, `submit_order`,
+`requests`, `socket` refusés dans la source d'`execution_sim` et de `replay_harness`).
+
+Poser `BROKER_API_KEY=` dans un template de production ne casse rien aujourd'hui — et c'est
+précisément le piège. La prochaine personne qui lit ce fichier en conclut qu'un chemin
+d'exécution existe quelque part, et le cherche. Une variable d'environnement est une
+**affordance**, pas une donnée inerte : elle annonce une capacité. Le jour où l'exécution
+automatique sera décidée, ce sera un ADR (`docs/adr/`), pas une ligne ajoutée en silence.
+
+Le refus est **écrit dans le template lui-même**, en tête, avec sa raison. Le taire aurait laissé
+croire à un oubli.
+
+Rithmic / ThetaData / Unusual Whales y sont, mais marqués **inertes** : aucun module ne les lit
+aujourd'hui (`options_worker.py` tourne sur `MockVendorClient`, le connecteur Rithmic n'existe
+pas — D-083). Une clé renseignée ne branche rien ; il faut implémenter le `Protocol`. Une
+variable qui a l'air de suffire alors qu'elle ne suffit pas est exactement le « stub qui feint de
+fonctionner » que les règles interdisent.
+
+### 2. Résilience — le superviseur tenait déjà, la PROJECTION mentait
+
+Vérification avant d'écrire : le superviseur survit déjà à une boucle qui meurt (prouvé en
+D-075 — `options.sync` à `STALLED`, `fail=35`, les autres `RUNNING`). Chaque tick est isolé
+(D-073). Il n'y avait rien à durcir de ce côté, et ajouter un filet par-dessus aurait été du
+théâtre.
+
+Le vrai défaut était **au-dessus** : `unhealthy` confondait deux choses opposées.
+
+- `core.tick` en `NOT_IMPLEMENTED` — **attendu**, documenté, aucune action.
+- `options.sync` en `STALLED` — **anormal**, il faut agir.
+
+Les deux atterrissaient dans la même liste. Un opérateur qui voit `unhealthy: [...]` à chaque
+démarrage apprend à l'ignorer — et le jour où quelque chose casse vraiment, il l'ignore aussi.
+Une alerte qui crie toujours est une alerte éteinte.
+
+`health.project()` publie donc un bloc `degraded` : `broken` (STALLED/DEAD), `stopped`,
+`expected` (NOT_IMPLEMENTED), `hot_path_broken`, et un `verdict` unique —
+`HOT_PATH_DOWN` > `DEGRADED` > `PARTIAL` > `NOMINAL`. `PARTIAL` est l'état **normal** du système
+aujourd'hui. `unhealthy` et `all_healthy` restent inchangés : aucun consommateur cassé.
+
+### 3. `OPERATING_MANUAL.md` — et un chapitre qui dit « rien à faire »
+
+La demande incluait « bascule manuelle en mode consultatif ». Il n'y a **rien à basculer** : O1-O5
+sont consultatifs **par construction** (`COMMANDS.md` §2) — aucun évaluateur ne retourne de
+booléen, aucun ne lève, l'entrée de journal n'a ni `blocked` ni `allowed`. Il n'existe aucun
+chemin de blocage à désactiver.
+
+Écrire une procédure factice pour honorer la ligne de la demande aurait fabriqué un geste inutile
+qu'un opérateur tenterait sous stress. Le chapitre existe donc, et explique pourquoi il est vide.
+
+Ce qui bloque — les 30 contrôles déterministes LSR et Phase 0 — **ne se désactive pas**. C'est le
+point du système (`CLAUDE §6` : la discipline est dans l'infra, pas dans la volonté).
+
+Le reste est court par construction : un manuel lu à 09h35 marché ouvert tient en quelques lignes
+par situation. Redémarrage en une ligne, triage par boucle, flush Redis (jamais le journal —
+immuable par triggers SQLite), et un rappel en tête : le terminal ne passe aucun ordre, donc
+aucune panne de ce manuel ne peut provoquer un trade.
+
+### Vérif
+4 tests neufs sur le verdict → **1747 passed**, ruff clean. Un test de cadence
+(`pas_de_rafale_de_rattrapage`) s'est révélé fragile sous charge parallèle : vérifié 3/3 isolé,
+puis rendu robuste (il refuse une **série** de ≥3 intervalles serrés, pas un intervalle isolé —
+c'est la rafale qui est interdite, pas le jitter de l'ordonnanceur).
+
 ## D-090 · Les conteneurs dedies — ma cartographie d'IDs etait fausse, pas approximative
 
 `frontend/public/v17/live.js` n'ecrit plus dans AUCUN element de la maquette, sauf `#px` dont
