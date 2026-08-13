@@ -3752,6 +3752,63 @@ Log (§2.5), pas un champ mutable. Les deux derniers sont purs et courts.
 21 tests neufs, 4 tests existants mis à jour (F2 les fait changer de verdict) → **1353 passed**,
 ruff clean.
 
+## D-081 · Harnais de rejeu bout-en-bout — la boucle du PnL est fermee
+
+`backend/app/replay_harness.py`. 15 tests. MBO -> carnet -> armement -> simulateur FIFO ->
+`Outcome`. Les modules existaient tous ; il manquait le fil qui les relie.
+
+### `NO_FILL` est une issue de PREMIERE CLASSE
+
+C'est tout l'interet du harnais. Un setup parfaitement valide dont l'entree limite n'est jamais
+servie n'est ni un gain ni une perte : **il n'a pas eu lieu**. C'est exactement ce qu'un backtest
+« rempli au touche » transforme en gagnant. Le compter comme un trade neutre serait deja un
+mensonge — il faut pouvoir dire COMBIEN de setups n'auraient jamais ete pris.
+
+Quatre issues tenues distinctes : `NO_FILL`, `WIN`, `LOSS`, `OPEN_AT_END`. Le taux de reussite
+se calcule sur les trades REELLEMENT PRIS ; mettre les `NO_FILL` au denominateur melangerait deux
+questions distinctes — « la strategie gagne-t-elle ? » et « les entrees sont-elles servies ? ».
+Sans trade pris, `win_rate` vaut `None`, jamais 0 : « 0 % de reussite » et « aucun trade » ne
+veulent pas dire la meme chose.
+
+### Le stop sort au MARCHE, le TP reste une LIMITE
+
+Un stop n'est pas une limite : quand le prix le traverse, on sort en payant le carnet, et le
+slippage de sortie est la consommation reelle des niveaux — jamais zero. Le TP, lui, repasse par
+la file FIFO et **peut ne jamais etre servi**. Sur un evenement ambigu ou stop et TP sont tous
+deux atteignables, **le stop prime** : ne pas s'accorder le meilleur des deux est ce qui separe
+une mesure d'un voeu.
+
+### Le bug de double decompte, trouve par un test
+
+Un ordre arme sur un evenement de TRADE voyait sa file decrementee **deux fois** : une fois par
+le carnet qui venait d'absorber l'echange, une fois par le simulateur a qui on presentait le meme
+echange. Il avancait donc dans la file sans que personne n'ait rien achete — un biais d'optimisme
+silencieux, dans le module ecrit precisement pour les supprimer.
+
+Corrige par une comparaison LARGE dans le simulateur : **un ordre place a l'instant T ne peut pas
+participer a l'echange survenu a T**, il n'etait pas encore dans le carnet.
+
+Corollaire : `entry_queue_ahead` (instantane immuable a l'armement, covariable utile a la
+calibration) est desormais distingue de `entry_queue_remaining` (ce qu'il restait devant nous a
+la fin, qui dit a quel point on est passe pres).
+
+### Ce qui reste NON MESURE — et pourquoi
+
+Le harnais ferme la boucle **mecaniquement**. Il ne ferme pas la question laissee ouverte en
+D-078 : la magnitude reelle du biais de touche. La seule fixture MBO disponible compte **7
+evenements synthetiques** — de quoi verifier la mecanique, pas de quoi mesurer une distribution
+volume-au-prix contre profondeur de file.
+
+Aucun chiffre de surestimation ne sera ecrit tant qu'une seance MBO reelle n'aura pas ete
+rejouee. Le harnais est l'outil ; il lui manque la donnee.
+
+### Bout-en-bout sur la fixture reelle
+
+Verifie : notre limite a 5000.00 derriere 40 lots, l'ordre 101 se deplace a 4999.75 (modify),
+15 lots s'y echangent — un echange SOUS notre bid traverse notre limite, donc tout ce qui etait
+devant a necessairement ete servi et nous sommes remplis. Le flux s'arrete la : `OPEN_AT_END`,
+`pnl_usd = None`. Distinguer cela d'un `NO_FILL` etait l'un des points a ne pas rater.
+
 ## D-080 · L4 `gates.eval` cablee — et la frontiere entre ce qui est mesurable et ce qui ne l'est pas
 
 `backend/app/gates_journal.py`, `build_gates_tick`, hook `on_arm` dans `engine.py`. 13 tests.

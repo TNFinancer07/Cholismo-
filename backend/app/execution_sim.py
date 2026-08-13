@@ -248,8 +248,14 @@ class ExecutionSimulator:
         for order in self._orders:
             if order.status not in (OrderStatus.WORKING, OrderStatus.PARTIAL):
                 continue
-            if _finite(ts_ms) and ts_ms < order.placed_ts_ms:
-                continue                                # latence : pas encore au marché
+            if _finite(ts_ms) and ts_ms <= order.placed_ts_ms:
+                # Comparaison LARGE, et c'est un choix (D-081) : un ordre placé à l'instant T ne
+                # peut pas participer à l'échange survenu à T — il n'était pas encore dans le
+                # carnet. Avec `<` strict, un ordre arme sur un événement de trade voyait sa file
+                # décrémentée DEUX fois : une fois par le carnet qui venait d'absorber l'échange,
+                # une fois par le simulateur. Il avançait donc dans la file sans que personne
+                # n'ait rien acheté.
+                continue
             if self._expired(order, ts_ms):
                 continue
             if tradable and self._invalidated(order, float(price), ts_ms):
