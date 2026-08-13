@@ -3752,6 +3752,90 @@ Log (§2.5), pas un champ mutable. Les deux derniers sont purs et courts.
 21 tests neufs, 4 tests existants mis à jour (F2 les fait changer de verdict) → **1353 passed**,
 ruff clean.
 
+## D-075 · L2 `options.sync` — le contexte options, de Redis au canal SSE
+
+`backend/app/options_context.py` (port Python d'`optionsContext.ts`), `app/loops/wiring.py`,
+3e canal SSE `options`, `workers/options_worker.py` versionne. 20 tests + 23 du worker.
+
+### Ce qui est cable, et ce qui ne l'est pas
+
+Deux boucles sur cinq : `options.sync` (L2) et `ui.broadcast` (L5, qui publie la sante). Les
+trois autres restent `NOT_IMPLEMENTED` et le disent. `core.tick` est deja assuree par
+`engine.py` : l'y migrer est un refactor, pas cette feature (Loop 3).
+
+### Le worker n'est pas pilote, il est consomme
+
+`options_worker.py` pose son propre decouplage : « un redemarrage ou une panne du serveur qui
+sert le terminal ne doit jamais affecter ce worker, et inversement ». Il est donc versionne sous
+`backend/workers/` — hors du paquet `app`, demarre separement — et L2 ne fait que lire
+`options:context:latest`. Sans worker, L2 echoue a chaque tick et finit `STALLED` : c'est la
+verite, elle se lit sur le canal, et aucune valeur n'est inventee pour combler le vide.
+
+### La discipline de lecture, reprise telle quelle du TypeScript
+
+`snapshot()` est SYNCHRONE, pure sur `now`, sans aucune I/O. Le fichier TS justifie la regle par
+la mesure : ~0,02 us pour une lecture locale, ~130x de plus pour le moindre saut asynchrone. Au
+moment de l'armement on lit une variable en memoire ; le rafraichissement vit dans L2, hors du
+chemin de decision (§7).
+
+### `refresh()` LEVE au lieu de renvoyer un booleen
+
+Un rafraichissement silencieux ferait battre L2, et le superviseur l'afficherait `RUNNING` alors
+qu'aucune donnee n'arrive — exactement le mensonge que D-073 existe pour empecher. L'echec doit
+etre compte. Le cache, lui, n'est jamais corrompu par une lecture ratee : la derniere valeur
+bonne reste et vieillit vers `STALE`. Trois causes distinguees (`redis_error`, `key_missing`,
+`malformed`) parce qu'elles n'appellent pas la meme intervention, et journalisees **une fois par
+episode** : a 5 s de cadence, une panne d'une heure produirait 720 lignes identiques (hygiene
+D-046, meme parade que la regression d'horloge du `lsr_driver`).
+
+Le tick publie dans un `finally`, donc **meme quand il echoue**. Sans cela, une source morte
+laisserait l'UI sur le dernier contexte recu, fige et d'allure fraiche.
+
+### Divergence ASSUMEE avec le TypeScript — l'horloge du futur
+
+`optionsContext.ts` calcule `age = now - computedAt`, obtient un negatif sur un horodatage date
+du futur, le compare a un seuil positif, et conclut `OK` : **fail-OPEN sur une desync
+d'horloge**. Ce depot a deja paye cette lecon (D-050/D-048) et refuse une donnee du futur —
+`STALE`, avec l'age negatif conserve dans la projection : on ne maquille pas la desync, on
+refuse seulement de la traiter comme de la fraicheur. Le type de retour reste identique aux
+quatre valeurs de `SnapshotHealth`, donc le contrat de fil ne bouge pas.
+
+### Verrou de parite (doctrine D-072), sur les DEUX bouts
+
+Trois tests LISENT les sources et echouent en cas de divergence : le seuil de peremption
+(`STALE_THRESHOLD_MS` du TS vs `OPTIONS_CONTEXT_TTL_SECONDS`), et la cle Redis + le canal
+pub/sub, compares a la fois au TypeScript et au worker Python. Une cle qui diverge ne casse
+aucun test unitaire : elle produit juste un terminal eternellement `UNAVAILABLE` face a un
+worker qui publie correctement.
+
+### Essai reel — la source coupee se VOIT
+
+Worker reel -> Redis reel -> backend reel -> canal SSE. Sequence observee de bout en bout :
+contexte `OK` a 13 strikes ; worker tue ; la cle survit sous son TTL de 90 s et L2 continue de
+lire **avec succes** un payload de plus en plus vieux (`fail=0`, age qui monte — comportement
+correct, la degradation etant portee par `age_s`) ; a 90 s le contexte bascule `STALE` ; le TTL
+expire, la cle disparait, `key_missing` s'accumule en `failures`. La valeur figee n'a jamais ete
+presentee comme fraiche.
+
+### `loops_health` publie sur changement d'etat
+
+A 0,25 s, publier la sante a chaque tick ferait 4 messages/s au contenu quasi constant. On
+publie sur changement d'empreinte (statut/echecs/plafonds — volontairement sans les ages ni les
+compteurs de ticks, qui bougent a chaque tour et supprimeraient tout dirty flag), plus un rappel
+toutes les 2 s pour que l'age affiche ne se fige pas. `replay=False` : une mesure datee ne se
+rejoue pas pour hydrater un abonne neuf.
+
+**Limite connue** : c'est `ui.broadcast` qui publie la sante. Si elle meurt, la sante cesse
+d'etre poussee et le client ne le voit qu'au silence du canal. Un watchdog externe (Loop G) est
+le vrai remede ; hors de cette tranche.
+
+### Reste ouvert
+
+Le frontend ne consomme pas encore le canal `options` (3e `EventSource` + panneau) : c'est une
+tranche UI, qui passe d'abord par `/design` (Loop 6). O4 restera `O4_SOURCE_UNCONFIRMED` tant
+que la source Net Premium Drift n'est confirmee que sur QQQ — prerequis externe, rendu lisible
+dans la projection (`net_drift.source_confirmed`) plutot que masque.
+
 ## D-073 · Un contrat unique de boucle — parce qu'une boucle morte ressemble à une boucle calme
 
 `backend/app/loops/` : `contract.py` (LoopSpec + runners), `supervisor.py`, `health.py`,

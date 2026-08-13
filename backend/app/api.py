@@ -24,6 +24,7 @@ from .recon import parse_ninjatrader_csv, reconcile
 from .schema import Operator, Phase0State
 from .snapshot import capture_snapshot, list_snapshots, read_snapshot
 from .trade_reconciliator import analyze_trades
+from .sse import CHANNELS as SSE_CHANNELS
 from .sse import broadcaster
 
 router = APIRouter()
@@ -110,8 +111,8 @@ async def analyses_robustness() -> dict[str, Any]:
 
 @router.get("/sse/{channel}")
 async def sse(channel: str, request: Request) -> EventSourceResponse:
-    if channel not in ("fast", "slow"):
-        raise HTTPException(404, "canal inconnu (fast|slow)")
+    if channel not in SSE_CHANNELS:
+        raise HTTPException(404, f"canal inconnu ({'|'.join(SSE_CHANNELS)})")
     queue = broadcaster.subscribe(channel)
 
     async def stream():

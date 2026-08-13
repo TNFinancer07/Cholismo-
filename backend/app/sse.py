@@ -2,6 +2,11 @@
 (CLAUDE §6): `fast` (sub-second: s1, bridge, sync, signal, statut) and `slow` (s2/cascade/
 matrix). Events are PARTIAL, per block: event name = block name, data = block JSON.
 Macro is never re-pushed on microstructure ticks.
+
+Troisième canal `options` (D-075) — cadence propre au Pont Options : le worker publie toutes
+les 5 s, la macro toutes les 15 s, la microstructure 4×/s. Les mêler forcerait le plus lent à
+la cadence du plus rapide (`CLAUDE §6` : « ne jamais re-pousser la macro à chaque tick
+microstructure »). Arbitrage transport en D-074 : SSE conservé, pas de passerelle WebSocket.
 """
 from __future__ import annotations
 
@@ -9,7 +14,7 @@ import asyncio
 import json
 from typing import Any
 
-CHANNELS = ("fast", "slow")
+CHANNELS = ("fast", "slow", "options")
 
 
 class Broadcaster:

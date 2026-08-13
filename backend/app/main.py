@@ -24,8 +24,11 @@ from .external import build_default as build_external
 from .external.macro_series import OWNED_FIELDS as MACRO_FIELDS
 from .external.macro_series import MacroSeriesProvider
 from .log_scraper import LogTailer, nt8_daily_log_path, startup_report
+from .loops.wiring import build_supervisor
+from .options_context import OptionsContextReader
 from .redis_state import RedisState
 from .snapshot import capture_snapshot
+from .sse import broadcaster
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 log = logging.getLogger("cholismo.main")
@@ -110,9 +113,18 @@ async def lifespan(app: FastAPI):
     app.state.log_scraper = _build_log_scraper(app.state.engine)
     if app.state.log_scraper is not None:
         await app.state.log_scraper.start()
+    # L2 `options.sync` (D-075) : CONSOMME `options:context:latest` publié par le service
+    # autonome `workers/options_worker.py`. Sans worker démarré, la boucle échoue à chaque tick
+    # et passe STALLED — ce qui est la VÉRITÉ, et se lit sur le canal `options`. Aucune valeur
+    # n'est inventée pour combler le vide (§3).
+    app.state.options_context = OptionsContextReader()
+    app.state.loops = build_supervisor(app.state.options_context, broadcaster)
+    await app.state.loops.start_all()
     try:
         yield
     finally:
+        await app.state.loops.stop_all()
+        await app.state.options_context.close()
         if app.state.log_scraper is not None:
             await app.state.log_scraper.stop()
         if isinstance(app.state.account_provider, NT8FileAccountProvider):
