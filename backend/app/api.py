@@ -22,6 +22,7 @@ from .event_store import get_store
 from .orchestrator import orchestrator_payload
 from .recon import parse_ninjatrader_csv, reconcile
 from .schema import Operator, Phase0State
+from .setup_journal import SetupJournal
 from .snapshot import capture_snapshot, list_snapshots, read_snapshot
 from .trade_reconciliator import analyze_trades
 from .sse import CHANNELS as SSE_CHANNELS
@@ -105,6 +106,51 @@ async def analyses_robustness() -> dict[str, Any]:
         return await asyncio.to_thread(projections.robustness, get_store())
     except Exception as exc:                       # jamais une 500 non maîtrisée (ni stack exposée)
         raise HTTPException(503, f"analyse de robustesse indisponible : {type(exc).__name__}") from exc
+
+
+# ---------- Blotter des setups + matrice de calibration (P4, D-088) ----------
+
+@router.get("/setups")
+async def setups(limit: int = 200) -> dict[str, Any]:
+    """Blotter : projection du journal des setups (D-082), plus récent en tête.
+
+    Lecture SEULE d'un journal append-only — cet endpoint ne peut rien réécrire. Offloadée
+    (`to_thread`) : le journal est sur SQLite, et une lecture disque n'a rien à faire dans la
+    boucle d'événements du hot path (§7)."""
+    limit = max(1, min(limit, 1000))
+
+    def _read() -> list[dict[str, Any]]:
+        rows = SetupJournal().projection()
+        # Plus récent en tête, comme le tape (D-026) : un blotter se lit du haut.
+        rows.sort(key=lambda r: r.get("armed_ts_ms") or 0, reverse=True)
+        return rows[:limit]
+
+    rows = await asyncio.to_thread(_read)
+    return {"count": len(rows), "setups": rows}
+
+
+@router.get("/setups/calibration")
+async def setups_calibration(min_sample: int = 10) -> dict[str, Any]:
+    """Matrice de calibration (D-082) : par balise et par statut, combien de setups, combien
+    jamais servis, et — seulement si l'échantillon le permet — quel taux de réussite.
+
+    Ne conclut rien. Une cellule sous l'échantillon minimal rend `win_rate: null` et
+    `status: INSUFFICIENT_DATA` — un taux sur trois trades n'est pas une mesure."""
+    min_sample = max(1, min(min_sample, 1000))
+    return await asyncio.to_thread(lambda: SetupJournal().calibration_matrix(
+        min_cell_sample=min_sample))
+
+
+@router.get("/loops/health")
+async def loops_health(request: Request) -> dict[str, Any]:
+    """Santé des cinq boucles (D-073). Le canal SSE `options` la pousse sur changement d'état ;
+    cet endpoint sert l'instantané pour un client qui vient de se connecter — sans lui, le
+    dashboard resterait vide jusqu'au prochain changement."""
+    supervisor = getattr(request.app.state, "loops", None)
+    if supervisor is None:
+        # Fail-closed : pas de superviseur = on ne prétend pas que tout va bien.
+        raise HTTPException(503, "superviseur de boucles non démarré")
+    return supervisor.health(time.time())
 
 
 # ---------- SSE — cadence-segmented channels (CLAUDE §6) ----------

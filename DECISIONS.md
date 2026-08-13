@@ -3752,6 +3752,65 @@ Log (§2.5), pas un champ mutable. Les deux derniers sont purs et courts.
 21 tests neufs, 4 tests existants mis à jour (F2 les fait changer de verdict) → **1353 passed**,
 ruff clean.
 
+## D-088 · P4 — le dashboard v17 raccorde au backend
+
+Endpoints `/setups`, `/setups/calibration`, `/loops/health` (9 tests) + maquette v17 versionnee
+sous `frontend/public/v17/` avec son generateur de prix remplace. 1743 verts.
+
+### Ce qui est VERIFIE, et ce qui ne l'est pas
+
+**Verifie** : les trois endpoints, par tests et par appel reel sur un backend demarre.
+`/loops/health` rend bien les cinq boucles avec leur statut ; `/setups` rend un blotter vide sans
+lever.
+
+**NON verifie** : le fichier `live.js` n'a jamais tourne dans un navigateur. `vitest` et un `tsc`
+epingle sont absents de l'environnement (npm hors ligne, meme cause que pour `lsr-engine` en
+D-076). Il est ecrit avec soin mais reste a corriger au premier lancement reel. C'est ecrit en
+tete du fichier, pas seulement ici.
+
+Trois fois dans cette session, l'essai reel a trouve ce que les tests avaient manque (D-077,
+D-085, D-086). Livrer du code navigateur sans pouvoir l'ouvrir contredit cette lecon — la
+livraison est donc **explicitement marquee comme non verifiee** plutot que presentee comme finie.
+
+### Pourquoi un instantane REST en plus du canal SSE
+
+Le canal `options` ne pousse `loops_health` que sur **changement d'etat** (dirty flag, D-075), et
+ne pousse pas le blotter du tout. Un client qui vient de se connecter resterait donc vide jusqu'au
+prochain changement — potentiellement plusieurs minutes sur un systeme sain. `/loops/health` et
+`/setups` servent cet instantane initial ; le SSE prend le relais ensuite.
+
+`/loops/health` sans superviseur rend une **503**, pas un « tout va bien » : ne pas savoir n'est
+pas etre sain (§3).
+
+### Les trois regles portees jusqu'a l'ecran
+
+Le back-end passe sa journee a distinguer « pas de donnee » de « donnee nulle ». Un ecran qui
+affiche `0` sur une mesure absente annule tout ce travail. `live.js` porte donc :
+
+1. **Aucune valeur inventee** — sans backend joignable, les champs affichent `—`, jamais une
+   derniere valeur figee ni un zero ;
+2. **La peremption se VOIT** — `OK / STALE / VENDOR_DOWN / UNAVAILABLE` sont rendus distinctement ;
+   un contexte `STALE` n'affiche pas ses niveaux comme s'ils etaient frais. `NOT_IMPLEMENTED`
+   reste **non sain** a l'ecran, comme cote backend : une capacite annoncee et absente n'est pas
+   un etat neutre ;
+3. **Le rendu est CADENCE, pas evenementiel** — les messages SSE marquent « sale », le DOM se
+   redessine a 250 ms (RUNTIME_LOOPS Loop B). Redessiner a chaque message ferait battre l'ecran
+   au rythme du reseau.
+
+Une trame malformee est ignoree SEULE : l'ecran garde son etat, il ne se vide pas et ne crashe
+pas. Une coupure SSE declenche une reconnexion differee (2 s) plutot qu'un martelage.
+
+### La maquette : design conserve, source remplacee
+
+`COMMANDS.md` §4 exige de conserver l'IHM v17 a 100 %, en precisant que « conserver » signifie
+garder le **design** en remplacant les generateurs `Math.random()` par des flux reels. Seul le
+bloc `PRIX SIMULE` a ete neutralise ; aucun style, aucun layout, aucune structure DOM n'a bouge.
+
+**Six occurrences de `Math.random()` subsistent** (carnet, tape, heatmap de la maquette) : elles
+alimentent des panneaux dont le backend ne publie pas encore l'equivalent sur le canal `options`.
+Les remplacer par du vide serait pire que les laisser — mais elles restent **de la simulation
+affichee comme reelle**, et c'est le prochain chantier de P4, pas un detail cosmetique.
+
 ## D-087 · Le declencheur LSR devient MICROSTRUCTUREL PUR — et l'order flow est mesure
 
 `backend/app/mbo/micro_sweep.py` + order flow cable dans l'adaptateur. 17 tests. 1734 verts.
