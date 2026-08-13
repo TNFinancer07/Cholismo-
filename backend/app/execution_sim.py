@@ -195,6 +195,11 @@ class ExecutionSimulator:
                        explicit: Optional[float]) -> Optional[float]:
         """La file explicite prime : en rejeu MBO on connaît la vraie position, elle vaut mieux
         que toute déduction. Sinon on somme la liquidité AU prix — on arrive derrière elle."""
+        if side not in ("BUY", "SELL"):
+            # Un `else: asks` implicite ferait d'un côté mal orthographié — ou d'un `LONG` non
+            # traduit — une file lue du MAUVAIS côté, donc presque toujours nulle : exactement
+            # le « premier de la file » que ce module existe pour interdire (trouvé en D-080).
+            return None
         if explicit is not None:
             return float(explicit) if _finite(explicit) and explicit >= 0 else None
         if book is None:

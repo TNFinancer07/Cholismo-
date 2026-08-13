@@ -90,9 +90,13 @@ async def lifespan(app: FastAPI):
     # EXTERNAL_DATA=1, rien ne tourne et le mock reste seul maître de `vix`/`macro_releases`.
     # Le module ne DÉCIDE rien : il alimente deux champs que les couches déterministes
     # existantes exploitent déjà (compute_macro_risk, update_regime, VIX_CRIT).
+    # L4 `gates.eval` (D-080) : la boucle est construite plus bas (elle a besoin du moteur pour
+    # lire tape/carnet) ; l'indirection par `app.state` évite une dépendance circulaire tout en
+    # gardant UN seul point d'armement.
     app.state.engine = Engine(app.state.datasource, app.state.redis,
                               account_provider=app.state.account_provider,
-                              news_provider=app.state.news_provider)
+                              news_provider=app.state.news_provider,
+                              on_arm=lambda manifest: _on_arm(app, manifest))
     if isinstance(app.state.account_provider, NT8FileAccountProvider):
         await app.state.account_provider.start()
     if app.state.news_provider is not None:
@@ -123,7 +127,12 @@ async def lifespan(app: FastAPI):
     # plutôt que les tampons internes du moteur : le tampon de prints du footprint est borné à
     # quelques minutes, là où O5 réclame une fenêtre de deux heures qui doit s'ACCUMULER.
     app.state.loops = build_supervisor(app.state.options_context, broadcaster,
-                                       read_tape=lambda: _tape_field(app.state.engine))
+                                       read_tape=lambda: _tape_field(app.state.engine),
+                                       read_book=lambda: _order_book_field(app.state.engine))
+    # L4 : la boucle événementielle qui journalise O1-O5 à chaque armement. Elle hérite des
+    # garde-fous du contrat (drop-if-busy, plafond de durée, filet d'exception) — un gate
+    # consultatif ne doit jamais pouvoir ralentir ni casser le chemin d'émission.
+    app.state.gates_loop = app.state.loops.get("gates.eval")
     await app.state.loops.start_all()
     try:
         yield
@@ -143,6 +152,33 @@ async def lifespan(app: FastAPI):
         await app.state.ai.stop()
         await app.state.engine.stop()
         await app.state.redis.close()
+
+
+def _on_arm(app: FastAPI, manifest) -> None:
+    """Armement d'un setup → L4 évalue O1-O5 (D-080). Consultatif : appelé APRÈS l'émission du
+    manifeste, donc structurellement incapable de la retenir. Le drop-if-busy du contrat de
+    boucle s'applique — deux armements simultanés n'écriraient pas deux fois la même entrée."""
+    loop = getattr(app.state, "gates_loop", None)
+    if loop is None:
+        return
+    import asyncio
+    asyncio.get_running_loop().create_task(loop.run_once(manifest))
+
+
+def _order_book_field(engine: Engine):
+    """Carnet agrégé courant, converti pour le simulateur FIFO. Fail-closed : carnet absent ou
+    non FRESH → `None`, et L4 rapporte `NO_BOOK` plutôt qu'une file supposée nulle (D-080)."""
+    from .execution_sim import book_from_levels
+    try:
+        field = engine.snapshot()["schema"]["s1_state"]["order_book"]
+    except Exception:
+        return None
+    if not isinstance(field, dict) or field.get("freshness") != "FRESH":
+        return None
+    value = field.get("value")
+    if not isinstance(value, dict):
+        return None
+    return book_from_levels(bids=value.get("bids"), asks=value.get("asks"))
 
 
 def _tape_field(engine: Engine) -> dict | None:

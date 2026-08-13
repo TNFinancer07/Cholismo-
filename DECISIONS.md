@@ -3752,6 +3752,71 @@ Log (§2.5), pas un champ mutable. Les deux derniers sont purs et courts.
 21 tests neufs, 4 tests existants mis à jour (F2 les fait changer de verdict) → **1353 passed**,
 ruff clean.
 
+## D-080 · L4 `gates.eval` cablee — et la frontiere entre ce qui est mesurable et ce qui ne l'est pas
+
+`backend/app/gates_journal.py`, `build_gates_tick`, hook `on_arm` dans `engine.py`. 13 tests.
+
+### Le PnL n'existe pas a l'armement
+
+L'objectif de P3 item 3 etait de journaliser chaque setup « avec son PnL/slippage simule ». Les
+deux moities n'ont pas le meme statut, et les confondre aurait produit un chiffre invente :
+
+- **Le slippage d'ENTREE est mesurable maintenant** : le carnet est connu, la file d'attente a
+  notre prix limite se lit dedans, et le simulateur FIFO (D-078) dit ce qu'un ordre y subirait.
+- **Le PnL ne l'est PAS** : le trade n'a pas eu lieu, sa sortie depend d'un futur qui n'est pas
+  arrive. Fabriquer un PnL a l'armement reviendrait a supposer le resultat qu'on cherche
+  precisement a mesurer.
+
+Ce n'est pas une limitation, c'est la doctrine event-sourced deja etablie (`CLAUDE §2.5`,
+D-045) : **la decision est un event immuable, l'outcome est un event ULTERIEUR qui la
+reference**. L'entree porte `setup_id` et `pnl_source: "PENDING"` — jamais un zero qui se lirait
+comme un resultat nul. Le PnL arrivera par reconciliation NinjaTrader en live, ou par rejeu MBO
+en backtest.
+
+### Consultatif par CONSTRUCTION, pas par convention
+
+Le hook `on_arm` est appele APRES `broadcaster.publish("fast", "trade_manifest", ...)`. L4 est
+donc structurellement incapable de retenir un manifeste : meme si elle levait, l'emission a deja
+eu lieu. Elle ne leve pas pour autant, et l'entree de journal n'a ni `blocked` ni `allowed`.
+
+Un contexte options mort n'empeche pas la journalisation : le setup est annote
+`O1_DATA_UNAVAILABLE`, pas supprime — sinon la calibration perdrait exactement les setups pris
+sans contexte, qui sont ceux qu'il faut pouvoir comparer.
+
+### Le bug que le test a attrape — et qui aurait tout annule
+
+Le manifeste parle en `LONG`/`SHORT`, le simulateur en `BUY`/`SELL`. En passant `LONG` tel quel,
+`_resolve_queue` lisait `book.bids if side == "BUY" else book.asks` — donc les ASKS pour un
+achat, ou aucun niveau ne correspond au prix d'entree : **file = 0, « premier servi »**.
+
+C'est-a-dire *exactement* le biais optimiste que D-078 et D-079 existent pour supprimer,
+reintroduit par une traduction manquante a la frontiere. Deux corrections :
+
+1. la traduction est faite explicitement dans `gates_journal` ;
+2. le simulateur **refuse** desormais un cote inconnu au lieu de retomber silencieusement sur
+   les asks. Un `else` implicite transformait toute faute de frappe en file nulle. Test de
+   regression sur `LONG`, `SHORT`, `buy`, `""`, `None`.
+
+### L4 lit les MEMES barres que L3
+
+Le tampon `EsBarAggregator` est partage : deux tampons distincts divergeraient, et l'O5 inscrit
+au journal ne serait plus celui diffuse sur le canal — deux verites pour une meme mesure.
+
+### Essai reel — ce qui est verifie et ce qui ne l'est pas
+
+`gates.eval` passe de `NOT_IMPLEMENTED` a **RUNNING** sur le backend reel, et `unhealthy` se
+reduit a `['core.tick']`. En revanche **aucun armement n'a ete observe** pendant l'essai (0
+manifeste emis en 20 s) : a 0,4-0,8 trade/jour, c'est attendu. Le chemin complet
+armement -> journal -> canal est couvert par test avec un manifeste synthetique, pas par
+observation live. Ce sera verifiable en rejeu MBO sur une seance complete.
+
+### Reste ouvert
+
+`core.tick` demeure `NOT_IMPLEMENTED` : la boucle rapide est assuree par `engine.py`, sa
+migration sous le contrat est un refactor. Le harnais de rejeu de bout en bout (MBO -> armement
+-> simulateur -> PnL realise) reste a assembler : c'est lui qui fermera la boucle du PnL et
+rendra enfin mesurable la magnitude du biais de touche laissee non chiffree en D-078.
+
 ## D-079 · Rejeu Parquet/MBO — le carnet L2/L3 reconstruit tick-by-tick
 
 `backend/app/mbo/` (`events.py`, `book.py`, `ingest.py`). 38 tests. Fixtures Parquet reelles de

@@ -312,3 +312,12 @@ def test_aucun_chemin_ne_passe_un_ordre_reel():
     src = inspect.getsource(execution_sim)
     for interdit in ("requests", "httpx", "socket", "broker", "submit_order", "aiohttp"):
         assert interdit not in src
+
+
+def test_un_COTE_inconnu_est_refuse_pas_lu_du_mauvais_cote():
+    """Régression (D-080). `book.bids if side == "BUY" else book.asks` faisait d'un côté mal
+    orthographié — ou d'un `LONG` non traduit — une file lue du MAUVAIS côté du carnet, donc
+    presque toujours nulle : « premier de la file », le biais que ce module interdit."""
+    sim = _sim()
+    for cote in ("LONG", "SHORT", "buy", "", None):
+        assert sim.place_limit(cote, 5999.75, 2, now_ms=0, book=_book(size=50)) is None

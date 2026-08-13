@@ -78,12 +78,46 @@ def build_o5_tick(read_tape: Callable[[], Any], aggregator: EsBarAggregator, bro
     return tick
 
 
+def build_gates_tick(read_snapshot: Callable[[], Any], read_bars: Callable[[], Any],
+                     read_book: Callable[[], Any], broadcaster: Any, *,
+                     append: Optional[Callable[[dict], Any]] = None,
+                     clock: Optional[Callable[[], float]] = None,
+                     tick_size: float = 0.25) -> Callable[[Any], Any]:
+    """Le tick de L4 (D-080) : **événementiel**, déclenché par l'armement d'un manifeste.
+
+    Aucune cadence propre — une L4 périodique réévaluerait le PASSÉ (piège D-052). Aucun pouvoir
+    de blocage non plus : elle est appelée APRÈS que le manifeste existe, donc après que les
+    contrôles déterministes ont statué (mode G2).
+    """
+    from ..gates_journal import evaluate_at_arming
+
+    now = clock or time.time
+
+    async def tick(manifest: Any) -> None:
+        entry = evaluate_at_arming(manifest, options_snapshot=read_snapshot(),
+                                   es_bars=read_bars(), book=read_book(),
+                                   now_ms=now() * 1000.0, tick_size=tick_size)
+        if entry is None:
+            return                                    # manifeste illisible : rien de mesuré
+        if append is not None:
+            append(entry)
+        # `replay=False` : une entrée de journal est un ÉVÉNEMENT daté. La rejouer pour hydrater
+        # un abonné neuf lui présenterait un setup d'avant sa connexion comme s'il venait
+        # d'être armé (même doctrine que `trade_manifest`, D-046).
+        broadcaster.publish("options", "options_gates", entry, replay=False)
+
+    return tick
+
+
 def build_supervisor(reader: Any, broadcaster: Any, *,
                      read_tape: Optional[Callable[[], Any]] = None,
+                     read_book: Optional[Callable[[], Any]] = None,
+                     journal_append: Optional[Callable[[dict], Any]] = None,
                      clock: Optional[Callable[[], float]] = None) -> LoopSupervisor:
     """Monte le superviseur. `reader` est un `OptionsContextReader` ; `read_tape` rend le champ
     `tape` du ContextSchema (L3 reste câblée seulement si une source de prints est fournie —
-    sans elle, `o5.kurtosis` demeure honnêtement `NOT_IMPLEMENTED`)."""
+    sans elle, `o5.kurtosis` demeure honnêtement `NOT_IMPLEMENTED`) ; `read_book` rend le carnet
+    agrégé courant pour l'estimation de file d'attente de L4."""
     now = clock or time.time
     sup = LoopSupervisor(clock=now)
     state: dict[str, Any] = {"fingerprint": None, "last_publish": 0.0}
@@ -112,9 +146,19 @@ def build_supervisor(reader: Any, broadcaster: Any, *,
     o5_tick = (build_o5_tick(read_tape, EsBarAggregator(), broadcaster, clock=now)
                if read_tape is not None else None)
 
+    o5_agg = EsBarAggregator()
+    o5_tick = (build_o5_tick(read_tape, o5_agg, broadcaster, clock=now)
+               if read_tape is not None else None)
+    # L4 lit les MÊMES barres que L3 : deux tampons divergeraient, et O5 au journal ne serait
+    # plus celui diffusé sur le canal.
+    gates_tick = build_gates_tick(
+        lambda: reader.snapshot(now()), lambda: list(o5_agg.bars),
+        read_book if read_book is not None else (lambda: None),
+        broadcaster, append=journal_append, clock=now)
+
     sup.register(CORE_TICK)                       # déjà assurée par engine.py — migration = refactor
     sup.register(OPTIONS_SYNC, options_tick)
     sup.register(O5_KURTOSIS, o5_tick)
-    sup.register(GATES_EVAL)                      # arrive avec le point d'armement du sweep
+    sup.register(GATES_EVAL, gates_tick)
     sup.register(UI_BROADCAST, broadcast_tick)
     return sup

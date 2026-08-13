@@ -16,7 +16,7 @@ import time
 import uuid
 from collections import deque
 from datetime import datetime, timezone, timedelta
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from . import config, lsr_tuning, settings
 from .datasource.base import MarketDataSource
@@ -219,9 +219,14 @@ def _validate_econ_calendar(meta: MetaField, now: float) -> None:
 class Engine:
     def __init__(self, datasource: MarketDataSource, state: RedisState,
                  account_provider: Optional["AccountDataProvider"] = None,
-                 news_provider: Optional["MacroNewsProvider"] = None):
+                 news_provider: Optional["MacroNewsProvider"] = None,
+                 on_arm: Optional[Callable[[Any], Any]] = None):
         self.ds = datasource
         self.state = state
+        # L4 `gates.eval` (D-080) : notifié à CHAQUE manifeste émis — le point d'armement du
+        # détecteur de sweep. `None` = pas de journalisation O1-O5, et rien d'autre ne change :
+        # les balises sont consultatives, leur absence ne retient aucun trade (§2.1).
+        self._on_arm = on_arm
         # Source de compte (D-047) : None = pas de source → AUCUNE émission de manifeste
         # (« on ne trade jamais à l'aveugle », fail-closed §3).
         self.account_provider = account_provider
@@ -941,6 +946,16 @@ class Engine:
         broadcaster.publish("fast", "trade_manifest", manifest.model_dump(), replay=False)
         self._lsr_emitted_key = key
         self._lsr_last_emit_ts = now
+        # L4 `gates.eval` (D-080) : l'armement est le point d'appel UNIQUE des balises O1-O5.
+        # Appelé APRÈS l'émission, donc structurellement incapable de la retenir — mode G2,
+        # consultatif, point final. Le callback est borné et isolé par la boucle L4 ; ici on
+        # garantit seulement qu'il ne peut pas faire tomber le tick d'émission.
+        if self._on_arm is not None:
+            try:
+                self._on_arm(manifest)
+            except Exception:
+                log.exception("L4 gates.eval a échoué sur l'armement %s "
+                              "(consultatif : le manifeste reste émis)", manifest.id)
         # HYGIÈNE DES LOGS (D-046 /polish) : le moteur évalue en continu — un rejet naturel ne
         # logge RIEN (silence structurel : evaluate_lsr est pur, aucun logger dedans). Seule
         # l'ÉMISSION, événement rare et significatif, mérite son unique ligne INFO.
