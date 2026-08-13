@@ -3752,6 +3752,78 @@ Log (§2.5), pas un champ mutable. Les deux derniers sont purs et courts.
 21 tests neufs, 4 tests existants mis à jour (F2 les fait changer de verdict) → **1353 passed**,
 ruff clean.
 
+## D-077 · L3 `o5.kurtosis` cablee — les barres ES qui n'existaient pas
+
+`backend/app/es_bars.py`, `build_o5_tick` dans `app/loops/wiring.py`. 19 tests.
+
+### Personne ne produisait de barres ES
+
+O5 lit une fenetre de 121 barres — deux heures. Le footprint agrege bien par bougie, mais son
+tampon est borne a `FOOTPRINT_MAX_PRINTS` (800 prints), de quoi couvrir quelques minutes. **Une
+fenetre de deux heures ne se reconstruit pas depuis un tampon de prints ; elle s'ACCUMULE.**
+D'ou un agregateur dedie, qui echantillonne le dernier print du tape et clot une barre a chaque
+frontiere de minute.
+
+### Trois choix qui ne sont pas cosmetiques
+
+1. **La largeur de barre est INDEPENDANTE de `FOOTPRINT_CANDLE_SECONDS`.** Ce reglage pilote un
+   affichage et peut basculer en mode tick (`FOOTPRINT_TICKS_PER_CANDLE`). Adosser une mesure de
+   risque a un reglage d'affichage, c'est accepter qu'un changement de vue modifie le kurtosis
+   sans que personne ne fasse le lien. `O5_BAR_PERIOD_SECONDS` lui appartient en propre.
+2. **Seules les barres CLOSES entrent dans le tampon.** La bougie en formation a une cloture
+   mouvante ; `push_bar` rejetant les doublons d'horodatage, la premiere valeur partielle serait
+   **gelee** comme cloture definitive de la minute.
+3. **Tape non FRESH -> aucune observation.** Repeter le dernier prix connu fabriquerait des
+   rendements nuls : une serie calme *inventee*, donc un kurtosis rassurant sur des donnees qui
+   n'existent pas. Un trou reste un trou — c'est `has_temporal_gap` qui doit le voir.
+
+### La cadence declaree de L3 est l'ECHANTILLONNAGE, pas la largeur de barre
+
+Correction de la spec posee en D-073 (60 s). Une boucle cadencee a la largeur de barre verrait
+chaque bucket une seule fois : la moindre gigue d'ordonnanceur sauterait une minute et
+fabriquerait un `O5_DATA_GAP` qui ne dit rien du marche et tout de notre boucle. On echantillonne
+a 5 s, et on ne recalcule **qu'a la cloture** d'une barre — entre deux clotures la fenetre n'a pas
+change, recalculer serait douze fois le travail pour la meme reponse.
+
+### Le deport, raison d'etre de cette boucle
+
+`evaluate_o5` est du CPU synchrone. Execute sur le fil de la boucle d'evenements, il la gele
+avant tout point d'attente — et gele `core.tick` avec elle (piege Python en tete de
+`RUNTIME_LOOPS.md`). Le calcul part donc en `asyncio.to_thread`. Le plafond de duree du contrat
+borne l'attente ; il ne rend pas le calcul non bloquant, seul le deport le fait. Un test le
+verifie en capturant le NOM DU FIL d'execution, pas en faisant confiance a la lecture du code.
+
+### Regression trouvee a l'essai reel, et le filet qui la cachait
+
+Premiere version : `snapshot()["s1_state"]["tape"]`. Or `Engine.snapshot()` enveloppe le schema
+sous la cle `schema`. Le chemin etait faux — et il etait entoure d'un `except Exception` qui a
+transforme un `KeyError` en `None`, donc en `tape_not_fresh`. Resultat : **L3 a echoue 58 fois
+d'affilee en accusant le feed**, alors que la faute etait dans ce chemin.
+
+Le `except` fourre-tout a ete retire, pas seulement le chemin corrige : **un filet trop large ne
+protege pas, il deguise**. Une projection malformee rend toujours `None` (fail-closed), mais une
+erreur de programmation remonte au lieu de se maquiller en absence de donnee. Le test de
+regression construit la projection depuis le **vrai modele Pydantic** plutot qu'un dict ecrit a
+la main — un dict fabrique se serait contente de refleter la meme erreur.
+
+### Essai reel — O5 vivant sur le canal `options`
+
+Worker -> Redis -> backend -> SSE, barres compressees a 2 s pour observer la montee. Sequence :
+23 evenements `O5_SAMPLE_TOO_SMALL` avec `excess_kurtosis: null` pendant l'accumulation (aucune
+valeur inventee sous le seuil d'echantillon), puis bascule en `PASS` des 30 rendements, avec
+kurtosis, skewness, variance et attribution du residu dominant renseignes. 42 evenements au
+total, un par cloture de barre.
+
+Les 3 echecs de L3 observes pendant l'essai ne sont pas des defauts : le `MockDataSource` injecte
+les pathologies exigees par §4 (ticks manquants, donnees en retard), le tape passe brievement
+non-FRESH, et L3 refuse alors d'observer plutot que de fabriquer une barre. Le chemin fail-closed
+s'exerce donc en conditions reelles.
+
+### Reste ouvert
+
+`gates.eval` (L4) demeure `NOT_IMPLEMENTED` : elle attend le point d'armement du detecteur de
+sweep. `core.tick` reste assuree par `engine.py` — sa migration est un refactor.
+
 ## D-076 · Portage Python des balises O1-O5 — et un verrou qui MORD
 
 `backend/app/options_gates.py` (O1-O4 + assemblage + export CSV), `backend/app/o5_tail_risk.py`

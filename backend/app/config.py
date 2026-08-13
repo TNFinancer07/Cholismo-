@@ -341,6 +341,14 @@ OPTIONS_CONTEXT_TTL_SECONDS = float(os.getenv("OPTIONS_CONTEXT_TTL_SECONDS", "90
 # L3 — barres ES nominales 1 min ; `maxBarGapMs = 90_000` côté o5TailRisk tolère une barre
 # manquée, pas deux. Le watchdog se déclenche donc APRÈS ce que le gate sait déjà gérer seul.
 O5_BAR_PERIOD_SECONDS = float(os.getenv("O5_BAR_PERIOD_SECONDS", "60.0"))               # PLACEHOLDER
+# Cadence d'ÉCHANTILLONNAGE de L3 — volontairement plus fine que la largeur de barre : une
+# boucle cadencée à 60 s verrait chaque bucket une seule fois, et la moindre gigue sauterait
+# une minute en fabriquant un faux O5_DATA_GAP. On échantillonne vite, on ne calcule qu'à la
+# clôture d'une barre (le kurtosis est déporté hors du fil principal — D-077).
+O5_SAMPLE_PERIOD_SECONDS = float(os.getenv("O5_SAMPLE_PERIOD_SECONDS", "5.0"))          # PLACEHOLDER
+# Tampon de barres : la fenêtre O5 en lit 121 ; une marge suffit. Borné pour ne pas laisser
+# une séance de 8 h accumuler 480 barres (fuite lente, RUNTIME_LOOPS Loop D).
+O5_BAR_BUFFER_SIZE = int(os.getenv("O5_BAR_BUFFER_SIZE", "180"))
 O5_TICK_BUDGET_SECONDS = float(os.getenv("O5_TICK_BUDGET_SECONDS", "5.0"))              # PLACEHOLDER
 O5_HEARTBEAT_STALE_SECONDS = float(os.getenv("O5_HEARTBEAT_STALE_SECONDS", "180.0"))    # PLACEHOLDER
 # L4 — `evaluateOptionsGates` ne fait que des lectures mémoire pures (aucune I/O par

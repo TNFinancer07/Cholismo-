@@ -118,7 +118,12 @@ async def lifespan(app: FastAPI):
     # et passe STALLED — ce qui est la VÉRITÉ, et se lit sur le canal `options`. Aucune valeur
     # n'est inventée pour combler le vide (§3).
     app.state.options_context = OptionsContextReader()
-    app.state.loops = build_supervisor(app.state.options_context, broadcaster)
+    # L3 `o5.kurtosis` (D-077) : la source de barres est le TAPE du ContextSchema — les prints
+    # déjà assemblés par le moteur (observation seule, §2.1). On lit la projection publique
+    # plutôt que les tampons internes du moteur : le tampon de prints du footprint est borné à
+    # quelques minutes, là où O5 réclame une fenêtre de deux heures qui doit s'ACCUMULER.
+    app.state.loops = build_supervisor(app.state.options_context, broadcaster,
+                                       read_tape=lambda: _tape_field(app.state.engine))
     await app.state.loops.start_all()
     try:
         yield
@@ -138,6 +143,22 @@ async def lifespan(app: FastAPI):
         await app.state.ai.stop()
         await app.state.engine.stop()
         await app.state.redis.close()
+
+
+def _tape_field(engine: Engine) -> dict | None:
+    """Champ `tape` du ContextSchema (D-026 : prints observés, plus récent en tête), lu depuis la
+    projection publique du moteur — qui enveloppe le schéma sous la clé `schema`.
+
+    **Aucun `except` fourre-tout ici, et c'est délibéré** : la première version en portait un, et
+    quand le chemin d'accès s'est révélé faux, L3 a échoué 58 fois d'affilée en annonçant
+    `tape_not_fresh`. Le symptôme accusait le feed alors que la faute était dans ce chemin. Un
+    filet trop large ne protège pas, il déguise. Le tampon de prints du footprint, lui, est borné
+    à quelques minutes, là où O5 réclame une fenêtre de deux heures qui doit s'ACCUMULER."""
+    snapshot = engine.snapshot()
+    schema = snapshot.get("schema") if isinstance(snapshot, dict) else None
+    s1 = schema.get("s1_state") if isinstance(schema, dict) else None
+    tape = s1.get("tape") if isinstance(s1, dict) else None
+    return tape if isinstance(tape, dict) else None
 
 
 def _build_log_scraper(engine: Engine) -> LogTailer | None:

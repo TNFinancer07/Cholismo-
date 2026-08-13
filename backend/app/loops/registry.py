@@ -65,13 +65,16 @@ OPTIONS_SYNC = LoopSpec(
 O5_KURTOSIS = LoopSpec(
     name="o5.kurtosis",
     cadence=Cadence.PERIODIC,
-    period_s=config.O5_BAR_PERIOD_SECONDS,
+    # Cadence d'ÉCHANTILLONNAGE, PAS la largeur de barre (D-077) : cadencée à 60 s, la boucle
+    # verrait chaque bucket une seule fois et la moindre gigue sauterait une minute — fabriquant
+    # un `O5_DATA_GAP` qui ne dit rien du marché et tout de notre ordonnanceur.
+    period_s=config.O5_SAMPLE_PERIOD_SECONDS,
     criticality=Criticality.COLD,
     tick_budget_s=config.O5_TICK_BUDGET_SECONDS,
     heartbeat_stale_s=config.O5_HEARTBEAT_STALE_SECONDS,
     starve=StarvePolicy.FAIL_CLOSED,
-    purpose="Excess kurtosis des log-returns sur les barres ES — calcul déporté hors du fil "
-            "principal, résultat consultatif (O5).",
+    purpose="Échantillonne le dernier print ES, clôt une barre par minute, et recalcule "
+            "l'excess kurtosis À LA CLÔTURE — calcul déporté hors du fil principal (O5).",
 )
 
 GATES_EVAL = LoopSpec(

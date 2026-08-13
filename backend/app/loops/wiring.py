@@ -21,10 +21,13 @@ externe (Loop G) est le vrai remède ; il n'est pas dans cette tranche.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 from typing import Any, Callable, Optional
 
+from ..es_bars import EsBarAggregator, EsBarsUnavailable, last_trade_price
+from ..o5_tail_risk import O5_CONFIG_PLACEHOLDER, evaluate_o5
 from .registry import CORE_TICK, GATES_EVAL, O5_KURTOSIS, OPTIONS_SYNC, UI_BROADCAST
 from .supervisor import LoopSupervisor
 
@@ -41,9 +44,46 @@ def _fingerprint(snapshot: dict[str, Any]) -> str:
                        for e in snapshot["loops"]], sort_keys=True)
 
 
+def build_o5_tick(read_tape: Callable[[], Any], aggregator: EsBarAggregator, broadcaster: Any, *,
+                  clock: Optional[Callable[[], float]] = None,
+                  evaluate: Callable[..., dict] = evaluate_o5,
+                  o5_config: Optional[dict] = None) -> Callable[[], Any]:
+    """Le tick de L3 (D-077) : échantillonner, et ne recalculer QU'À la clôture d'une barre.
+
+    **Le calcul est DÉPORTÉ (`asyncio.to_thread`)** — c'est la raison d'être de cette boucle. Le
+    kurtosis est du CPU synchrone : exécuté sur le fil de la boucle d'événements, il la gèle
+    avant tout point d'attente, et gèle donc `core.tick` avec elle (piège Python nommé en tête de
+    `RUNTIME_LOOPS.md`). Le plafond de durée du contrat borne l'attente ; il ne rend pas le
+    calcul non bloquant — seul le déport le fait.
+
+    Recalculer à chaque échantillon serait douze fois le travail pour la même réponse : entre
+    deux clôtures, la fenêtre n'a pas changé.
+
+    Lève `EsBarsUnavailable` si le tape ne donne aucun prix exploitable, pour que la boucle
+    COMPTE l'échec plutôt que de battre dans le vide (doctrine D-075).
+    """
+    now = clock or time.time
+    cfg = o5_config if o5_config is not None else O5_CONFIG_PLACEHOLDER
+
+    async def tick() -> None:
+        price = last_trade_price(read_tape())
+        if price is None:
+            raise EsBarsUnavailable("tape_not_fresh")
+        if not aggregator.observe(price, now()):
+            return                                    # barre en formation : rien à recalculer
+        bars = list(aggregator.bars)
+        result = await asyncio.to_thread(evaluate, bars, cfg, now() * 1000.0)
+        broadcaster.publish("options", "o5_tail_risk", result)
+
+    return tick
+
+
 def build_supervisor(reader: Any, broadcaster: Any, *,
+                     read_tape: Optional[Callable[[], Any]] = None,
                      clock: Optional[Callable[[], float]] = None) -> LoopSupervisor:
-    """Monte le superviseur avec L2 et L5 câblées. `reader` est un `OptionsContextReader`."""
+    """Monte le superviseur. `reader` est un `OptionsContextReader` ; `read_tape` rend le champ
+    `tape` du ContextSchema (L3 reste câblée seulement si une source de prints est fournie —
+    sans elle, `o5.kurtosis` demeure honnêtement `NOT_IMPLEMENTED`)."""
     now = clock or time.time
     sup = LoopSupervisor(clock=now)
     state: dict[str, Any] = {"fingerprint": None, "last_publish": 0.0}
@@ -69,9 +109,12 @@ def build_supervisor(reader: Any, broadcaster: Any, *,
         # servirait un âge d'avant sa connexion — un état, ça se rejoue ; une mesure, non.
         broadcaster.publish("options", "loops_health", snapshot, replay=False)
 
+    o5_tick = (build_o5_tick(read_tape, EsBarAggregator(), broadcaster, clock=now)
+               if read_tape is not None else None)
+
     sup.register(CORE_TICK)                       # déjà assurée par engine.py — migration = refactor
     sup.register(OPTIONS_SYNC, options_tick)
-    sup.register(O5_KURTOSIS)                     # arrive avec le port O5 (P2)
-    sup.register(GATES_EVAL)                      # arrive avec le port O1-O4 (P2)
+    sup.register(O5_KURTOSIS, o5_tick)
+    sup.register(GATES_EVAL)                      # arrive avec le point d'armement du sweep
     sup.register(UI_BROADCAST, broadcast_tick)
     return sup
