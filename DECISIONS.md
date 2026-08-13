@@ -3752,6 +3752,76 @@ Log (§2.5), pas un champ mutable. Les deux derniers sont purs et courts.
 21 tests neufs, 4 tests existants mis à jour (F2 les fait changer de verdict) → **1353 passed**,
 ruff clean.
 
+## D-079 · Rejeu Parquet/MBO — le carnet L2/L3 reconstruit tick-by-tick
+
+`backend/app/mbo/` (`events.py`, `book.py`, `ingest.py`). 38 tests. Fixtures Parquet reelles de
+l'artefact v1.7 versionnees sous `backend/tests/fixtures/`.
+
+### L'ambiguite de cote sur un trade — traitee, pas devinee
+
+L'artefact impute le passif d'un trade depuis le drapeau : `side === 'A' ? asks : bids`. Or son
+propre `CLAUDE.md` §5 avertit que « `tradeSideMeaning` = **agresseur**, pas le passif consomme —
+l'inverser retourne B2 et B3 **en silence** », et Databento documente `side` comme le cote de
+l'agresseur. Sous cette convention l'imputation de l'artefact est inversee ; sous celle de sa
+propre fixture elle est juste. **Les deux lectures s'opposent et aucune n'est verifiable sans
+donnees reelles.**
+
+Deviner aurait inverse deux gates sans qu'aucun test ne tombe. Le cote passif est donc resolu
+dans cet ordre : (1) l'`order_id` au repos — seule source autoritaire, l'ordre touche porte son
+propre cote ; (2) a defaut le PRIX compare aux meilleures limites, derive du carnet donc
+independant de la convention (`order_id = 0` est le cas normal des donnees reelles) ; (3) sinon
+**rejet compte** (`unresolved_trades`), jamais une imputation au hasard.
+
+Un test verifie explicitement que le drapeau `side` **ne peut pas** inverser le passif : meme
+trade, drapeau oppose, meme resultat. Les deux trades anonymes de la fixture sont tous deux
+resolus, `unresolved_trades == 0`.
+
+### Deux ecarts de plus avec l'artefact
+
+- Sa docstring annonce « O(1) par evenement, sans allocation dans le chemin chaud ». C'est
+  **inexact** : `recomputeBest` balaie tous les niveaux a chaque retrait, `cumulativeDepth`
+  alloue puis trie. La promesse n'est pas reprise — mieux vaut pas de promesse qu'une fausse.
+- `levelOf` creait une entree a chaque prix touche, y compris pour l'annulation d'un ordre
+  inconnu a un prix arbitraire : sur une seance la table croit sans borne (piege « fuite
+  memoire » de RUNTIME_LOOPS Loop D). Le nombre de niveaux par cote est **borne**, les plus
+  eloignes du marche evinces en premier, et **jamais** un niveau portant de la liquidite vivante.
+
+### L'invariant nanoseconde change de NATURE en Python
+
+L'artefact impose `bigint` parce qu'un epoch ns (~1,78e18) depasse `Number.MAX_SAFE_INTEGER`
+(9,0e15) : en `number`, deux evenements distincts collapsent et l'ordre de rejeu cesse d'etre
+reproductible. Les entiers Python sont illimites — l'invariant est acquis **tant qu'on reste en
+`int`**. Un `float` porte exactement la meme mantisse de 53 bits que le `number` JS : stocker des
+ns en flottant reintroduirait le bug a l'identique. Verrouille par un test qui montre que
+`float(1_700_000_000_000_000_001) == float(1_700_000_000_000_000_002)`.
+
+### Rien n'est ecarte en silence
+
+Chaque ligne rejetee l'est **avec son motif compte**, et le `reject_ratio` est calcule plutot que
+laisse a l'appelant : un fichier a moitie rejete qui produit un backtest d'allure normale est le
+pire resultat possible. Un recul temporel est **signale et conserve** par defaut — trier
+discretement ferait disparaitre le symptome d'un probleme de capture ; le jeter est un choix
+explicite (`drop_out_of_order=True`) et compte comme les autres. Une colonne requise absente est
+fatale au FICHIER, pas a la ligne : on ne devine pas une colonne absente. Un fichier illisible
+**leve** au lieu de rendre une liste vide, qui se lirait « seance sans evenements ».
+
+### `pyarrow` reste OPTIONNEL
+
+Le coeur — schema d'evenements et carnet — n'a aucune dependance Parquet : il se teste et tourne
+sans. La lecture est importee a l'usage, et `pyarrow` va dans `requirements-dev` : le rejeu est
+une preoccupation de backtest, pas du terminal live, et imposer ~100 Mo au demarrage d'un chemin
+qui ne s'en sert jamais serait un cout gratuit.
+
+### La jonction de P3
+
+`to_aggregated_book()` projette le carnet MBO vers le carnet du simulateur FIFO (D-078) : la file
+d'attente cesse d'etre une deduction et devient la **profondeur reellement observee** dans le
+flux. Verifie sur la fixture — un ordre place a 4999.75 apres le `modify` trouve bien les 40 lots
+de l'ordre 101 devant lui.
+
+C'est aussi ce qui rendra mesurable la magnitude du biais de touche, laissee explicitement
+non chiffree en D-078.
+
 ## D-078 · Simulateur d'execution FIFO — le biais le plus couteux du backtest de scalping
 
 `backend/app/execution_sim.py`. 33 tests. Phase P3, intervertie avec P2 sur arbitrage operateur.

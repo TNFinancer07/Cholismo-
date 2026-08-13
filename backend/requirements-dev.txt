@@ -2,3 +2,5 @@ pytest>=8
 ruff>=0.6
 pandas>=2.2  # `to_dataframe` uniquement — commodité d exploration, JAMAIS le chemin d execution
 mypy>=1.11   # typage strict — voir [tool.mypy] : `app/replay` et `app/datasource/replay.py`
+pyarrow>=17  # lecture Parquet MBO (rejeu P3) UNIQUEMENT — optionnelle, importée à l usage :
+             # le coeur MBO (evenements + carnet) tourne et se teste sans elle.
