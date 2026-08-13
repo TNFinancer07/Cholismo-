@@ -37,6 +37,32 @@
   var dirty = true;
 
   function $(sel) { return document.querySelector(sel); }
+
+  /* ── Conteneurs DÉDIÉS (D-090) ────────────────────────────────────────────
+   * Correction d'une erreur de fond : la version precedente ecrivait dans des IDs de la
+   * maquette (#g4, #w1-#w4, #s1-#s3, #p6) que j'avais DEDUITS au lieu de les lire. Or :
+   *   · #g4 est la BARRE de jauge B4 (`<i style="width:…">`), pilotee par `ofWidgets()` —
+   *     y ecrire du texte detruisait la jauge ;
+   *   · #w1-#w4 et #s1-#s3 sont les widgets B1-B4 de l'order flow, deja vivants ;
+   *   · #p6 est la SECTION ENTIERE de l'onglet « Backtest & Monte-Carlo » — `innerHTML`
+   *     l'aurait rasee, avec le rejeu, le Monte-Carlo et la grille de resilience.
+   * On n'ecrit donc plus dans AUCUN element de la maquette (sauf #px, dont on a remplace le
+   * generateur). Tout passe par des conteneurs qu'on cree, avec nos propres IDs prefixes. */
+  function ensureStrip() {
+    if ($('#cho-live')) return $('#cho-live');
+    var header = document.querySelector('header.topbar');
+    if (!header) return null;
+    var strip = document.createElement('div');
+    strip.id = 'cho-live';
+    strip.style.cssText = 'display:flex;gap:10px;align-items:center;flex-wrap:wrap;'
+      + 'padding:4px 10px;font:11px/1.4 ui-monospace,monospace;opacity:.92';
+    strip.innerHTML =
+      '<span id="cho-opt">contexte —</span>'
+      + '<span id="cho-o5">O5 —</span>'
+      + '<span id="cho-loops" style="display:flex;gap:6px;flex-wrap:wrap"></span>';
+    header.insertAdjacentElement('afterend', strip);
+    return strip;
+  }
   function setText(sel, value) {
     var el = $(sel);
     if (el) el.textContent = (value === null || value === undefined) ? ABSENT : value;
@@ -63,27 +89,31 @@
     // Prix — canal `fast`. Absent = « — », jamais la dernière valeur figée.
     setText('#px', state.px === null ? null : state.px.toFixed(2));
 
-    // Contexte options → Gamma / murs. La SANTÉ prime : un contexte STALE n'affiche pas ses
-    // niveaux comme s'ils étaient frais.
+    if (!ensureStrip()) return;
+
+    // Contexte options. La SANTÉ prime : un contexte STALE n'affiche pas ses niveaux comme
+    // s'ils étaient frais.
     var opt = state.options;
     var optOk = opt && opt.health === 'OK';
-    setText('#g4', optOk ? num(opt.gamma_zero_es, 2) : null);
-    setText('#w1', optOk ? num(opt.put_wall_es, 2) : null);
-    setText('#w2', optOk ? num(opt.call_wall_es, 2) : null);
-    setText('#w3', opt ? opt.health : null);
-    setText('#w4', opt && typeof opt.age_s === 'number' ? Math.round(opt.age_s) + ' s' : null);
-    var w3 = $('#w3');
-    if (w3) w3.className = 'badge ' + healthClass(opt ? opt.health : null);
+    setText('#cho-opt', 'contexte ' + (opt ? opt.health : ABSENT)
+      + ' · γ0 ' + (optOk ? (num(opt.gamma_zero_es, 2) || ABSENT) : ABSENT)
+      + ' · put ' + (optOk ? (num(opt.put_wall_es, 2) || ABSENT) : ABSENT)
+      + ' · call ' + (optOk ? (num(opt.call_wall_es, 2) || ABSENT) : ABSENT)
+      + ' · âge ' + (opt && typeof opt.age_s === 'number' ? Math.round(opt.age_s) + 's' : ABSENT));
+    var optEl = $('#cho-opt');
+    if (optEl) optEl.style.color = tint(healthClass(opt ? opt.health : null));
 
     // O5 — kurtosis. `null` sous l'échantillon minimal : le backend refuse de le calculer, et
     // l'écran doit refuser de l'afficher plutôt que de montrer un 0 rassurant.
     var o5 = state.o5;
-    setText('#s1', o5 ? o5.status : null);
-    setText('#s2', o5 ? num(o5.excess_kurtosis, 3) : null);
-    setText('#s3', o5 ? (o5.sample_size + ' éch.') : null);
-    var s1 = $('#s1');
-    if (s1) s1.className = 'badge ' + (o5 && o5.status === 'PASS' ? 'ok'
-      : o5 && o5.status === 'FLAG_HIDDEN_TAIL' ? 'bad' : 'warn');
+    setText('#cho-o5', 'O5 ' + (o5 ? o5.status : ABSENT)
+      + ' · kurt ' + (o5 ? (num(o5.excess_kurtosis, 3) || ABSENT) : ABSENT)
+      + ' · n=' + (o5 ? o5.sample_size : ABSENT));
+    var o5El = $('#cho-o5');
+    if (o5El) {
+      o5El.style.color = tint(o5 && o5.status === 'PASS' ? 'ok'
+        : o5 && o5.status === 'FLAG_HIDDEN_TAIL' ? 'bad' : 'warn');
+    }
 
     renderLoops();
     renderGates();
@@ -93,10 +123,11 @@
    * Sans superviseur joignable, on n'affiche RIEN plutôt qu'un vert par défaut : « je ne sais
    * pas » et « tout va bien » ne sont pas la même chose (doctrine D-073). */
   function renderLoops() {
-    var host = $('#p6') || $('#con');
+    var host = $('#cho-loops');            // conteneur DÉDIÉ — jamais un panneau de la maquette
     if (!host || !state.loops || !state.loops.loops) return;
     host.innerHTML = state.loops.loops.map(function (loop) {
-      return '<span class="badge ' + healthClass(loop.status) + '" title="'
+      return '<span style="padding:1px 6px;border-radius:3px;border:1px solid currentColor;color:'
+        + tint(healthClass(loop.status)) + '" title="'
         + (loop.purpose || '').replace(/"/g, '') + '">' + loop.name + ' · ' + loop.status
         + '</span>';
     }).join(' ');
@@ -106,7 +137,7 @@
    * Une entrée sans issue reste `PENDING` : elle n'est jamais affichée comme un résultat nul
    * (D-082). */
   function renderGates() {
-    var table = $('#jTable');
+    var table = ensureBlotter();           // table DÉDIÉE — #jTable appartient à la maquette
     if (!table || !state.gates.length) return;
     table.innerHTML = state.gates.slice(0, 50).map(function (row) {
       return '<tr><td>' + (row.setup_id || ABSENT) + '</td>'
@@ -118,6 +149,27 @@
         }).join('')
         + '<td>' + (row.outcome_status || 'PENDING') + '</td></tr>';
     }).join('');
+  }
+
+  /* Table de blotter DÉDIÉE, ajoutée SOUS celle de la maquette plutôt qu'à sa place : le
+   * journal v17 garde son contenu, le nôtre vient à côté. */
+  function ensureBlotter() {
+    var existing = $('#cho-blotter');
+    if (existing) return existing;
+    var anchor = $('#jTable');
+    if (!anchor || !anchor.parentNode) return null;
+    var table = document.createElement('table');
+    table.id = 'cho-blotter';
+    table.style.cssText = 'width:100%;margin-top:8px;font:11px/1.5 ui-monospace,monospace';
+    anchor.parentNode.insertBefore(table, anchor.nextSibling);
+    return table;
+  }
+
+  /* Teintes reprises des variables CSS de la maquette — on emprunte sa palette, on ne la
+   * redéfinit pas (Loop 6 : « inspiré, jamais copié » vaut aussi pour soi-même). */
+  function tint(kind) {
+    return kind === 'ok' ? 'var(--bias-up, #4ea)' 
+      : kind === 'warn' ? 'var(--gold, #c9a24d)' : 'var(--rust, #c4685e)';
   }
 
   /* ── SSE : deux canaux, résurrection automatique ───────────────────────────

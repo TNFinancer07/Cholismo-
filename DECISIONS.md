@@ -3752,6 +3752,48 @@ Log (§2.5), pas un champ mutable. Les deux derniers sont purs et courts.
 21 tests neufs, 4 tests existants mis à jour (F2 les fait changer de verdict) → **1353 passed**,
 ruff clean.
 
+## D-090 · Les conteneurs dedies — ma cartographie d'IDs etait fausse, pas approximative
+
+`frontend/public/v17/live.js` n'ecrit plus dans AUCUN element de la maquette, sauf `#px` dont
+j'ai legitimement remplace le generateur. Syntaxe validee (`node --check`), backend 1743 verts.
+
+### Les deux suspects etaient confirmes — et il y en avait un troisieme
+
+J'avais signale deux risques. La lecture du HTML les a confirmes, et en a revele un de plus que
+je n'avais pas vu :
+
+1. **`#g4` est la BARRE de la jauge B4** (`<i style="width:28%">`), pilotee par `ofWidgets()` via
+   `g.style.width`. Y ecrire du texte detruisait la jauge.
+2. **`#p6` est la SECTION ENTIERE** de l'onglet « Backtest & Monte-Carlo »
+   (`<section class="panel" role="tabpanel">`). Mon `innerHTML` l'aurait **rasee** — rejeu,
+   Monte-Carlo, grille de resilience compris. Bien pire que « pourrait ne pas marcher ».
+3. **`#w1`-`#w4` et `#s1`-`#s3` sont les widgets B1-B4 de l'order flow**, deja vivants :
+   « B1 · rechargement du mur », « B2 · bascule du tape », « B3 · CVD normalise », « B4 · vitesse
+   d'agression », avec leurs sparklines. Je les ecrasais tous les sept.
+
+### Ce n'etait pas deux erreurs, c'etait une methode fausse
+
+J'avais **deduit** une cartographie d'identifiants au lieu de la **lire**. Corriger `#g4` et
+`#p6` un par un aurait laisse la cause intacte — et les cinq autres collisions en place.
+
+La correction porte donc sur la methode : `live.js` **cree ses propres conteneurs** (`#cho-live`,
+`#cho-opt`, `#cho-o5`, `#cho-loops`, `#cho-blotter`), inseres a cote de l'existant, jamais a sa
+place. Le bandeau s'ajoute apres `header.topbar` ; le blotter s'insere SOUS `#jTable`, qui n'est
+plus que **lu** comme ancre. Verifie : les seuls selecteurs ecrits sont `#cho-*` et `#px`.
+
+La palette est empruntee aux variables CSS de la maquette (`--bias-up`, `--gold`, `--rust`) avec
+repli — on emprunte sa charte, on ne la redefinit pas.
+
+### Ce que ca dit du reste
+
+Trois fois aujourd'hui l'essai reel a trouve ce que les tests avaient manque ; ici c'est la
+simple LECTURE du fichier qui a suffi. Je ne l'avais pas faite avant d'ecrire — c'est la meme
+faute que le chemin du tape (D-077) et le parseur de calendrier (D-085) : supposer une structure
+au lieu de l'ouvrir.
+
+Le reste reste NON VERIFIE : `node --check` valide la syntaxe, pas le rendu. Le test navigateur
+de l'operateur demeure le seul juge.
+
 ## D-089 · Les generateurs factices de la maquette, remplaces par du reel
 
 `frontend/public/v17/` — carnet, tape et heatmap consomment desormais le canal `fast`.
