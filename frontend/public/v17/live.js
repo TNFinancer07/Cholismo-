@@ -29,6 +29,11 @@
 
   // État local : dernier message reçu par type. Aucune fusion, aucune extrapolation.
   var state = { options: null, o5: null, loops: null, gates: [], px: null, connected: {} };
+
+  /* Magasin partagé lu par la maquette (D-089). Elle ne connaît pas SSE : elle lit un objet.
+   * `null` signifie « pas de donnée », JAMAIS « donnée vide » — c'est cette distinction qui
+   * permet à `buildDom` d'afficher des tirets au lieu de tailles inventées. */
+  window.CHOLISMO_LIVE = { book: null, tape: null, heatmap: null, ts: null };
   var dirty = true;
 
   function $(sel) { return document.querySelector(sel); }
@@ -165,6 +170,17 @@
         var tape = data && data.tape;
         var prints = tape && tape.freshness === 'FRESH' ? tape.value : null;
         state.px = (prints && prints.length) ? prints[0].price : null;
+
+        // Carnet, tape et heatmap alimentent la maquette (D-089). Seul le FRESH passe : un
+        // carnet périmé affiché comme courant annoncerait une liquidité qui n'est plus là.
+        var book = data && data.order_book;
+        window.CHOLISMO_LIVE.book =
+          (book && book.freshness === 'FRESH' && book.value) ? book.value : null;
+        window.CHOLISMO_LIVE.tape = prints;
+        var heat = data && data.liquidity_heatmap;
+        window.CHOLISMO_LIVE.heatmap =
+          (heat && heat.freshness === 'FRESH' && heat.value) ? heat.value : null;
+        window.CHOLISMO_LIVE.ts = Date.now();
       }
     });
 

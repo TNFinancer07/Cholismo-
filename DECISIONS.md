@@ -3752,6 +3752,42 @@ Log (§2.5), pas un champ mutable. Les deux derniers sont purs et courts.
 21 tests neufs, 4 tests existants mis à jour (F2 les fait changer de verdict) → **1353 passed**,
 ruff clean.
 
+## D-089 · Les generateurs factices de la maquette, remplaces par du reel
+
+`frontend/public/v17/` — carnet, tape et heatmap consomment desormais le canal `fast`.
+**Zero `Math.random()` restant.** Syntaxe des deux fichiers validee par `node --check`.
+
+### Du reel, pas des tirets
+
+Le backend publie deja `order_book`, `tape` et `liquidity_heatmap` sur le canal `fast` : il n'y
+avait aucune raison de se rabattre sur des tirets. La maquette lit un magasin partage
+(`window.CHOLISMO_LIVE`) alimente par `live.js` — elle ne connait pas SSE, elle lit un objet.
+
+**Seul le FRESH passe.** Un carnet perime affiche comme courant annoncerait une liquidite qui
+n'est plus la ; il devient `null`, et l'ecran montre des tirets.
+
+### `null` n'est pas `0`, jusque dans le DOM
+
+`domSize()` rend `null` — jamais 0 — quand le carnet n'est pas publie ou ne porte pas ce niveau.
+Un 0 annoncerait une absence de liquidite OBSERVEE, alors qu'on n'a rien observe du tout. La
+barre de volume disparait avec la valeur : pas de barre a largeur nulle qui suggererait une
+mesure.
+
+Meme logique pour le tape : sans print neuf, `ofTrade()` rend `null` et **le tape ne bouge pas**.
+Une maquette qui continue de defiler sur un flux mort est le pire des affichages — elle a l'air
+vivante. L'immobilite est la verite.
+
+### Ce qui reste NON VERIFIE
+
+`node --check` valide la **syntaxe**, pas le comportement. Ni `vitest` ni un `tsc` epingle ne
+sont disponibles (npm hors ligne), et la page n'a jamais ete ouverte. Les selecteurs (`#w1`,
+`#p6`, `#jTable`…) sont deduits de la lecture du HTML, pas observes a l'ecran : c'est
+precisement le genre d'hypothese que trois essais reels ont invalidee aujourd'hui (D-077, D-085,
+D-086).
+
+L'operateur teste la page ; les corrections viendront de ce qu'il observe, pas de nouvelles
+suppositions empilees.
+
 ## D-088 · P4 — le dashboard v17 raccorde au backend
 
 Endpoints `/setups`, `/setups/calibration`, `/loops/health` (9 tests) + maquette v17 versionnee

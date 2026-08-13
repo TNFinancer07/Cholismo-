@@ -1110,21 +1110,35 @@ renderLevels(); renderLvDetail();
 /* ═══════════════════════════════════════════════════════════════
    CARNET MBO
    ═══════════════════════════════════════════════════════════════ */
+/* Taille au prix `p` d'après le carnet RÉEL publié sur le canal `fast` (D-089).
+   Rend `null` — pas 0 — quand le carnet n'est pas publié ou ne porte pas ce niveau : un 0
+   annoncerait une absence de liquidité OBSERVÉE, alors qu'on n'a rien observé du tout (§3). */
+function domSize(side, p){
+  var live = window.CHOLISMO_LIVE && window.CHOLISMO_LIVE.book;
+  var rows = live && live[side];
+  if(!rows) return null;
+  for(var i=0;i<rows.length;i++){
+    if(Math.abs(Number(rows[i][0]) - p) < 0.13) return Math.round(Number(rows[i][1]));
+  }
+  return null;                              // niveau hors de la profondeur publiée
+}
 function buildDom(el, up, down, wallPrice){
   const mid = 5000.125, ts = 0.25;
   let h = '';
   for(let i = up; i >= 1; i--){
     const p = mid + (i - 0.5) * ts;
-    const sz = Math.round(30 + Math.random() * 90);
+    const sz = domSize('asks', p);          // carnet RÉEL (D-089) — null si non publié
+    const bar = sz === null ? '' : '<i style="width:'+Math.min(100, sz/1.6)+'%"></i>';
     h += '<div class="dom-r"><div class="dom-b"></div><div class="dom-p">'+p.toFixed(2)+'</div>'+
-         '<div class="dom-a"><i style="width:'+Math.min(100, sz/1.6)+'%"></i><span>'+sz+'</span></div></div>';
+         '<div class="dom-a">'+bar+'<span>'+(sz === null ? '—' : sz)+'</span></div></div>';
   }
   h += '<div class="dom-r mid"><div class="dom-b"></div><div class="dom-p">'+px.toFixed(2)+'</div><div class="dom-a"></div></div>';
   for(let i = 1; i <= down; i++){
     const p = mid - (i - 0.5) * ts;
     const isWall = Math.abs(p - wallPrice) < 0.13;
-    const sz = isWall ? 412 : Math.round(28 + Math.random() * 85);
-    h += '<div class="dom-r'+(isWall?' wall':'')+'"><div class="dom-b"><i style="width:'+Math.min(100, sz/(isWall?4.6:1.6))+'%"></i><span>'+sz+'</span></div>'+
+    const sz = domSize('bids', p);          // carnet RÉEL (D-089) — null si non publié
+    const bar = sz === null ? '' : '<i style="width:'+Math.min(100, sz/(isWall?4.6:1.6))+'%"></i>';
+    h += '<div class="dom-r'+(isWall?' wall':'')+'"><div class="dom-b">'+bar+'<span>'+(sz === null ? '—' : sz)+'</span></div>'+
          '<div class="dom-p">'+p.toFixed(2)+'</div><div class="dom-a"></div></div>';
   }
   el.innerHTML = h;
@@ -1141,7 +1155,9 @@ var ofSeq=200;
 setInterval(function(){
   if(!$('#p4').classList.contains('on')||!HEAT) return;
   ofClock+=760; HEAT.push(ofBook(ofSeq++,0), ofClock, true);
-  TAPE.push(ofTrade(60+ (ofSeq%30))); TAPE.render(); ofWidgets();
+  var trade = ofTrade();
+  if(trade){ TAPE.push(trade); TAPE.render(); }   // aucun print neuf → le tape ne bouge pas
+  ofWidgets();
 }, 780);
 
 /* ═══════════════════════════════════════════════════════════════
@@ -1483,12 +1499,19 @@ function ofBook(c,need){
   }
   return b;
 }
-function ofTrade(i){
-  var sweep=i>44&&i<54, after=i>=54;
-  var buy = sweep ? (Math.random()<0.15) : (Math.random()<(after?0.72:0.5));
-  var sz = sweep ? 40+Math.floor(Math.random()*260) : 2+Math.floor(Math.random()*40);
-  if(!sweep && Math.random()<0.05) sz=260+Math.floor(Math.random()*180);   // bloc
-  return { ts: i*420, side: buy?'B':'A', size: sz };
+/* Un print RÉEL du tape (D-089), converti au format attendu par le widget.
+   `side` du schéma est l'AGRESSEUR (BUY/SELL) ; le widget attend 'B'/'A'. Rend `null` quand
+   aucun print neuf n'est disponible — le tape ne se remplit alors PAS de transactions
+   inventées, il reste simplement immobile, ce qui est la vérité. */
+var _lastSeq = null;
+function ofTrade(){
+  var prints = window.CHOLISMO_LIVE && window.CHOLISMO_LIVE.tape;
+  if(!prints || !prints.length) return null;
+  var head = prints[0];
+  if(_lastSeq !== null && head.seq === _lastSeq) return null;   // déjà consommé
+  _lastSeq = head.seq;
+  return { ts: head.ts * 1000, side: head.side === 'BUY' ? 'B' : 'A',
+           size: Math.round(Number(head.size) || 0) };
 }
 function ofWidgets(){
   var sp=TAPE.speed(), r=Math.min(4,sp.ratio);
