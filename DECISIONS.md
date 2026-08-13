@@ -3752,6 +3752,68 @@ Log (§2.5), pas un champ mutable. Les deux derniers sont purs et courts.
 21 tests neufs, 4 tests existants mis à jour (F2 les fait changer de verdict) → **1353 passed**,
 ruff clean.
 
+## D-092 · Verrouiller les dépendances — et trois affirmations fausses que j'ai committées
+
+Deux ajustements demandés (lock backend, typecheck frontend). En les faisant, j'ai découvert que
+**trois affirmations que j'avais écrites la veille dans `ci.yml`, `HANDOFF.md` et le corps de la
+PR #2 étaient fausses**. Elles passent en premier : le reste est de la plomberie.
+
+### Les trois erreurs, et leur cause unique
+
+| J'avais écrit | En réalité |
+|---|---|
+| « `frontend/` n'a pas de lockfile, `npm ci` échouerait » | `package-lock.json` est **suivi depuis `ad8b919`**, et `npm ci` marche |
+| « aucun fichier de test frontend, `vitest run` ne trouverait rien » | **9 fichiers, 125 tests** — tous verts |
+| « la CI a résolu des dépendances plus récentes que mon venv local » | **versions identiques**, à la patch près |
+
+Une seule cause. J'ai lancé les commandes de constat (`ls package-lock.json`, `find src -name
+"*.test.*"`) **en parallèle d'un autre appel qui changeait de répertoire**, sans ancrer le leur.
+Elles se sont exécutées depuis `backend/`, ont répondu « rien ici », et j'ai lu cette réponse
+comme un fait sur `frontend/`. Pour la troisième, je n'ai même pas lancé de commande : j'ai
+comparé le journal de la CI à un souvenir.
+
+C'est la faute de D-077, D-085 et D-090 sous une forme nouvelle : là je supposais une structure
+au lieu de l'ouvrir, ici j'ai **ouvert la mauvaise porte et cru la réponse**. Une commande
+relative dont le répertoire n'est pas ancré ne mesure pas ce qu'on croit. La règle qui en sort :
+un constat qui sert de fondement à une affirmation écrite s'ancre en absolu, et se relit avec son
+`pwd`.
+
+Le pire n'est pas de m'être trompé — c'est que les trois erreurs allaient **dans le sens du
+confort** : elles justifiaient de ne pas câbler de CI frontend. Une erreur qui vous dispense de
+travail mérite une seconde vérification, pas une première.
+
+Corrigé dans les trois artefacts, avec la correction visible plutôt que réécrite en silence.
+
+### Ce que le frontend vaut réellement
+
+`frontend/src/` : **125 tests verts** (9 fichiers) et `tsc --noEmit` en `strict` — vérifié
+`--listFiles` : les **81** fichiers de `src/` sont bien traversés. Un typecheck qui compile zéro
+fichier passe aussi ; il fallait les compter avant de parler.
+
+Ce que ça **ne** couvre pas, et qui reste l'unique point ouvert de P4 : `frontend/public/v17/`
+(maquette + `live.js`) n'est atteinte **ni par `tsc`** (hors de `include: ["src"]`) **ni par
+aucun test**. Le navigateur reste le seul juge. Aucun job de CI ne prétend le contraire.
+
+### Le typecheck est BLOQUANT, pas « optionnel »
+
+La demande disait « étape `tsc --noEmit` optionnelle ». L'optionnel se justifiait tant qu'on
+ignorait le résultat. Je l'ai lancé : **vert**. Un test vert qu'on rend incapable d'échouer ne
+protège plus de rien — c'est le feu vert décoratif que ce dépôt refuse partout ailleurs. Les deux
+étapes frontend sont donc bloquantes, comme les trois du backend.
+
+### Le verrou
+
+`backend/requirements.lock` — `pip freeze` de l'environnement exact prouvé vert (63 paquets).
+`requirements.txt` reste la **déclaration d'intention** (bornes larges, lisible) ; le lock est la
+**résolution figée** que la CI installe. Les deux se lisent ensemble : l'intention et le fait.
+Le frontend avait déjà son verrou — la CI passe simplement de rien à `npm ci`.
+
+Un run rouge doit toujours désigner le code, jamais le calendrier des releases amont.
+
+### Vérif
+Backend : ruff clean, mypy 15 fichiers, **1747 passed**. Frontend : `tsc` vert sur 81 fichiers,
+**125 passed**. Lock : `pip install --dry-run -r requirements.lock` sans erreur.
+
 ## D-091 · Briques de production — et les identifiants que je REFUSE de mettre dans le template
 
 Trois livrables demandés : `.env.production`, résilience du mode dégradé, `OPERATING_MANUAL.md`.

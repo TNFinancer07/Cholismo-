@@ -1,15 +1,19 @@
 # CI — le vert cesse d'être une parole et devient une preuve.
 #
 # Avant ce fichier, le dépôt n'avait AUCUN lanceur de tests : `check_runs` valait 0 et le seul
-# workflow listé était le graphe de dépendances Dependabot. Les 1747 tests ne tournaient que sur
-# le poste de développement — « suite verte » était une affirmation invérifiable par un relecteur.
+# workflow listé était le graphe de dépendances Dependabot. Les 1747 tests backend et les 125
+# tests frontend ne tournaient que sur un poste de développement — « suite verte » était une
+# affirmation invérifiable par un relecteur.
 #
-# ── Ce qui n'est PAS couvert ici, et pourquoi ────────────────────────────────────────────────
-# Le frontend n'a pas de job. Ce n'est pas un oubli : `frontend/` n'a **pas de lockfile**
-# (`npm ci` échouerait) et **aucun fichier de test** (`vitest run` ne trouverait rien). Un job
-# qui installe des dépendances pour ne rien vérifier est un feu vert décoratif — précisément le
-# « stub qui feint de fonctionner » que ce dépôt refuse. L'IHM reste donc non vérifiée, comme
-# `HANDOFF.md` §2.1 le dit. La lever demande un lockfile et de vrais tests, pas un job de plus.
+# Les deux jobs installent depuis un VERROU (`requirements.lock`, `package-lock.json`) et non
+# depuis les bornes larges : un run ne doit pas pouvoir casser sur une release amont publiée
+# entre deux commits. Un rouge doit toujours désigner le code, jamais le calendrier.
+#
+# ── Ce que la CI ne couvre PAS ───────────────────────────────────────────────────────────────
+# `frontend/public/v17/` — la maquette vendue (`index.html` + `live.js`). Vérifié : elle n'est
+# atteinte ni par `tsc` (hors de `include: ["src"]`) ni par aucun des 9 fichiers de test. C'est
+# du HTML/JS statique, et seule une ouverture réelle dans un navigateur la valide
+# (`docs/p4-verification.md`). Aucun job ici ne prétend le contraire.
 
 name: CI
 
@@ -26,7 +30,7 @@ concurrency:
 
 jobs:
   backend:
-    name: backend — pytest · ruff · mypy
+    name: backend — ruff · mypy · pytest
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -54,12 +58,12 @@ jobs:
         with:
           python-version: '3.11'        # figé : `target-version = "py311"` (pyproject)
           cache: pip
-          cache-dependency-path: backend/requirements*.txt
+          cache-dependency-path: backend/requirements.lock
 
-      - name: Dépendances
+      - name: Dépendances (verrouillées)
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt -r requirements-dev.txt
+          pip install -r requirements.lock
 
       - name: ruff
         run: ruff check app tests workers
@@ -73,3 +77,32 @@ jobs:
         env:
           REDIS_URL: redis://localhost:6379/0
         run: pytest -q
+
+  frontend:
+    name: frontend — tsc · vitest
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Dépendances (verrouillées)
+        run: npm ci --no-audit --no-fund
+
+      - name: tsc --noEmit
+        # `strict: true`, et vérifié : les 81 fichiers de `src/` sont réellement traversés.
+        # Un typecheck qui compile zéro fichier passe aussi — il fallait le compter.
+        run: npx tsc --noEmit
+
+      - name: vitest
+        run: npx vitest run

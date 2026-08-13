@@ -48,11 +48,20 @@ Prouvé = **exécuté**, avec un résultat observé. Pas « écrit et relu ».
 
 C'est la section qui compte. La lire avant de reprendre.
 
-### 2.1 L'IHM v17 n'a jamais été ouverte dans un navigateur
+### 2.1 La maquette v17 n'a jamais été ouverte dans un navigateur
+
+> **Correction (D-092).** Une version antérieure de cette section affirmait que le frontend était
+> invérifiable — « `vitest` et `tsc` absents, npm hors ligne ». **C'était faux, et c'était ma
+> faute** : j'avais lancé les commandes de constat sans ancrer leur répertoire, et lu leur réponse
+> comme un fait. `frontend/src/` a **9 fichiers de test / 125 tests** et un `tsc --noEmit` en mode
+> `strict` sur ses **81 fichiers** — les deux verts, et désormais dans la CI.
+>
+> Ce qui suit est ce qui reste réellement non prouvé, une fois l'erreur retirée.
 
 `frontend/public/v17/` (`index.html` + `live.js`) est validé par `node --check` — **la syntaxe,
-pas le comportement**. `vitest` et un `tsc` épinglé sont absents de l'environnement (npm hors
-ligne). Aucun rendu n'a été observé.
+pas le comportement**. Vérifié : la maquette n'est atteinte **ni par `tsc`** (hors de
+`include: ["src"]`) **ni par aucun des 9 fichiers de test**. C'est du HTML/JS statique vendu, et
+aucun rendu n'a été observé.
 
 Le point le plus fragile est nommé dans `docs/p4-verification.md` §1 : `live.js` insère son
 bandeau **après** `header.topbar`, sélecteur **déduit de la lecture du HTML, pas observé**. S'il

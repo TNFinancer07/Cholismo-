@@ -1,9 +1,14 @@
 # P4 — checklist de vérification navigateur
 
 > Clôture de la phase P4 (D-088 → D-090). Ce document existe parce que **rien de ce qui suit
-> n'a été exécuté dans un navigateur** : `vitest` et un `tsc` épinglé sont absents de
-> l'environnement de développement (npm hors ligne). `node --check` valide la *syntaxe* des deux
-> fichiers, pas leur comportement.
+> n'a été exécuté dans un navigateur**. `node --check` valide la *syntaxe* des deux fichiers, pas
+> leur comportement.
+>
+> **Correction (D-092)** : ce paragraphe affirmait que `vitest` et `tsc` étaient absents de
+> l'environnement. C'était faux — `frontend/src/` a 125 tests et un typecheck `strict` verts,
+> tous deux en CI depuis D-092. Mais ils ne changent rien ici : vérifié, **la maquette v17 n'est
+> couverte ni par `tsc` ni par aucun test** (elle est hors de `include: ["src"]`). Le navigateur
+> reste le seul juge de ce qui suit.
 >
 > Les vérifications sont ordonnées par **risque décroissant** : celles du haut sont celles où je
 > me suis déjà trompé aujourd'hui.
@@ -76,10 +81,11 @@ C'est la régression que D-090 a corrigée, et celle qu'il faut confirmer.
 
 | | État |
 |---|---|
-| Backend (1743 tests, ruff clean) | **prouvé** |
+| Backend (1747 tests, ruff + mypy clean) | **prouvé**, et rejoué en CI |
 | Endpoints `/setups`, `/setups/calibration`, `/loops/health` | **prouvés**, testés + appelés en réel |
 | Canal SSE `options` (contexte, O5, santé, gates) | **prouvé** en réel (curl) |
-| `live.js` + maquette modifiée | **syntaxe seule** — comportement non vérifié |
+| `frontend/src/` — 125 tests + `tsc --noEmit` strict (81 fichiers) | **prouvé**, et rejoué en CI |
+| `live.js` + maquette v17 | **syntaxe seule** — comportement non vérifié, non couvert par la CI |
 
 ## Ce qui reste ouvert après P4
 
