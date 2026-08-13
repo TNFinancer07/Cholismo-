@@ -42,22 +42,25 @@ from .. import config
 from ..graph.liquidity_sweep import SWEEP_GRAPH, build_sweep_inputs
 from ..lsr_engine import build_lsr_inputs, evaluate_lsr
 from ..meta import Freshness, MetaField
+from ..volume_profile import build_volume_profile
 from ..schema import ContextSchema, LiquiditySweepAlert
 from .book import MboBook
 from .events import MboAction, MboEvent, MboSide
 from .session_context import AtrTracker, SessionContext
 
-#: Ce que le MBO ne porte PAS et qu'aucune jointure ne peut fournir. `svs_score` est un score
-#: de stratégie calculé en amont, pas une donnée de marché : le fabriquer reviendrait à
-#: réimplémenter une stratégie pour pouvoir la mesurer.
-MISSING_FROM_MBO = ("svs_score",)
+#: Vérifié en lisant `build_lsr_inputs` (D-085) : la chaîne LSR consomme le sweep, les prints,
+#: `absorption`, `aggressor_ratio`, le carnet, `vpoc` et l'order flow. **`svs_score` n'en fait
+#: PAS partie** — c'est une entrée de la stratégie SVS de Sony, un autre système. L'annoncer
+#: comme « manquant pour le LSR » envoyait l'opérateur chercher une donnée dont le moteur ne
+#: veut pas. Plus rien ne manque structurellement au rejeu.
+MISSING_FROM_MBO: tuple[str, ...] = ()
+
+#: Entrées du LSR que le MBO ne porte pas telles quelles mais qui se DÉRIVENT du flux.
+DERIVED_FROM_FLOW = ("atr_session", "vpoc")
 
 #: Ce que le MBO ne porte pas mais qu'un CONTEXTE DE SÉANCE fournit (D-084) : joint
 #: point-in-time depuis une série historique, jamais interrogé « au présent ».
 JOINED_FROM_CONTEXT = ("vix", "econ_calendar", "news_state")
-
-#: Ce qui se DÉRIVE du flux lui-même — aucune source externe, donc aucune seconde vérité.
-DERIVED_FROM_FLOW = ("atr_session",)
 
 
 class MboLsrDetector:
@@ -84,6 +87,9 @@ class MboLsrDetector:
         #: restent ABSENT et les gates continuent de refuser — jamais un défaut inventé.
         self.context = context
         self._atr = AtrTracker()
+        #: Volume par NIVEAU de prix (clé entière de tick), accumulé sur la séance rejouée.
+        #: Borné par le nombre de NIVEAUX, pas de prints — même doctrine que `engine._vp_levels`.
+        self._vp_levels: dict[int, float] = {}
         self._prints: deque = deque(maxlen=max_prints)
         self._seq = 0
         self._armed = 0
@@ -107,6 +113,27 @@ class MboLsrDetector:
             "seq": self._seq,
         })
 
+    def _accumulate_volume(self, event: MboEvent) -> None:
+        """Volume par niveau, pour le VPOC. Le profil se DÉRIVE des transactions rejouées : le
+        chercher ailleurs donnerait un POC calculé sur d'autres bornes de séance que celles
+        qu'on mesure."""
+        if not isinstance(event.size, (int, float)) or event.size <= 0:
+            return
+        key = round(event.price / self.tick)
+        if len(self._vp_levels) >= config.VP_MAX_LEVELS and key not in self._vp_levels:
+            return                                   # grille bornée, jamais de croissance libre
+        self._vp_levels[key] = self._vp_levels.get(key, 0.0) + float(event.size)
+
+    def _vpoc(self) -> Optional[float]:
+        """POC du profil accumulé, via `build_volume_profile` — le MÊME calcul que le moteur
+        live. En réécrire un ici ferait deux POC pour un seul marché."""
+        if not self._vp_levels:
+            return None
+        profile = build_volume_profile(
+            {key * self.tick: vol for key, vol in self._vp_levels.items()},
+            self.tick, config.VP_VA_PCT, config.VP_LVN_RATIO, config.VP_MAX_LEVELS)
+        return profile.get("poc")
+
     def build_schema(self, book: MboBook, now: float) -> ContextSchema:
         """`ContextSchema` minimal : carnet et tape FRESH, **le reste laissé ABSENT**. C'est ce
         silence qui fait refuser les gates dépendant de données que le MBO ne porte pas — et
@@ -121,6 +148,11 @@ class MboLsrDetector:
         if self._prints:
             schema.s1_state.tape = MetaField(
                 value=list(self._prints), last_update_ts=now, source="mbo_replay",
+                freshness=Freshness.FRESH)
+        vpoc = self._vpoc()
+        if vpoc is not None:
+            schema.s1_state.structure.vpoc = MetaField(
+                value=vpoc, last_update_ts=now, source="mbo_replay",
                 freshness=Freshness.FRESH)
         self._join_context(schema, now)
         return schema
@@ -152,6 +184,7 @@ class MboLsrDetector:
             # L'ATR se dérive du flux REJOUÉ, pas d'une source externe : une seconde source
             # produirait des barres qui ne coïncideraient pas avec celles qu'on mesure.
             self._atr.observe(event.price, event.ts_event / 1_000_000_000.0)
+            self._accumulate_volume(event)
 
         now = event.ts_event / 1_000_000_000.0
         schema = self.build_schema(book, now)
@@ -208,6 +241,8 @@ class MboLsrDetector:
             "inputs_derived_from_flow": list(DERIVED_FROM_FLOW),
             "context": self.context.diagnostics() if self.context is not None else None,
             "atr": self._atr.diagnostics(),
+            "vpoc": self._vpoc(),
+            "vp_levels": len(self._vp_levels),
             "news_state": self.news_state,
             "tick_size": self.tick,
             "instrument": self.instrument,

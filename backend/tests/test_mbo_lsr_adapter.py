@@ -167,7 +167,10 @@ def test_le_diagnostic_NOMME_les_entrees_manquantes():
     que la cause peut être « le fichier ne porte pas ce que les filtres exigent »."""
     diag = MboLsrDetector(tick_size=TICK).diagnostics()
     assert set(diag["inputs_absent_from_mbo"]) == set(MISSING_FROM_MBO)
-    assert "svs_score" in diag["inputs_absent_from_mbo"], "un score de stratégie ne se joint pas"
+    # `svs_score` a été RETIRÉ de cette liste (D-085) : `build_lsr_inputs` ne le lit pas — c'est
+    # une entrée de la stratégie SVS de Sony. L'annoncer comme manquant envoyait l'opérateur
+    # chercher une donnée dont le moteur LSR ne veut pas.
+    assert diag["inputs_absent_from_mbo"] == []
     # Sans contexte fourni, rien n'est joint — et le diagnostic le dit plutôt que de laisser
     # croire que VIX et calendrier sont disponibles.
     assert diag["inputs_joined_from_context"] == []
@@ -223,3 +226,42 @@ def test_la_passe_de_calibration_accepte_le_detecteur():
     assert report["replay"]["setups"] == 0
     assert report["replay"]["win_rate"] is None, "aucun trade pris → None, jamais 0 %"
     assert report["calibration"]["result_visible"] is False
+
+
+def test_le_VPOC_se_DERIVE_du_flux_rejoue():
+    """Régression (D-085). `build_lsr_inputs` LIT `vpoc` ; l'adaptateur ne le remplissait pas,
+    et le moteur refusait donc pour une donnée pourtant dérivable des transactions rejouées."""
+    detector = MboLsrDetector(tick_size=TICK)
+    book = _seeded_book()
+    # Le gros du volume s'échange à 5000.25 : c'est lui qui doit ressortir en POC.
+    for i in range(5):
+        detector(book, _ev(MboAction.TRADE, MboSide.ASK, 5000.25, 100, order_id=0, ms=10 + i))
+    detector(book, _ev(MboAction.TRADE, MboSide.BID, 5000.00, 1, order_id=0, ms=50))
+    schema = detector.build_schema(book, now=1_000.0)
+    assert schema.s1_state.structure.vpoc.freshness.value == "FRESH"
+    assert schema.s1_state.structure.vpoc.value == 5000.25
+
+
+def test_le_VPOC_reste_ABSENT_tant_qu_aucun_volume_n_a_ete_echange():
+    detector = MboLsrDetector(tick_size=TICK)
+    schema = detector.build_schema(_seeded_book(), now=1_000.0)
+    assert schema.s1_state.structure.vpoc.freshness.value == "ABSENT"
+
+
+def test_la_grille_de_volume_est_BORNEE():
+    """Sans borne, une séance à prix errant ferait croître la table sans fin."""
+    from app import config
+    detector = MboLsrDetector(tick_size=TICK)
+    book = _seeded_book()
+    for i in range(config.VP_MAX_LEVELS + 200):
+        detector(book, _ev(MboAction.TRADE, MboSide.ASK, 5000.25 + i * TICK, 1,
+                           order_id=0, ms=10 + i))
+    assert detector.diagnostics()["vp_levels"] <= config.VP_MAX_LEVELS
+
+
+def test_le_VPOC_utilise_le_MEME_calcul_que_le_moteur_live():
+    """En réécrire un ici ferait deux POC pour un seul marché."""
+    import inspect
+
+    from app.mbo import lsr_adapter
+    assert "build_volume_profile" in inspect.getsource(lsr_adapter)

@@ -235,8 +235,8 @@ def test_le_diagnostic_dit_ce_qui_est_JOINT_et_ce_qui_est_DERIVE():
                          calendar=[CalendarPoint(T0 + 600, "CPI", tier1=True)])
     diag = MboLsrDetector(tick_size=0.25, context=ctx).diagnostics()
     assert set(diag["inputs_joined_from_context"]) == {"vix", "econ_calendar", "news_state"}
-    assert diag["inputs_derived_from_flow"] == ["atr_session"]
-    assert diag["inputs_absent_from_mbo"] == ["svs_score"]
+    assert set(diag["inputs_derived_from_flow"]) == {"atr_session", "vpoc"}
+    assert diag["inputs_absent_from_mbo"] == [], "plus rien ne manque structurellement (D-085)"
     assert diag["context"]["vix_points"] == 1 and diag["context"]["tier1_events"] == 1
 
 

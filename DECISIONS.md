@@ -3752,6 +3752,69 @@ Log (§2.5), pas un champ mutable. Les deux derniers sont purs et courts.
 21 tests neufs, 4 tests existants mis à jour (F2 les fait changer de verdict) → **1353 passed**,
 ruff clean.
 
+## D-085 · Extracteur historique — et deux erreurs de ma part corrigees
+
+`backend/app/mbo/build_context.py` (26 tests) + VPOC derive du flux + reclassement de
+`svs_score`. Suite complete : 1713 verts.
+
+### `svs_score` n'etait PAS une dependance du LSR — erreur de ma part (D-083)
+
+En lisant `build_lsr_inputs`, la chaine LSR consomme : le sweep, les prints, `absorption`,
+`aggressor_ratio`, le carnet, **`vpoc`** et l'order flow. **`svs_score` n'y figure pas** — c'est
+une entree de la strategie SVS de Sony, un autre systeme.
+
+Je l'avais inscrit en D-083 dans `MISSING_FROM_MBO`, ce qui envoyait l'operateur chercher une
+donnee dont le moteur LSR ne veut pas. Retire.
+
+En revanche `vpoc`, lui, **est** lu par le moteur et n'etait **pas** alimente par l'adaptateur :
+le refus venait de la, pas de `svs_score`. Il se derive du flux (volume par niveau accumule sur
+les transactions rejouees, puis `build_volume_profile` — le MEME calcul que le moteur live ; en
+reecrire un ici ferait deux POC pour un seul marche). La grille est bornee par
+`VP_MAX_LEVELS`, comme celle du moteur.
+
+`MISSING_FROM_MBO` est desormais **vide** : plus rien ne manque structurellement au rejeu.
+
+### L'horodatage du VIX — le point qui decide si la jointure est honnete
+
+`VIXCLS` est une serie de **clotures quotidiennes**. Une cloture du 3 mars n'est connue qu'apres
+la cloture du 3 mars : la dater a 00:00 la rendrait disponible toute la seance qu'on rejoue, soit
+un lookahead d'une journee entiere, invisible dans le fichier produit. Chaque observation est donc
+horodatee a la **cloture du cash US (16:00 ET)**, l'instant ou elle devient reellement connue.
+
+Verifie bout en bout : a l'ouverture du 14, `vix_at()` rend la cloture du **13**.
+
+Les jours feries (« . » chez FRED) sont **ecartes**, jamais combles par la veille — combler
+fabriquerait une observation qui n'a jamais eu lieu. `--pad-days` remonte quelques jours en amont,
+sans quoi la jointure n'aurait rien a rendre sur les premieres minutes de seance (elle ne regarde
+jamais devant).
+
+### Trois bugs dans MON extracteur, trouves a l'essai reel
+
+Les 22 tests initiaux passaient tous. Ils ne couvraient que le calendrier **vide**.
+
+1. **`CalendarEvent` est un DICT, pas un objet.** `getattr(ev, "ts", None)` rendait `None` pour
+   chaque entree — **tous** les evenements d'un flux Finnhub parfaitement valide etaient jetes.
+2. **`tier1` n'existe pas** sur `CalendarEvent` : la severite se lit sur `impact`, que le parseur
+   a deja promue pour les publications sensibles a impact absent.
+3. **`None` et `[]` etaient confondus.** Le parseur les DISTINGUE : `None` = flux illisible ou
+   empoisonne, `[]` = flux lisible et vide. Les confondre ecrivait un calendrier vide sur une
+   reponse corrompue — un fichier de contexte d'allure normale sur des donnees jamais lues. Et
+   iterer `None` aurait leve.
+
+Quatre tests de regression ajoutes, dont celui qui manquait : **un calendrier NON vide**.
+
+### Ce que l'extracteur refuse de faire
+
+Une fenetre incomplete est **rapportee**, pas completee. Un calendrier vide est signale avec ses
+**deux causes possibles** — « aucun evenement ce jour-la » et « l'historique n'est pas servi par
+ce plan Finnhub » se ressemblent dans la reponse, pas dans les consequences. Et dans tous les
+cas la jointure reste fail-closed : sans calendrier, `news_state` vaut `None` et F0 refuse. **Un
+calendrier vide ne fabrique jamais un `SAFE`.**
+
+La provenance accompagne le fichier (serie interrogee, convention d'horodatage, avertissements) :
+un contexte silencieusement incomplet produirait une passe de calibration d'allure normale sur
+des donnees trouees.
+
 ## D-084 · Joindre VIX, calendrier et ATR au rejeu — sans ouvrir la porte au lookahead
 
 `backend/app/mbo/session_context.py`, jointure branchee dans `MboLsrDetector`, option
