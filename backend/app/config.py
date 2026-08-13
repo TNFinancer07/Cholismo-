@@ -325,3 +325,25 @@ REPLAY_AUTOPLAY = os.getenv("REPLAY_AUTOPLAY", "1") not in ("0", "false", "False
 # oubliée aurait fait vieillir un champ vers ABSENT sans que rien ne l'explique.
 # Bookmap par défaut ; `MICROSTRUCTURE_SOURCE=sierra_chart` (ou `rithmic`, …) suffit à changer.
 MICROSTRUCTURE_SOURCE = os.getenv("MICROSTRUCTURE_SOURCE", "bookmap")
+
+# --- Boucles d'exécution : contrat commun (D-073) ---
+# Cadences et budgets des cinq boucles du terminal. Les valeurs qui EXISTENT DÉJÀ ailleurs sont
+# réutilisées telles quelles (FAST_TICK_SECONDS, ENGINE_HEARTBEAT_MAX_AGE) plutôt que réécrites :
+# un seuil écrit deux fois finit par diverger (leçon D-069).
+HOT_PATH_BUDGET_SECONDS = 0.2      # AUTORITÉ — CLAUDE §7, hot path déterministe < ~200 ms
+# L2 — miroirs des constantes d'`options_worker.py` (POLL_INTERVAL_SECONDS, VENDOR_TIMEOUT_SECONDS,
+# CONTEXT_TTL_SECONDS) et d'`optionsContext.ts` (STALE_THRESHOLD_MS). Le worker est un service
+# AUTONOME (redémarrage du terminal ≠ redémarrage du worker) : ces valeurs le DÉCRIVENT, elles ne
+# le pilotent pas. Toutes PLACEHOLDER côté worker — donc PLACEHOLDER ici aussi.
+OPTIONS_SYNC_PERIOD_SECONDS = float(os.getenv("OPTIONS_SYNC_PERIOD_SECONDS", "5.0"))    # PLACEHOLDER
+OPTIONS_VENDOR_TIMEOUT_SECONDS = float(os.getenv("OPTIONS_VENDOR_TIMEOUT_SECONDS", "3.0"))  # PLACEHOLDER
+OPTIONS_CONTEXT_TTL_SECONDS = float(os.getenv("OPTIONS_CONTEXT_TTL_SECONDS", "90.0"))   # PLACEHOLDER
+# L3 — barres ES nominales 1 min ; `maxBarGapMs = 90_000` côté o5TailRisk tolère une barre
+# manquée, pas deux. Le watchdog se déclenche donc APRÈS ce que le gate sait déjà gérer seul.
+O5_BAR_PERIOD_SECONDS = float(os.getenv("O5_BAR_PERIOD_SECONDS", "60.0"))               # PLACEHOLDER
+O5_TICK_BUDGET_SECONDS = float(os.getenv("O5_TICK_BUDGET_SECONDS", "5.0"))              # PLACEHOLDER
+O5_HEARTBEAT_STALE_SECONDS = float(os.getenv("O5_HEARTBEAT_STALE_SECONDS", "180.0"))    # PLACEHOLDER
+# L4 — `evaluateOptionsGates` ne fait que des lectures mémoire pures (aucune I/O par
+# construction) : un budget large masquerait une régression qui y glisserait un aller-retour.
+GATES_TICK_BUDGET_SECONDS = float(os.getenv("GATES_TICK_BUDGET_SECONDS", "0.05"))       # PLACEHOLDER
+UI_BROADCAST_BUDGET_SECONDS = float(os.getenv("UI_BROADCAST_BUDGET_SECONDS", "1.0"))    # PLACEHOLDER

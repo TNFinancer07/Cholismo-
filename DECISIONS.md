@@ -3752,6 +3752,82 @@ Log (§2.5), pas un champ mutable. Les deux derniers sont purs et courts.
 21 tests neufs, 4 tests existants mis à jour (F2 les fait changer de verdict) → **1353 passed**,
 ruff clean.
 
+## D-073 · Un contrat unique de boucle — parce qu'une boucle morte ressemble à une boucle calme
+
+`backend/app/loops/` : `contract.py` (LoopSpec + runners), `supervisor.py`, `health.py`,
+`registry.py`. 27 tests.
+
+### Pourquoi maintenant, et pas une sixième boucle à la main
+
+Le dépôt comptait déjà **quatre** boucles Loop-D écrites une par une (`engine.py` 0,25 s/15 s,
+`account_provider` 1 s, `macro_news` 1 h, `lsr_driver` 0,25 s). Le Pont Options v2 en ajoute
+**trois** (sync options, kurtosis O5, gates O1-O5). Refaire sept fois les mêmes parades, c'est
+sept occasions de rouvrir la faille que D-052 a fermée au prix d'une passe `/devil` complète —
+et cette faille a un nom : **un driver mort ressemble à un driver calme**.
+
+Les parades de D-052 sont donc factorisées ici en un seul endroit : cadence à l'échéance sur
+horloge monotone sans rattrapage, créneaux manqués comptés puis abandonnés, drop-if-busy,
+plafond de durée par tick, filet d'exception, relance signalée d'une boucle tuée de l'extérieur,
+arrêt non propageant.
+
+### Le vrai apport n'est pas la factorisation, c'est la santé observable
+
+`CLAUDE §3` — « no signal without data » — s'applique aussi aux boucles. La projection
+`health()` permet à l'UI d'afficher « o5.kurtosis STALLED » au lieu de laisser un kurtosis figé
+passer pour frais. **Le battement ne compte que les ticks RÉUSSIS** : une boucle qui cycle sans
+rien produire est vivante et inutile ; l'afficher `RUNNING` serait précisément le mensonge que
+ce module existe pour empêcher.
+
+Corollaire trouvé à l'**essai manuel** (§13 Loop 1, étape 6) et corrigé avant commit : la grâce
+accordée avant le premier battement n'était pas bornée, si bien qu'une boucle échouant à *chaque*
+tour restait `RUNNING` pour toujours. Elle est désormais bornée par le seuil de péremption,
+mesurée depuis le démarrage. Test de régression dédié.
+
+### Trois choix qui ne sont pas cosmétiques
+
+1. **`gates.eval` est ÉVÉNEMENTIELLE**, déclenchée par `evaluateLsr()`, jamais par une horloge :
+   une L4 périodique réévaluerait le PASSÉ (piège de cadence D-052 / doctrine D-045 T3).
+   Conséquence assumée : son silence n'est pas une panne (un matin sans setup est un matin
+   normal), donc elle n'a **pas** de seuil de péremption et ne peut pas passer `STALLED`. Une
+   spec événementielle portant un seuil est refusée à la construction.
+2. **`o5.kurtosis` est COLD.** Les moments d'ordre 4 sur 120 rendements sont du CPU synchrone :
+   exécutés dans la boucle, ils gèlent `core.tick` avant tout point d'attente (piège Python en
+   tête de `RUNTIME_LOOPS.md`). Le budget borne l'attente ; il ne rend pas le calcul non
+   bloquant — c'est au tick de déporter (`asyncio.to_thread`).
+3. **`options.sync` DÉGRADE, elle ne bloque pas.** Le Pont Options est consultatif (mode G2) :
+   un fournisseur muet ramène le poids options à zéro et marque le signal dégradé, il n'empêche
+   jamais un trade que les contrôles déterministes ont autorisé. Même doctrine que le poids
+   Macro non calibré (`CLAUDE §8`).
+
+Le seuil de watchdog doit dépasser la période (RUNTIME_LOOPS Loop G) : un watchdog en alerte
+permanente est un watchdog qu'on apprend à ignorer. Refusé à la construction, pas découvert en
+production.
+
+### Ce que ce commit ne fait PAS
+
+Il **déclare** les cinq boucles ; il n'en câble aucune. Un superviseur monté sur le registre seul
+rapporte `NOT_IMPLEMENTED` sur les cinq lignes et `all_healthy: false` — c'est la vérité à ce
+stade, et elle est visible. Le critère retenu (COMMANDS.md §3) est « un lecteur peut-il confondre
+ceci avec du code de production validé ? » : ici le statut le dit en toutes lettres.
+`NOT_IMPLEMENTED` est délibérément classé **non sain** — une capacité annoncée et absente n'est
+pas un état neutre.
+
+L1/L5 existent déjà sous une autre forme (`engine.py`, `api.py`) : les y migrer est un refactor,
+pas cette feature (§13 Loop 3 — jamais refactor + feature dans le même commit).
+
+## D-074 · Transport : le 3ᵉ canal SSE, pas une passerelle WebSocket
+
+`COMMANDS.md` (P4) et `/sync-ui` désignent une « passerelle WebSocket ». Écart signalé, arbitré
+par l'opérateur : **on conserve SSE**, et les métriques GEX/Kurtosis/O1-O5 partent sur un
+**3ᵉ canal SSE `options`**, aux côtés des canaux rapide et lent (`CLAUDE §6`).
+
+Raison : `frontend/src/lib/sse.ts` porte deux `EventSource` auto-résurrectés, durcis par une
+passe `/devil` (deux pannes distinctes fermées). Migrer vers WebSocket jetterait un transport
+éprouvé pour du bidirectionnel dont aucun besoin n'est établi — le flux options est
+unidirectionnel serveur → client, exactement ce que SSE fait. La cadence UI reste à 250 ms :
+`options_worker.py` publie toutes les 5 s, un rafraîchissement à 50 ms rendrait 100 fois la même
+valeur.
+
 ## D-072 · Le verrou de parité — le test qui LIT le TypeScript
 
 `tests/test_parite_lsr_config.py` parse `lsr-engine/src/config.ts` et échoue si le Python ne dit
