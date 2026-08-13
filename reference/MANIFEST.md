@@ -13,9 +13,32 @@
 | `youssef/01_FONDATIONS_ET_ANALYSE_QUANTITATIVE.md` | Phase 0 (régime kurtosis VIX) · Étape 0 (quadrant Bridgewater) · N1 · N2A (D1-D5) | Youssef — analyse macro (1/3) |
 | `youssef/02_ANALYSE_QUALITATIVE_BLOCS.md` | N2B — blocs 1 à 7 (CB 3 niveaux, narratifs, cross-market, géopolitique, signaux faibles, 10 questions, calibrage) | Youssef — analyse macro (2/3) |
 | `youssef/03_SCORING_ARBITRAGES_DECISION.md` | N3 (Flux 1 + Flux 2 / 6 arbitrages) · N4 (validation) · N5 (scénarios + trade card) | Youssef — analyse macro (3/3) |
+| `v2/fast-engine/optionsContext.ts` | Lecture du contexte options publié par `options_worker.py` (santé OK/STALE/VENDOR_DOWN/UNAVAILABLE) | Pont Options v2 |
+| `v2/fast-engine/gatesO1toO4.ts` | Évaluateurs consultatifs O1 (régime gamma) · O2 (zone d'exclusion) · O3 (obstacle géométrique) · O4 (Net Premium Drift) | Pont Options v2 |
+| `v2/fast-engine/o5TailRisk.ts` | O5 — excess kurtosis des log-returns sur barres ES, autonome (aucune dépendance fournisseur) | Pont Options v2 |
+| `v2/fast-engine/decisionLog.ts` | Assemblage O1-O5 à l'armement + aplatissement CSV | Pont Options v2 |
 | `journal/tradingjournal.html` | **Journal de Session — Sony & Youssef** (app React autonome, localStorage) | Journal de trading commun |
 
 ## Classement des blocs
+
+### Pont Options v2 · Fast Engine (`v2/fast-engine/`) — `AUTORITÉ`
+Exception explicite à la règle « `/reference/` = maquette » : ces quatre fichiers ne sont pas
+une inspiration d'UI, ce sont les **sources autoritaires** du portage Python des balises O1-O5,
+et le **verrou de parité** (doctrine D-072) les LIT pour échouer en cas de divergence.
+
+Ils vivent ici et **non** dans `lsr-engine/` parce qu'ils appartiennent au Fast Engine v1.7 —
+un autre paquet, avec d'autres dépendances (`redis` côté TS). Les compiler dans le paquet v1.2
+cassait son `tsc --noEmit` sans rien apporter : ce dépôt ne les exécute pas, il les porte.
+
+- `AUTORITÉ` — codes de statut, seuils (`O1_SIGNIFICANCE_THRESHOLD`, `O2_EXCLUSION_TICKS`,
+  `O3_TOLERANCE_TICKS`, `O4_WINDOW_MS`, `O4_LOCATION_TOLERANCE_TICKS`, `STALE_THRESHOLD_MS`,
+  `O5_CONFIG_PLACEHOLDER`), ordre des garde-fous, clé Redis et canal pub/sub.
+- **Tous ces seuils restent `PLACEHOLDER` au sens métier** : ils sont autoritaires pour
+  l'ÉQUIVALENCE des deux implémentations, jamais pour affirmer qu'ils sont calibrés. Aucun n'a
+  été validé sur données.
+- Divergences délibérées du port Python : consignées en D-075 (horodatage du futur) et D-076
+  (GEX non fini). Toute autre divergence est un bug.
+
 
 ### Sony · SVS (stratégie d'exécution 1) — `AUTORITÉ`
 - Identité : breakout par vide de liquidité (LVN) après cassure de Value Area, ES/corrélat NQ.

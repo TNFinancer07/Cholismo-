@@ -3752,6 +3752,83 @@ Log (§2.5), pas un champ mutable. Les deux derniers sont purs et courts.
 21 tests neufs, 4 tests existants mis à jour (F2 les fait changer de verdict) → **1353 passed**,
 ruff clean.
 
+## D-076 · Portage Python des balises O1-O5 — et un verrou qui MORD
+
+`backend/app/options_gates.py` (O1-O4 + assemblage + export CSV), `backend/app/o5_tail_risk.py`
+(O5). 69 tests. Sources TS sous `reference/v2/fast-engine/`, marquees `AUTORITE` au MANIFEST.
+
+### Le mode G2 est une garantie STRUCTURELLE, pas une configuration
+
+Aucun evaluateur ne retourne de booleen, aucun ne leve, et l'entree de journal n'a ni champ
+`blocked` ni `allowed`. Il n'existe nulle part un motif `if not gate: block()` desactive qu'un
+refactor pourrait reactiver par accident : il n'y a simplement **aucun chemin de blocage**.
+
+Cette propriete est verifiee **par introspection** (`inspect.getsource`), pas seulement par
+usage. Un test qui se contente d'appeler les gates prouve qu'ils ne bloquent pas *aujourd'hui* ;
+un test qui lit leur source prouve qu'on ne peut pas les faire bloquer *demain* sans le voir.
+
+### Deux divergences deliberees avec le TypeScript, chacune fail-closed
+
+1. **GEX non fini -> `O1_DATA_UNAVAILABLE`.** Le TS fait `Math.abs(NaN) <= seuil` -> faux, puis
+   `NaN > 0` -> faux, et tombe dans la branche du regime negatif : il produirait un
+   `FLAG_STRONG` porteur d'un `NaN`. Ce n'est pas du JSON valide, et §3 exige un refus explicite
+   plutot qu'une mesure inventee. Un strike **ou** une valeur non finie est ecarte du choix du
+   plus proche — designer « le plus proche » puis n'avoir rien a y lire n'avance a rien.
+2. **Horodatage du futur**, deja tranche en D-075.
+
+Toute autre divergence est un bug, pas un choix. Les deux sont testees et nommees comme telles.
+
+### Le verrou de parite, verifie en le faisant ECHOUER
+
+Un verrou qui ne tombe jamais est du theatre. Trois mutations deliberees ont ete introduites
+dans les sources TS — `O2_EXCLUSION_TICKS` 12 -> 14, un statut `O3_NOUVEAU` ajoute a l'union,
+`kurtosisThreshold` 6.0 -> 8.0 — et **chacune a fait tomber son test**, aucun autre. Sources
+restaurees a l'identique de l'artefact (verifie par `diff`).
+
+Le verrou couvre les seuils, le tick ES, **les unions de statuts** et **les noms de colonnes
+CSV**. Ces deux derniers comptent autant que les seuils : un statut ajoute d'un seul cote ne
+casse aucun test d'usage, il produit une colonne de journal que personne ne sait relire ; et le
+journal des 60+ setups sera relu par la calibration, donc une colonne renommee casserait la
+correlation en silence.
+
+### Ou vivent les sources TS — et pourquoi pas dans `lsr-engine/`
+
+Correction d'une regression que j'ai introduite en D-075 : `optionsContext.ts` avait ete versionne
+dans `lsr-engine/src/`, un paquet qui **compile**. Il importe `redis`, absent de ses dependances
+-> `tsc --noEmit` passait de 6 erreurs preexistantes (`vitest` non installe dans cet
+environnement) a 8. Le gate TypeScript etait rouge de mon fait, et je ne l'avais pas execute.
+
+Ces fichiers appartiennent au Fast Engine v1.7 — un autre paquet, d'autres dependances. Ce depot
+ne les execute pas, il les **porte**. Ils vivent donc sous `reference/v2/fast-engine/`, avec une
+entree `AUTORITE` explicite au MANIFEST : exception assumee a la regle « `/reference/` =
+maquette », puisqu'ils sont la source du portage et la cible du verrou.
+
+Nuance inscrite au MANIFEST : ils font autorite pour l'**equivalence des deux implementations**,
+jamais pour affirmer que leurs seuils sont calibres. Aucun ne l'est.
+
+### O4 est inerte par PREREQUIS EXTERNE, pas par bug
+
+`sourceConfirmed` faux court-circuite tout le reste : la source Net Premium Drift n'est confirmee
+que sur QQQ, pas SPY/SPX. Avec les donnees disponibles, O4 renvoie donc toujours
+`O4_SOURCE_UNCONFIRMED`. La logique d'alignement en dessous est **prete et testee** — un test
+force `sourceConfirmed` a vrai et verifie qu'elle fonctionne. Ce n'est pas du code mort a
+supprimer : c'est du code qui attend une donnee qui n'existe pas encore, et on le prouve.
+
+### Unites — `now_ms` en millisecondes, explicitement
+
+Le worker horodate `netDriftCrossover.ts` en ms ; le reste du backend est en secondes. Convertir
+au milieu du gate serait le meilleur moyen de comparer des secondes a des millisecondes sans que
+rien ne le signale. La conversion est la responsabilite de l'appelant, et le nom du parametre le
+dit.
+
+### Ce que ce commit ne fait PAS
+
+Le port est une bibliotheque pure : **L3 et L4 ne sont pas cablees**. `o5.kurtosis` et
+`gates.eval` restent `NOT_IMPLEMENTED` dans la projection de sante. L3 exige une source de barres
+ES 1 min et le deport `asyncio.to_thread` (le calcul est du CPU synchrone : execute dans la
+boucle, il gele `core.tick` avant tout point d'attente) ; L4 exige le point d'armement du
+detecteur de sweep. Deux tranches d'integration distinctes.
+
 ## D-075 · L2 `options.sync` — le contexte options, de Redis au canal SSE
 
 `backend/app/options_context.py` (port Python d'`optionsContext.ts`), `app/loops/wiring.py`,

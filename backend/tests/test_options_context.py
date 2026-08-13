@@ -234,11 +234,12 @@ def test_projection_expose_les_champs_du_pont_options():
 # ---------------------------------------------------------------------------
 
 def _ts_source():
-    import pathlib
-    p = (pathlib.Path(__file__).resolve().parents[2]
-         / "lsr-engine" / "src" / "options" / "optionsContext.ts")
-    assert p.exists(), f"source TS de référence introuvable : {p}"
-    return p.read_text(encoding="utf-8")
+    """Les sources TS vivent sous `reference/v2/fast-engine/` (marquées `AUTORITÉ` au
+    MANIFEST), et non dans `lsr-engine/` : elles appartiennent au Fast Engine v1.7, un autre
+    paquet avec d'autres dépendances. Les compiler dans le paquet v1.2 cassait son `tsc` sans
+    rien apporter — ce dépôt ne les exécute pas, il les porte."""
+    from app.options_gates import ts_reference_source
+    return ts_reference_source("optionsContext.ts")
 
 
 def test_parite_le_seuil_de_peremption_dit_la_MEME_chose_des_deux_cotes():
