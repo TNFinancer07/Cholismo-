@@ -83,6 +83,11 @@ class MboBook:
         self._asks: dict[int, LevelState] = {}
         #: Trades dont le passif n'a pas pu être résolu — comptés, jamais imputés au hasard.
         self.unresolved_trades = 0
+        #: Côté passif du DERNIER trade appliqué, résolu AVANT que le carnet ne mute (D-086).
+        #: Un consommateur qui re-résout après coup regarde un carnet où le niveau consommé a
+        #: déjà disparu : pendant un sweep — l'événement qu'on cherche précisément à détecter —
+        #: les trades suivants tombent « dans le spread » et sont rejetés à tort.
+        self.last_trade_passive_side: Optional[str] = None
 
     # -- clés et accès --
 
@@ -200,16 +205,23 @@ class MboBook:
 
     def _trade(self, event: MboEvent) -> bool:
         """Un trade consomme du PASSIF. Voir la docstring du module pour l'ordre de résolution
-        du côté — et pourquoi le drapeau `side` n'en fait pas partie."""
+        du côté — et pourquoi le drapeau `side` n'en fait pas partie.
+
+        Le côté résolu est MÉMORISÉ (`last_trade_passive_side`) : il l'est ici, sur le carnet
+        d'AVANT la consommation. Le re-résoudre après coup regarderait un carnet où le niveau
+        vient de disparaître (D-086)."""
+        self.last_trade_passive_side = None
         if event.size <= 0:
             return False
         if event.order_id and event.order_id in self._orders:
+            self.last_trade_passive_side = self._orders[event.order_id].side
             return self._remove(event, traded=True)     # (1) ordre au repos : autoritaire
 
         passive = self._passive_side_from_price(event.price)
         if passive is None:                              # (3) inrésolvable → rejet COMPTÉ
             self.unresolved_trades += 1
             return False
+        self.last_trade_passive_side = passive
         return self._remove(event, traded=True, side=passive, price=event.price)
 
     def _passive_side_from_price(self, price: float) -> Optional[str]:

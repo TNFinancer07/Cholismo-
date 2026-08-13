@@ -100,8 +100,12 @@ class MboLsrDetector:
     def _record_print(self, book: MboBook, event: MboEvent) -> None:
         """Un trade MBO → un print au format du tape. Le côté est INVERSÉ : le carnet raisonne
         en passif consommé, le tape en agresseur."""
-        passive = (book.side_of_order(event.order_id)
-                   or book._passive_side_from_price(event.price))   # noqa: SLF001 — même paquet
+        # Le carnet a DÉJÀ appliqué l'événement quand on arrive ici : re-résoudre le côté
+        # regarderait un carnet où le niveau consommé a disparu. Pendant un sweep — l'événement
+        # qu'on cherche à détecter — les trades suivants tomberaient « dans le spread » et
+        # seraient rejetés à tort (D-086 : 12 trades ne produisaient que 2 prints, donc aucune
+        # rafale, donc aucun sweep). On lit le côté que le carnet a résolu AVANT de muter.
+        passive = book.last_trade_passive_side
         if passive is None:
             return                                   # côté inrésolvable → aucun print inventé
         self._seq += 1
@@ -168,11 +172,19 @@ class MboLsrDetector:
             schema.s2_state.cascade.vix = MetaField(
                 value=vix, last_update_ts=now, source="session_context",
                 freshness=Freshness.FRESH)
-        events = self.context.events_known_at(now)
-        if events:
-            schema.econ_calendar.events = MetaField(
-                value=events, last_update_ts=now, source="session_context",
-                freshness=Freshness.FRESH)
+        # Calendrier publié FRESH **même vide** (D-086). Un contexte fourni signifie que le
+        # calendrier a été CHARGÉ ; une fenêtre sans publication est un état CONNU, pas une
+        # absence de source. C'est la leçon déjà payée dans l'artefact (`CLAUDE` v1.7 §5) :
+        # « un tableau vide est ambigu — sans distinction, M1 est fail-OPEN, c'était un vrai
+        # bug ». Ici l'effet était inverse mais aussi paralysant : `data_ok` du graphe de sweep
+        # exige un calendrier frais, donc AUCUN sweep ne pouvait jamais se déclencher.
+        schema.econ_calendar.events = MetaField(
+            value=[{"ts": e["ts"], "name": e["name"],
+                    # Le graphe lit `tier` (entier), pas `tier1` (booléen) — un nom de champ qui
+                    # diverge ne casse aucun test unitaire, il rend la news invisible en silence.
+                    "tier": 1 if e.get("tier1") else 2}
+                   for e in self.context.events_known_at(now)],
+            last_update_ts=now, source="session_context", freshness=Freshness.FRESH)
 
     # -- interface d'armement (compatible ReplayHarness) --
 

@@ -26,6 +26,14 @@ def _ev(action, side, price, size, order_id=0, ms=0):
                     order_id=order_id, sequence=ms, symbol="MESZ4")
 
 
+def _feed(detector, book, event):
+    """Ordre RÉEL du harnais : le carnet applique l'événement, PUIS le détecteur le voit. Le
+    détecteur lit `book.last_trade_passive_side`, résolu par le carnet avant sa mutation
+    (D-086) — l'appeler sans avoir nourri le carnet ne reflète aucun usage réel."""
+    book.apply(event)
+    return detector(book, event)
+
+
 def _seeded_book():
     book = MboBook(tick_size=TICK)
     for i in range(5):
@@ -73,7 +81,7 @@ def test_un_trade_sur_l_ASK_produit_un_print_ACHETEUR():
     """Le carnet dit « l'ask a été consommé » ; le tape doit dire « un acheteur a agressé »."""
     detector = MboLsrDetector(tick_size=TICK)
     book = _seeded_book()
-    detector(book, _ev(MboAction.TRADE, MboSide.ASK, 5000.25, 10, order_id=0, ms=10))
+    _feed(detector, book, _ev(MboAction.TRADE, MboSide.ASK, 5000.25, 10, order_id=0, ms=10))
     schema = detector.build_schema(book, now=1_000.0)
     assert schema.s1_state.tape.value[0]["side"] == "BUY"
 
@@ -81,7 +89,7 @@ def test_un_trade_sur_l_ASK_produit_un_print_ACHETEUR():
 def test_un_trade_sur_le_BID_produit_un_print_VENDEUR():
     detector = MboLsrDetector(tick_size=TICK)
     book = _seeded_book()
-    detector(book, _ev(MboAction.TRADE, MboSide.BID, 5000.00, 10, order_id=0, ms=10))
+    _feed(detector, book, _ev(MboAction.TRADE, MboSide.BID, 5000.00, 10, order_id=0, ms=10))
     schema = detector.build_schema(book, now=1_000.0)
     assert schema.s1_state.tape.value[0]["side"] == "SELL"
 
@@ -101,16 +109,23 @@ def test_les_prints_sont_ordonnes_du_PLUS_RECENT_au_plus_ancien():
     detector = MboLsrDetector(tick_size=TICK)
     book = _seeded_book()
     for i in range(3):
-        detector(book, _ev(MboAction.TRADE, MboSide.ASK, 5000.25, 5, order_id=0, ms=10 + i))
+        _feed(detector, book, _ev(MboAction.TRADE, MboSide.ASK, 5000.25, 5, order_id=0, ms=10 + i))
     prints = detector.build_schema(book, now=1_000.0).s1_state.tape.value
     assert [p["seq"] for p in prints] == [3, 2, 1]
 
 
 def test_le_tampon_de_prints_est_BORNE():
+    """Le flux frappe le meilleur ask COURANT — un vrai balayage monte les niveaux. Trader à un
+    niveau déjà épuisé ne se produit pas dans un carnet réel, et les transactions y seraient
+    (légitimement) rejetées comme inrésolvables."""
     detector = MboLsrDetector(tick_size=TICK, max_prints=50)
-    book = _seeded_book()
-    for i in range(200):
-        detector(book, _ev(MboAction.TRADE, MboSide.ASK, 5000.25, 1, order_id=0, ms=10 + i))
+    book = MboBook(tick_size=TICK)
+    for i in range(200):                             # carnet profond, 1 lot par niveau
+        book.apply(_ev(MboAction.ADD, MboSide.BID, 5000.00 - i * TICK, 1, order_id=1000 + i))
+        book.apply(_ev(MboAction.ADD, MboSide.ASK, 5000.25 + i * TICK, 1, order_id=2000 + i))
+    for i in range(120):
+        best = book.best_ask()
+        _feed(detector, book, _ev(MboAction.TRADE, MboSide.ASK, best, 1, order_id=0, ms=10 + i))
     assert detector.diagnostics()["prints_accumulated"] == 50
 
 
@@ -265,3 +280,54 @@ def test_le_VPOC_utilise_le_MEME_calcul_que_le_moteur_live():
 
     from app.mbo import lsr_adapter
     assert "build_volume_profile" in inspect.getsource(lsr_adapter)
+
+
+def test_le_cote_est_resolu_AVANT_que_le_carnet_ne_mute():
+    """Régression (D-086), trouvée à l'essai réel. L'adaptateur re-résolvait le côté passif sur
+    le carnet POST-trade : pendant un balayage — l'événement qu'on cherche à détecter — les
+    niveaux consommés disparaissent, les transactions suivantes tombent « dans le spread » et
+    étaient rejetées. 14 transactions ne produisaient que 2 prints, donc aucune rafale, donc
+    aucun sweep. Le carnet mémorise désormais le côté qu'il a résolu AVANT de muter."""
+    detector = MboLsrDetector(tick_size=TICK)
+    book = MboBook(tick_size=TICK)
+    for i in range(20):
+        book.apply(_ev(MboAction.ADD, MboSide.BID, 5000.00 - i * TICK, 20, order_id=100 + i))
+        book.apply(_ev(MboAction.ADD, MboSide.ASK, 5000.25 + i * TICK, 20, order_id=200 + i))
+
+    for i in range(14):                              # balayage qui descend les niveaux
+        best = book.best_bid()
+        _feed(detector, book, _ev(MboAction.TRADE, MboSide.BID, best, 20, order_id=0, ms=10 + i))
+
+    assert detector.diagnostics()["prints_accumulated"] == 14, "aucun print perdu au balayage"
+    assert book.unresolved_trades == 0
+
+
+def test_le_calendrier_CHARGE_mais_VIDE_est_publie_FRESH():
+    """Régression (D-086). Un contexte fourni signifie que le calendrier a été CHARGÉ ; une
+    fenêtre sans publication est un état CONNU. Ne rien publier rendait un jour calme
+    indistinguable d'une absence de source — et `data_ok` du graphe de sweep exigeant un
+    calendrier frais, AUCUN sweep ne pouvait jamais se déclencher."""
+    from app.mbo.session_context import SessionContext
+
+    detector = MboLsrDetector(tick_size=TICK, context=SessionContext())
+    schema = detector.build_schema(_seeded_book(), now=1_000.0)
+    assert schema.econ_calendar.events.freshness.value == "FRESH"
+    assert schema.econ_calendar.events.value == []
+
+
+def test_SANS_contexte_le_calendrier_reste_ABSENT():
+    """La distinction qui compte : « chargé et vide » n'est pas « pas de source »."""
+    schema = MboLsrDetector(tick_size=TICK).build_schema(_seeded_book(), now=1_000.0)
+    assert schema.econ_calendar.events.freshness.value == "ABSENT"
+
+
+def test_le_calendrier_publie_le_champ_TIER_que_le_graphe_lit():
+    """`tier` (entier), pas `tier1` (booléen). Un nom de champ qui diverge ne casse aucun test
+    unitaire — il rend la news invisible en silence."""
+    from app.mbo.session_context import CalendarPoint, SessionContext
+
+    ctx = SessionContext(calendar=[CalendarPoint(1_000.0, "CPI", tier1=True),
+                                   CalendarPoint(1_100.0, "Mineur", tier1=False)])
+    detector = MboLsrDetector(tick_size=TICK, context=ctx)
+    events = detector.build_schema(_seeded_book(), now=1_000.0).econ_calendar.events.value
+    assert {e["name"]: e["tier"] for e in events} == {"CPI": 1, "Mineur": 2}

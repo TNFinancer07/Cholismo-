@@ -3752,6 +3752,79 @@ Log (§2.5), pas un champ mutable. Les deux derniers sont purs et courts.
 21 tests neufs, 4 tests existants mis à jour (F2 les fait changer de verdict) → **1353 passed**,
 ruff clean.
 
+## D-086 · La passe relancee — deux bugs qui rendaient tout sweep IMPOSSIBLE
+
+Correctifs dans `mbo/book.py` et `mbo/lsr_adapter.py`. 7 tests de regression. 1717 verts.
+
+### Ce que la passe a revele
+
+Relancee avec le VPOC cable, la passe rendait toujours 0 setup — et surtout
+`refuses (post-sweep) = 0` : le detecteur de sweep ne s'etait **jamais** declenche. Le pipeline
+n'atteignait donc meme pas `evaluate_lsr`. Un flux MBO synthetique concu pour declencher un
+balayage a permis d'isoler deux causes, toutes deux dans MON code.
+
+### Bug 1 — le cote passif resolu APRES la mutation du carnet
+
+L'adaptateur re-resolvait le cote passif de chaque transaction en interrogeant le carnet… qui
+venait deja d'appliquer cette transaction. Pendant un **balayage** — l'evenement qu'on cherche
+precisement a detecter — les niveaux consommes disparaissent, et les transactions suivantes
+tombent « dans le spread » du carnet post-trade : rejetees comme inresolvables.
+
+Mesure : **14 transactions ne produisaient que 2 prints**. Donc aucune rafale de tape, donc
+aucun sweep, donc aucun setup. Le detecteur etait structurellement aveugle a l'evenement qu'il
+existe pour voir.
+
+Le carnet resout deja le cote correctement, AVANT de muter (D-079). Il memorise desormais ce
+resultat (`last_trade_passive_side`) et l'adaptateur le lit au lieu de re-deviner. Apres
+correction : **14/14 prints, 0 transaction non resolue, `tape_burst = True`.**
+
+Corollaire : le detecteur depend maintenant de l'ordre « carnet d'abord, detecteur ensuite » —
+l'ordre que le harnais applique deja. Quatre tests l'ignoraient et passaient a cote ; ils
+nourrissent desormais le carnet, comme la realite.
+
+### Bug 2 — le calendrier « charge mais vide » n'etait pas publie
+
+`build_sweep_inputs` exige `data_ok = (spread ou tape frais) ET calendrier frais`. Ma jointure
+(D-084) ne publiait `econ_calendar` **que s'il contenait des evenements**. Une fenetre sans
+publication laissait donc le champ ABSENT, `data_ok` restait faux, et **aucun sweep ne pouvait
+jamais se declencher** — meme avec un contexte parfaitement charge.
+
+C'est exactement la lecon deja payee dans l'artefact (`CLAUDE` v1.7 §5) : « un tableau vide est
+ambigu (« rien aujourd'hui » ou « chargement echoue »)… sans ce champ, M1 est fail-OPEN, c'etait
+un vrai bug ». Ici l'effet etait inverse — fail-CLOSED permanent — mais la cause identique :
+confondre « charge et vide » avec « pas de source ».
+
+Un contexte fourni signifie que le calendrier a ete charge : le champ est desormais publie FRESH
+**meme vide**. Sans contexte, il reste ABSENT — la distinction est conservee, et testee.
+
+**Bug 2 bis** : la jointure ecrivait `tier1` (booleen) la ou le graphe lit `tier` (entier). Un
+nom de champ qui diverge ne casse aucun test unitaire — il rend la news invisible en silence.
+
+### Etat apres correctifs
+
+Sur flux synthetique realiste : `SWEEP declenche : True — TAPE_BURST+WIDE_SPREAD couple a une
+news T1 imminente`, puis **13 refus post-sweep**. La chaine atteint donc `evaluate_lsr`, qui
+refuse pour une autre raison.
+
+**Ce n'est PAS F0** : avec la news placee a +15 min (hors blackout −5/+2), l'etat vaut `SAFE` et
+les refus persistent. Les entrees restantes non alimentees par l'adaptateur sont `absorption` et
+`aggressor_ratio` (bloc `s1_state.order_flow`), plus le parametre `orderflow` de
+`build_lsr_inputs` — que l'adaptateur ne passe pas. Toutes trois sont derivables du flux via
+`compute_snapshot` (prints + carnets + barres), deja present au depot. C'est le prochain
+increment, et le dernier avant qu'un setup puisse s'armer en rejeu.
+
+### Tension structurelle a trancher (pas un bug)
+
+Le graphe `SWEEP_GRAPH` definit un sweep comme « anomalie microstructure **COUPLEE a une news
+Tier-1 imminente** » (±30 min), et sa propre docstring precise qu'il n'emet **qu'une ALERTE**,
+jamais un ordre. Or LSR (Liquidity Sweep **Reversion**) traite un balayage de liquidite comme un
+evenement de microstructure, sans exigence de news.
+
+Utiliser ce graphe comme declencheur d'armement LSR est peut-etre une erreur de categorie de ma
+part : les deux notions portent le meme nom et ne designent pas la meme chose. A trancher avant
+la passe reelle — sinon le rejeu ne mesurera que les balayages survenus a ±30 min d'une news
+Tier-1, ce qui n'est pas la population de setups LSR.
+
 ## D-085 · Extracteur historique — et deux erreurs de ma part corrigees
 
 `backend/app/mbo/build_context.py` (26 tests) + VPOC derive du flux + reclassement de
