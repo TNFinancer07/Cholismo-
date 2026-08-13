@@ -14,17 +14,19 @@ tourner ensemble ») ; ici il n'y a qu'un moteur, avec deux sources.
 
 ---
 
-**Ce qu'un flux MBO peut honnêtement alimenter, et rien de plus.**
+**Trois provenances, tenues distinctes** (D-084) :
 
-Un export MBO contient le carnet et les transactions. Il ne contient ni VIX, ni calendrier
-macro, ni ATR de session, ni score SVS. Ces entrées ne sont donc **pas fabriquées** : elles
-restent absentes, les gates qui en dépendent refusent, et `diagnostics()` dit **lesquelles**
-manquent. Un détecteur qui armerait quand même produirait des setups dont les filtres n'ont
-jamais tourné — la matrice de calibration mesurerait alors l'absence de données, pas la
-stratégie.
+- **du FLUX** — carnet et transactions, donc l'ATR, qui se dérive des barres de la séance
+  rejouée. Aller le chercher ailleurs introduirait une seconde vérité sur le même instrument ;
+- **du CONTEXTE DE SÉANCE** — VIX, calendrier, état F0, joints **point-in-time** depuis une
+  série historique fournie. Jamais `fetch()` : interroger une API au présent injecterait le VIX
+  d'aujourd'hui dans une séance d'alors, un lookahead d'autant plus coûteux qu'il est invisible ;
+- **de nulle part** — `svs_score` est un score de stratégie calculé en amont, pas une donnée de
+  marché. Le fabriquer reviendrait à réimplémenter une stratégie pour pouvoir la mesurer.
 
-C'est la même doctrine que `ReplayDataSource` (« un replay dit ce qu'il sait, et se tait sur le
-reste ») appliquée un cran plus bas.
+Sans contexte fourni, VIX et calendrier restent ABSENT, les gates refusent, et `diagnostics()`
+dit **lesquelles** entrées manquent. C'est la doctrine de `ReplayDataSource` (« un replay dit ce
+qu'il sait, et se tait sur le reste ») appliquée un cran plus bas.
 
 **Le côté d'un print est l'AGRESSEUR.** Le carnet MBO résout le côté PASSIF consommé (D-079) ;
 le tape du `ContextSchema` attend l'agresseur (convention `tradeSideMeaning`, `CLAUDE` v1.7 §5).
@@ -43,11 +45,19 @@ from ..meta import Freshness, MetaField
 from ..schema import ContextSchema, LiquiditySweepAlert
 from .book import MboBook
 from .events import MboAction, MboEvent, MboSide
+from .session_context import AtrTracker, SessionContext
 
-#: Entrées que le MBO ne porte pas. Nommées ici pour que `diagnostics()` puisse dire POURQUOI
-#: un setup n'est pas armé, au lieu de laisser un silence qu'on interpréterait comme « rien à
-#: signaler ».
-MISSING_FROM_MBO = ("vix", "econ_calendar", "news_state", "atr_session", "svs_score")
+#: Ce que le MBO ne porte PAS et qu'aucune jointure ne peut fournir. `svs_score` est un score
+#: de stratégie calculé en amont, pas une donnée de marché : le fabriquer reviendrait à
+#: réimplémenter une stratégie pour pouvoir la mesurer.
+MISSING_FROM_MBO = ("svs_score",)
+
+#: Ce que le MBO ne porte pas mais qu'un CONTEXTE DE SÉANCE fournit (D-084) : joint
+#: point-in-time depuis une série historique, jamais interrogé « au présent ».
+JOINED_FROM_CONTEXT = ("vix", "econ_calendar", "news_state")
+
+#: Ce qui se DÉRIVE du flux lui-même — aucune source externe, donc aucune seconde vérité.
+DERIVED_FROM_FLOW = ("atr_session",)
 
 
 class MboLsrDetector:
@@ -61,7 +71,8 @@ class MboLsrDetector:
 
     def __init__(self, *, tick_size: float = 0.25, depth: int = 10,
                  max_prints: int = 512, instrument: str = "MES",
-                 news_state: Optional[str] = None):
+                 news_state: Optional[str] = None,
+                 context: Optional[SessionContext] = None):
         self.tick = float(tick_size)
         self.depth = int(depth)
         self.instrument = instrument
@@ -69,6 +80,10 @@ class MboLsrDetector:
         #: passe donc PAS `SAFE` par défaut, ce qui reviendrait à lever une protection faute de
         #: données (D-050).
         self.news_state = news_state
+        #: Contexte de séance JOINT (D-084). `None` = aucune série fournie : VIX et calendrier
+        #: restent ABSENT et les gates continuent de refuser — jamais un défaut inventé.
+        self.context = context
+        self._atr = AtrTracker()
         self._prints: deque = deque(maxlen=max_prints)
         self._seq = 0
         self._armed = 0
@@ -107,7 +122,25 @@ class MboLsrDetector:
             schema.s1_state.tape = MetaField(
                 value=list(self._prints), last_update_ts=now, source="mbo_replay",
                 freshness=Freshness.FRESH)
+        self._join_context(schema, now)
         return schema
+
+    def _join_context(self, schema: ContextSchema, now: float) -> None:
+        """Jointure POINT-IN-TIME (D-084) : à `now`, on ne voit que ce qui était déjà publié à
+        `now`. Sans contexte fourni, rien n'est écrit — les champs restent ABSENT et les gates
+        refusent, ce qui est le comportement voulu (§3)."""
+        if self.context is None:
+            return
+        vix = self.context.vix_at(now)
+        if vix is not None:
+            schema.s2_state.cascade.vix = MetaField(
+                value=vix, last_update_ts=now, source="session_context",
+                freshness=Freshness.FRESH)
+        events = self.context.events_known_at(now)
+        if events:
+            schema.econ_calendar.events = MetaField(
+                value=events, last_update_ts=now, source="session_context",
+                freshness=Freshness.FRESH)
 
     # -- interface d'armement (compatible ReplayHarness) --
 
@@ -116,6 +149,9 @@ class MboLsrDetector:
 
         if event.action in (MboAction.TRADE, MboAction.FILL):
             self._record_print(book, event)
+            # L'ATR se dérive du flux REJOUÉ, pas d'une source externe : une seconde source
+            # produirait des barres qui ne coïncideraient pas avec celles qu'on mesure.
+            self._atr.observe(event.price, event.ts_event / 1_000_000_000.0)
 
         now = event.ts_event / 1_000_000_000.0
         schema = self.build_schema(book, now)
@@ -133,7 +169,10 @@ class MboLsrDetector:
 
         # 2. Évaluation LSR — le moteur existant, inchangé. Il refusera tant que les entrées
         #    absentes du MBO manquent : c'est un refus MOTIVÉ, pas un bug.
-        plan = evaluate_lsr(build_lsr_inputs(schema, now, news_state=self.news_state))
+        news = (self.context.news_state_at(now) if self.context is not None else None)
+        plan = evaluate_lsr(build_lsr_inputs(schema, now,
+                                             news_state=news if news is not None
+                                             else self.news_state))
         if plan is None:
             self._refused += 1
             return None
@@ -164,6 +203,11 @@ class MboLsrDetector:
             "refused_after_sweep": self._refused,
             # Nommées, pas comptées : c'est la LISTE qui est actionnable.
             "inputs_absent_from_mbo": list(MISSING_FROM_MBO),
+            "inputs_joined_from_context": (list(JOINED_FROM_CONTEXT) if self.context is not None
+                                           else []),
+            "inputs_derived_from_flow": list(DERIVED_FROM_FLOW),
+            "context": self.context.diagnostics() if self.context is not None else None,
+            "atr": self._atr.diagnostics(),
             "news_state": self.news_state,
             "tick_size": self.tick,
             "instrument": self.instrument,

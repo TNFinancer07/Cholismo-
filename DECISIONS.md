@@ -3752,6 +3752,71 @@ Log (§2.5), pas un champ mutable. Les deux derniers sont purs et courts.
 21 tests neufs, 4 tests existants mis à jour (F2 les fait changer de verdict) → **1353 passed**,
 ruff clean.
 
+## D-084 · Joindre VIX, calendrier et ATR au rejeu — sans ouvrir la porte au lookahead
+
+`backend/app/mbo/session_context.py`, jointure branchee dans `MboLsrDetector`, option
+`--context` de la passe de calibration. 24 tests.
+
+### Le risque de cette feature n'est pas qu'elle echoue
+
+C'est qu'elle **reussisse trop bien**. Une jointure negligente injecte des donnees du futur, les
+gates s'ouvrent, les setups s'arment, les chiffres deviennent excellents — et faux. L'ordre des
+tests suit donc cet ordre de risque : d'abord l'absence de lookahead, ensuite la peremption,
+ensuite seulement le fonctionnement nominal.
+
+### Pourquoi `app/external/` ne peut PAS etre appele tel quel
+
+`FredVix.fetch(now=…)` et `FinnhubCalendar.fetch(now=…)` interrogent une API **au present**.
+Rejouer une seance du mois dernier en appelant `fetch()` injecterait le VIX **d'aujourd'hui**
+dans une seance d'alors. C'est la forme la plus couteuse du lookahead parce qu'elle est
+invisible : les chiffres sont reels, ils sont simplement de la mauvaise date.
+
+La jointure lit donc une **serie historique fournie** (`--context`), point-in-time : a l'instant
+`t`, on ne voit que ce qui etait **deja publie** a `t`. Comparaison sur `ts <= t` — une valeur
+publiee exactement a `t` est connue a `t`. Un test verifie qu'une valeur de `t+100` n'est jamais
+rendue a `t`, et un autre que « la plus proche » ne l'emporte pas sur « la derniere publiee »
+(a `t+900`, entre une valeur a `t` et une a `t+1000`, c'est celle de `t` qui sort).
+
+### Trois provenances, tenues distinctes
+
+| Provenance | Entrees | Pourquoi |
+|---|---|---|
+| **du FLUX** | ATR | Se derive des barres de la seance rejouee. Une source externe produirait des barres qui ne coincident pas avec celles qu'on mesure — deux verites sur le meme instrument. |
+| **du CONTEXTE** | VIX, calendrier, etat F0 | Joints point-in-time depuis une serie fournie. |
+| **de nulle part** | `svs_score` | Un score de STRATEGIE calcule en amont, pas une donnee de marche. Le fabriquer reviendrait a reimplementer une strategie pour pouvoir la mesurer. |
+
+Le diagnostic de la passe imprime desormais les trois listes : ce qui est joint, ce qui est
+derive, ce qui reste absent.
+
+### Le calendrier a le droit de regarder devant, le VIX non
+
+Distinction qui merite d'etre ecrite parce qu'elle ressemble a une incoherence. Un calendrier est
+**annonce a l'avance** : ses entrees futures sont legitimement connues — c'est tout l'interet de
+F5, qui protege d'une publication A VENIR. Le lookahead y porterait sur le CONTENU (un resultat
+publie apres `t`), pas sur la date. Le VIX, lui, est une observation : une valeur posterieure a
+`t` n'etait pas connue a `t`, point.
+
+### La peremption reste la peremption
+
+Un VIX de la veille n'est pas le VIX de la seance. Au-dela de `VIX_MAX_AGE_S` (24 h,
+PLACEHOLDER), la valeur devient ABSENT au lieu de se trainer. Et sans serie fournie, rien n'est
+ecrit : injecter « VIX = 15 parce que c'est une valeur courante » fabriquerait le contexte qu'on
+pretend mesurer.
+
+### Ce que la jointure change pour F0
+
+Sans calendrier, `news_state` restait `None` — fail-closed sur l'inconnu (D-050), donc refus
+systematique. Avec un calendrier date, la porte peut enfin repondre `SAFE` **en connaissance de
+cause**, et `HARD_LOCK` dans la fenetre de blackout Tier 1. L'etat issu du contexte **prime** sur
+la valeur passee a la construction : celle-ci n'est qu'un defaut pour les rejeux sans calendrier,
+et la laisser gagner ferait ignorer un blackout reel.
+
+### Ce qui reste
+
+Les gates peuvent desormais etre alimentes, mais **aucun setup ne s'arme encore sur la fixture** —
+7 evenements synthetiques ne produisent ni sweep ni ATR (0 barre close). Ce n'est pas un defaut
+de la jointure : c'est l'absence de donnees reelles, que la passe rapporte ligne par ligne.
+
 ## D-083 · Le detecteur LSR branche sur le flux MBO — un seul moteur, deux sources
 
 `backend/app/mbo/lsr_adapter.py`, detecteur branche dans `app.calibration`. 16 tests.

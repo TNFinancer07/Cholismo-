@@ -167,8 +167,12 @@ def test_le_diagnostic_NOMME_les_entrees_manquantes():
     que la cause peut être « le fichier ne porte pas ce que les filtres exigent »."""
     diag = MboLsrDetector(tick_size=TICK).diagnostics()
     assert set(diag["inputs_absent_from_mbo"]) == set(MISSING_FROM_MBO)
-    assert "vix" in diag["inputs_absent_from_mbo"]
-    assert "news_state" in diag["inputs_absent_from_mbo"]
+    assert "svs_score" in diag["inputs_absent_from_mbo"], "un score de stratégie ne se joint pas"
+    # Sans contexte fourni, rien n'est joint — et le diagnostic le dit plutôt que de laisser
+    # croire que VIX et calendrier sont disponibles.
+    assert diag["inputs_joined_from_context"] == []
+    assert diag["context"] is None
+    assert "atr_session" in diag["inputs_derived_from_flow"]
 
 
 def test_l_etat_news_par_defaut_n_est_PAS_SAFE():

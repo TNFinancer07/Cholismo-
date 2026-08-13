@@ -30,6 +30,7 @@ from .mbo.book import MboBook
 from .mbo.events import MboEvent
 from .mbo.ingest import ingest_parquet
 from .mbo.lsr_adapter import MboLsrDetector
+from .mbo.session_context import SessionContext
 from .replay_harness import ReplayHarness, Setup, summarize
 from .setup_journal import SetupJournal
 
@@ -111,8 +112,10 @@ def _format(report: dict[str, Any]) -> str:
                   f"  prints accumulés  {detector['prints_accumulated']}",
                   f"  setups armés      {detector['armed']}",
                   f"  refusés (post-sweep) {detector['refused_after_sweep']}",
-                  f"  ⓘ absent du MBO : {', '.join(detector['inputs_absent_from_mbo'])}",
-                  "    (ces entrées manquantes font refuser les gates — refus motivé, pas un bug)"]
+                  f"  ATR (dérivé du flux) fast={detector['atr']['atr_fast']} "
+                  f"slow={detector['atr']['atr_slow']} sur {detector['atr']['bars_closed']} barres",
+                  f"  joint du contexte : {', '.join(detector['inputs_joined_from_context']) or '— (aucun --context)'}",
+                  f"  ⓘ absent, non joignable : {', '.join(detector['inputs_absent_from_mbo'])}"]
     if not report["calibration"]["result_visible"]:
         lines += ["", f"  ⓘ volet RÉSULTAT masqué — moins de "
                       f"{report['calibration']['result_min_trades']} trades dénoués (§2.7)"]
@@ -127,6 +130,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--min-sample", type=int, default=10,
                         help="échantillon minimal par cellule de la matrice")
     parser.add_argument("--tick", type=float, default=0.25, help="taille du tick")
+    parser.add_argument("--context", help="JSON de contexte de séance (VIX + calendrier) — "
+                        "joint POINT-IN-TIME, jamais interrogé au présent (D-084)")
     parser.add_argument("--news-state", default=None,
                         help="état de la porte F0 (défaut : inconnu → fail-closed, D-050)")
     parser.add_argument("--json", action="store_true", help="rapport brut en JSON")
@@ -136,7 +141,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     # Le détecteur LSR RÉEL (D-083) : il projette l'état MBO dans un ContextSchema et réutilise
     # la chaîne déterministe existante. Il refuse tant que les entrées absentes du fichier
     # manquent — refus MOTIVÉ, rapporté par `diagnostics()`, jamais un silence.
-    detector = MboLsrDetector(tick_size=args.tick, news_state=args.news_state)
+    context = SessionContext.from_json_file(args.context) if args.context else None
+    detector = MboLsrDetector(tick_size=args.tick, news_state=args.news_state, context=context)
     report = run_calibration(args.parquet, arm=detector, journal=journal,
                              tick_size=args.tick, min_cell_sample=args.min_sample)
     report["detector"] = detector.diagnostics()
