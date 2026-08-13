@@ -3752,6 +3752,65 @@ Log (§2.5), pas un champ mutable. Les deux derniers sont purs et courts.
 21 tests neufs, 4 tests existants mis à jour (F2 les fait changer de verdict) → **1353 passed**,
 ruff clean.
 
+## D-087 · Le declencheur LSR devient MICROSTRUCTUREL PUR — et l'order flow est mesure
+
+`backend/app/mbo/micro_sweep.py` + order flow cable dans l'adaptateur. 17 tests. 1734 verts.
+
+### L'erreur de categorie, tranchee
+
+J'utilisais `SWEEP_GRAPH` comme declencheur d'armement LSR. Ce graphe definit un sweep comme
+« anomalie microstructure **COUPLEE a une news Tier-1 imminente** » (±30 min), et sa propre
+docstring precise qu'il n'emet **qu'une alerte** a afficher, jamais un ordre.
+
+| | `SWEEP_GRAPH` (D-028) | LSR — Liquidity Sweep **Reversion** |
+|---|---|---|
+| News | **prerequis de declenchement** (ET) | **filtre de blocage** en aval (F0/F5) |
+| Sortie | affichage / scoring async | armement d'un setup |
+
+Consequence : le rejeu n'aurait mesure que les balayages survenus a ±30 min d'une publication —
+pas la population de setups LSR. Arbitre par l'operateur : **declencheur microstructurel pur, la
+news redevient un filtre**.
+
+`micro_sweep.detect()` declenche sur rafale de tape OU spread anormal, sans aucune notion de
+calendrier — verifie par introspection de sa signature. Les **seuils sont IMPORTES** de
+`liquidity_sweep`, jamais recopies : deux detecteurs regardant la meme microstructure avec des
+constantes dupliquees divergeraient au premier ajustement.
+
+**La direction se lit sur le cote CONSOMME.** Vendeurs dominants → les bids sont manges →
+`BID_SWEEP` → reversion **acheteuse** (`is_long = direction == "BID_SWEEP"`). Se tromper de sens
+inverserait tous les trades du rejeu sans qu'aucun test d'usage ne tombe. Une anomalie **sans
+cote dominant** ne produit aucune direction plutot qu'un tirage au sort.
+
+### L'order flow est desormais MESURE, pas absent
+
+`snapshot_for_lsr` — le MEME calcul que le moteur live — alimente `absorption` et
+`aggressor_ratio`, et le snapshot complet est passe a `build_lsr_inputs`. Chacun ne s'ecrit que
+s'il a ete reellement mesure : `None` reste ABSENT, jamais un zero qui se lirait « aucune
+absorption » alors qu'on n'a rien mesure.
+
+### Deux contraintes STRUCTURELLES decouvertes, pas des bugs
+
+Le calculateur les nomme lui-meme dans `snapshot.missing` :
+
+1. **B1 exige au moins deux observations du niveau.** Je ne poussais l'historique de carnets qu'a
+   l'armement — B1 etait donc structurellement non mesurable. L'historique s'alimente desormais a
+   **chaque evenement**.
+2. **B4 mesure l'agression APRES le balayage.** A l'instant du sweep, 0 s se sont ecoulees : la
+   mesure est impossible par construction. Le moteur live y remedie par sa cadence de tick ; en
+   rejeu, le balayage est garde **EN ATTENTE** et reevalue sur les evenements suivants, puis
+   **EXPIRE** au-dela de `LSR_SWEEP_MAX_PENDING_S` — un setup arme sur un balayage d'il y a une
+   minute n'est plus celui qu'on avait detecte.
+
+### Etat verifie sur flux synthetique
+
+Balayage detecte (`BID_SWEEP`, sens correct), 38 balayages sur une seance simulee de 25 min,
+120 carnets historises, 25 barres ATR closes, B2 et B3 calcules. La chaine tourne de bout en bout.
+
+**Aucun setup ne s'arme encore, et la cause est mon GENERATEUR** : ses barres sont degenerees
+(amplitude nulle → `atr_fast = 0.0`) et 25 minutes ne suffisent pas a l'ATR lent, qui en exige
+50. Aucune donnee synthetique ne fermera ce point — et c'est tant mieux : un generateur capable
+d'armer des setups mesurerait le generateur.
+
 ## D-086 · La passe relancee — deux bugs qui rendaient tout sweep IMPOSSIBLE
 
 Correctifs dans `mbo/book.py` et `mbo/lsr_adapter.py`. 7 tests de regression. 1717 verts.

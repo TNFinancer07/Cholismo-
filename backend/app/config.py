@@ -355,3 +355,10 @@ O5_HEARTBEAT_STALE_SECONDS = float(os.getenv("O5_HEARTBEAT_STALE_SECONDS", "180.
 # construction) : un budget large masquerait une régression qui y glisserait un aller-retour.
 GATES_TICK_BUDGET_SECONDS = float(os.getenv("GATES_TICK_BUDGET_SECONDS", "0.05"))       # PLACEHOLDER
 UI_BROADCAST_BUDGET_SECONDS = float(os.getenv("UI_BROADCAST_BUDGET_SECONDS", "1.0"))    # PLACEHOLDER
+
+# --- Rejeu LSR : durée de vie d'un balayage EN ATTENTE (D-087) ---
+# B4 mesure l'agression APRÈS le balayage : à l'instant du sweep, la mesure est impossible
+# (0 s écoulées). Le moteur live y remédie par sa cadence de tick ; en rejeu on garde le
+# balayage en attente et on réévalue sur les événements suivants. Au-delà de ce délai il
+# EXPIRE — un setup armé sur un balayage d'il y a une minute n'est plus celui qu'on a détecté.
+LSR_SWEEP_MAX_PENDING_S = float(os.getenv("LSR_SWEEP_MAX_PENDING_S", "30.0"))  # PLACEHOLDER

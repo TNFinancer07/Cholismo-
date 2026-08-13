@@ -39,13 +39,15 @@ from collections import deque
 from typing import Any, Optional
 
 from .. import config
-from ..graph.liquidity_sweep import SWEEP_GRAPH, build_sweep_inputs
 from ..lsr_engine import build_lsr_inputs, evaluate_lsr
+from ..orderflow.bridge import book_history_push, snapshot_for_lsr
 from ..meta import Freshness, MetaField
 from ..volume_profile import build_volume_profile
 from ..schema import ContextSchema, LiquiditySweepAlert
 from .book import MboBook
 from .events import MboAction, MboEvent, MboSide
+from .micro_sweep import detect as detect_micro_sweep
+from .micro_sweep import spread_ticks_from_book
 from .session_context import AtrTracker, SessionContext
 
 #: Vérifié en lisant `build_lsr_inputs` (D-085) : la chaîne LSR consomme le sweep, les prints,
@@ -90,10 +92,20 @@ class MboLsrDetector:
         #: Volume par NIVEAU de prix (clé entière de tick), accumulé sur la séance rejouée.
         #: Borné par le nombre de NIVEAUX, pas de prints — même doctrine que `engine._vp_levels`.
         self._vp_levels: dict[int, float] = {}
+        #: Historique de carnets, borné — `snapshot_for_lsr` en a besoin pour mesurer le
+        #: rechargement de mur (B1) sur la fenêtre qui démarre AU balayage.
+        self._book_history: list = []
+        #: Balayage détecté mais pas encore évaluable (D-087). B4 mesure l'agression APRÈS le
+        #: sweep : à l'instant du balayage, 0 s se sont écoulées et la mesure est impossible.
+        #: Le moteur live résout ça par sa cadence (tick sweep 1 s) ; en rejeu, on garde le
+        #: balayage EN ATTENTE et on réévalue sur les événements suivants.
+        self._pending: Any = None
         self._prints: deque = deque(maxlen=max_prints)
         self._seq = 0
         self._armed = 0
         self._refused = 0
+        self._detected = 0
+        self._expired = 0
 
     # -- projection --
 
@@ -186,6 +198,23 @@ class MboLsrDetector:
                    for e in self.context.events_known_at(now)],
             last_update_ts=now, source="session_context", freshness=Freshness.FRESH)
 
+    def _publish_order_flow(self, schema: ContextSchema, snapshot: Any, now: float) -> None:
+        """Écrit les deux proxys que `build_lsr_inputs` lit dans le schéma. Chacun ne s'écrit
+        que s'il a été RÉELLEMENT mesuré : `None` reste ABSENT, jamais un zéro qui se lirait
+        comme « aucune absorption » alors qu'on n'a rien mesuré (§3)."""
+        ratio = getattr(snapshot, "tape_aggressor_buy_fraction", None)
+        if ratio is not None:
+            schema.s1_state.order_flow.aggressor_ratio = MetaField(
+                value=ratio, last_update_ts=now, source="mbo_replay",
+                freshness=Freshness.FRESH)
+        refill = getattr(snapshot, "wall_refill_ratio", None)
+        if refill is not None:
+            # B1 : un mur qui se recharge = absorption observée. La MESURE est le ratio ; le
+            # seuil appartient au moteur, pas à cet adaptateur.
+            schema.s1_state.order_flow.absorption = MetaField(
+                value=refill, last_update_ts=now, source="mbo_replay",
+                freshness=Freshness.FRESH)
+
     # -- interface d'armement (compatible ReplayHarness) --
 
     def __call__(self, book: MboBook, event: MboEvent) -> Optional[Any]:
@@ -201,26 +230,53 @@ class MboLsrDetector:
         now = event.ts_event / 1_000_000_000.0
         schema = self.build_schema(book, now)
 
-        # 1. Détection de sweep — le graphe déterministe existant, inchangé.
-        sweep_state = SWEEP_GRAPH.invoke(build_sweep_inputs(schema, now))
-        if not sweep_state.get("triggered"):
-            return None
-        alert = sweep_state.get("alert")
-        if alert is None:
+        # 1. Détection MICROSTRUCTURELLE PURE (D-087). `SWEEP_GRAPH` exigeait une news T1
+        #    imminente comme PRÉREQUIS de déclenchement — erreur de catégorie : la news est un
+        #    filtre de blocage en aval (F0/F5), pas une condition d'existence du balayage.
+        # L'historique de carnets s'alimente à CHAQUE événement, pas seulement à l'armement :
+        # B1 (rechargement de mur) exige au moins deux observations du niveau. Ne le pousser
+        # qu'au balayage laissait B1 structurellement non mesurable.
+        book_history_push(self._book_history, schema.s1_state.order_book, now)
+        prints = schema.s1_state.tape.value if schema.s1_state.tape.value else []
+
+        sweep = self._pending
+        if sweep is None:
+            result = detect_micro_sweep(
+                prints, now=now,
+                spread_ticks=spread_ticks_from_book(schema.s1_state.order_book.value))
+            if not result.data_ok or result.sweep is None:
+                return None
+            self._pending = sweep = result.sweep
+            self._detected += 1
+        elif now - sweep.ts > config.LSR_SWEEP_MAX_PENDING_S:
+            # Le balayage a vieilli sans jamais devenir évaluable : on le laisse expirer plutôt
+            # que de le traîner. Un setup armé sur un balayage d'il y a une minute n'est plus
+            # le setup qu'on avait détecté.
+            self._pending = None
+            self._expired += 1
             return None
         schema.liquidity_sweep.triggered = True
-        schema.liquidity_sweep.alert = (alert if isinstance(alert, LiquiditySweepAlert)
-                                        else LiquiditySweepAlert(**alert))
+        schema.liquidity_sweep.alert = LiquiditySweepAlert(
+            ts=sweep.ts, direction=sweep.direction, reason=sweep.as_alert()["reason"])
 
         # 2. Évaluation LSR — le moteur existant, inchangé. Il refusera tant que les entrées
         #    absentes du MBO manquent : c'est un refus MOTIVÉ, pas un bug.
+        # 2. Order flow MESURÉ (D-087) — `snapshot_for_lsr` est le MÊME calcul que le moteur
+        #    live. `absorption` et `aggressor_ratio` en sont dérivés plutôt que laissés absents :
+        #    c'est leur silence qui faisait refuser les gates B1-B4 après le sweep.
+        snapshot = snapshot_for_lsr(schema, self._book_history, now=now,
+                                    sweep_ts=sweep.ts, sweep_direction=sweep.direction)
+        self._publish_order_flow(schema, snapshot, now)
+
+        # 3. La news redevient ce qu'elle doit être : un FILTRE, consommé par F5 en aval.
         news = (self.context.news_state_at(now) if self.context is not None else None)
         plan = evaluate_lsr(build_lsr_inputs(schema, now,
                                              news_state=news if news is not None
-                                             else self.news_state))
+                                             else self.news_state,
+                                             orderflow=snapshot))
         if plan is None:
             self._refused += 1
-            return None
+            return None                              # balayage gardé EN ATTENTE, on réessaiera
 
         entry, risk = plan.get("executionPlan") or {}, plan.get("executionPlan") or {}
         entry_price = entry.get("entryPrice")
@@ -230,6 +286,7 @@ class MboLsrDetector:
             return None
 
         self._armed += 1
+        self._pending = None                         # armé : le balayage a joué son rôle
         return Setup(
             setup_id=f"mbo-{event.sequence}-{self._armed}",
             side="LONG" if str(plan.get("direction", "")).upper() == "LONG" else "SHORT",
@@ -245,6 +302,8 @@ class MboLsrDetector:
         return {
             "prints_accumulated": len(self._prints),
             "armed": self._armed,
+            "sweeps_detected": self._detected,
+            "sweeps_expired": self._expired,
             "refused_after_sweep": self._refused,
             # Nommées, pas comptées : c'est la LISTE qui est actionnable.
             "inputs_absent_from_mbo": list(MISSING_FROM_MBO),
@@ -253,6 +312,7 @@ class MboLsrDetector:
             "inputs_derived_from_flow": list(DERIVED_FROM_FLOW),
             "context": self.context.diagnostics() if self.context is not None else None,
             "atr": self._atr.diagnostics(),
+            "book_history": len(self._book_history),
             "vpoc": self._vpoc(),
             "vp_levels": len(self._vp_levels),
             "news_state": self.news_state,
