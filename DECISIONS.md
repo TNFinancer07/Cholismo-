@@ -3752,6 +3752,65 @@ Log (§2.5), pas un champ mutable. Les deux derniers sont purs et courts.
 21 tests neufs, 4 tests existants mis à jour (F2 les fait changer de verdict) → **1353 passed**,
 ruff clean.
 
+## D-083 · Le detecteur LSR branche sur le flux MBO — un seul moteur, deux sources
+
+`backend/app/mbo/lsr_adapter.py`, detecteur branche dans `app.calibration`. 16 tests.
+
+### Projeter, pas reimplementer
+
+Le point d'armement lisait le `ContextSchema` alimente par le moteur live ; le harnais de rejeu
+reconstruit un carnet depuis un flux MBO. L'adaptateur fait le pont **dans le sens qui ne
+duplique rien** : il projette l'etat MBO dans un `ContextSchema` minimal, puis appelle
+`build_sweep_inputs`, `SWEEP_GRAPH` et `evaluate_lsr` **tels quels**.
+
+Reimplementer la detection pour le MBO aurait cree un second moteur de decision, a faire diverger
+du premier. Le depot a deja tranche ce genre de question (D-052 : « les deux ne doivent jamais
+tourner ensemble »). Ici il n'y a qu'un moteur, avec deux sources. Un test verifie qu'aucun seuil
+de decision n'est recopie dans l'adaptateur.
+
+### Le silence du fichier est CONSERVE
+
+Un export MBO porte le carnet et les transactions. Il ne porte ni VIX, ni calendrier macro, ni
+ATR de session, ni score SVS. Ces entrees ne sont **pas fabriquees** : elles restent ABSENT, les
+gates qui en dependent refusent, et `diagnostics()` **nomme** lesquelles manquent.
+
+C'est la doctrine de `ReplayDataSource` (« un replay dit ce qu'il sait, et se tait sur le reste »)
+appliquee un cran plus bas. Un detecteur qui armerait quand meme produirait des setups dont les
+filtres n'ont jamais tourne — la matrice de calibration mesurerait alors l'absence de donnees,
+pas la strategie.
+
+Corollaire assume : `news_state` vaut `None` par defaut, pas `SAFE`. La porte F0 est fail-closed
+sur l'inconnu ; passer `SAFE` par defaut leverait une protection faute de donnees (lecon D-050).
+
+### L'inversion passif -> agresseur, explicite
+
+Le carnet MBO resout le cote PASSIF consomme (D-079) ; le tape du `ContextSchema` attend
+l'AGRESSEUR (`tradeSideMeaning`). La conversion est donc une inversion — passif ASK -> agresseur
+BUY. L'omettre retournerait B2 et B3 en silence, exactement ce que D-079 s'employait a empecher.
+Un trade au cote inresolvable ne produit **aucun** print plutot qu'un print devine.
+
+### Une matrice vide qui dit POURQUOI
+
+Sans le rapport de diagnostic, une matrice de calibration vide se lirait « la strategie ne se
+declenche jamais ». La cause peut etre tout autre : « le fichier ne porte pas les entrees que les
+filtres exigent ». La passe imprime donc prints accumules, setups armes, refus post-sweep, et la
+liste nommee des entrees absentes.
+
+Exerce sur la fixture : 7 evenements, 2 prints accumules, 0 setup arme, entrees absentes listees.
+Aucun chiffre invente pour combler le vide.
+
+### Ce qu'il reste a faire pour la passe reelle
+
+Deux ecarts a couvrir avant que la matrice puisse se remplir, et il vaut mieux les nommer
+maintenant que les decouvrir sur le fichier :
+
+1. **Les entrees absentes doivent venir d'ailleurs.** VIX, calendrier et ATR ne sont pas dans le
+   MBO — il faudra les joindre depuis les sources externes existantes (`app/external/`) en les
+   alignant sur les horodatages de la seance, ou accepter que les gates correspondants refusent.
+2. **Une seance ne fera pas 60 setups.** A 0,4-0,8 trade/jour, la calibration demande plusieurs
+   mois de seances rejouees. La matrice restera `INSUFFICIENT_DATA` d'ici la — et c'est elle qui
+   le dira, plutot qu'un taux calcule sur trois trades.
+
 ## D-082 · Infrastructure P2 — le journal des setups et la matrice de calibration
 
 `backend/app/setup_journal.py`, `app/calibration.py`, table `setup_journal` dans l'event store.

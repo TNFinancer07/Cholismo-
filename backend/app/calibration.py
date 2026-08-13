@@ -23,13 +23,13 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 from typing import Any, Callable, Optional
 
 from .event_store import EventStore
 from .mbo.book import MboBook
 from .mbo.events import MboEvent
 from .mbo.ingest import ingest_parquet
+from .mbo.lsr_adapter import MboLsrDetector
 from .replay_harness import ReplayHarness, Setup, summarize
 from .setup_journal import SetupJournal
 
@@ -105,6 +105,14 @@ def _format(report: dict[str, Any]) -> str:
             rate = (f"{cell['win_rate']:.1%}" if cell["win_rate"] is not None
                     else f"— ({cell['status']})")
             lines.append(f"  {gate}/{status:<26} n={cell['settled']:<4} réussite {rate}")
+    detector = report.get("detector")
+    if detector:
+        lines += ["", "── Détecteur LSR sur MBO ─────────────────────────────",
+                  f"  prints accumulés  {detector['prints_accumulated']}",
+                  f"  setups armés      {detector['armed']}",
+                  f"  refusés (post-sweep) {detector['refused_after_sweep']}",
+                  f"  ⓘ absent du MBO : {', '.join(detector['inputs_absent_from_mbo'])}",
+                  "    (ces entrées manquantes font refuser les gates — refus motivé, pas un bug)"]
     if not report["calibration"]["result_visible"]:
         lines += ["", f"  ⓘ volet RÉSULTAT masqué — moins de "
                       f"{report['calibration']['result_min_trades']} trades dénoués (§2.7)"]
@@ -118,17 +126,20 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--db", help="base du journal (défaut : celle du terminal)")
     parser.add_argument("--min-sample", type=int, default=10,
                         help="échantillon minimal par cellule de la matrice")
+    parser.add_argument("--tick", type=float, default=0.25, help="taille du tick")
+    parser.add_argument("--news-state", default=None,
+                        help="état de la porte F0 (défaut : inconnu → fail-closed, D-050)")
     parser.add_argument("--json", action="store_true", help="rapport brut en JSON")
     args = parser.parse_args(argv)
 
     journal = SetupJournal(EventStore(args.db) if args.db else None)
-    # Aucun détecteur d'armement n'est fourni par défaut, et on n'en invente pas : des setups
-    # arbitraires produiraient une matrice d'allure complète mesurant un générateur.
-    print("Aucun détecteur d'armement branché : la passe ne peut pas produire de setups.\n"
-          "Le détecteur LSR se branche via `run_calibration(..., arm=...)` — voir la docstring.\n"
-          "Ingestion et carnet sont, eux, exerçables dès maintenant :", file=sys.stderr)
-    report = run_calibration(args.parquet, arm=lambda book, event: None, journal=journal,
-                             min_cell_sample=args.min_sample)
+    # Le détecteur LSR RÉEL (D-083) : il projette l'état MBO dans un ContextSchema et réutilise
+    # la chaîne déterministe existante. Il refuse tant que les entrées absentes du fichier
+    # manquent — refus MOTIVÉ, rapporté par `diagnostics()`, jamais un silence.
+    detector = MboLsrDetector(tick_size=args.tick, news_state=args.news_state)
+    report = run_calibration(args.parquet, arm=detector, journal=journal,
+                             tick_size=args.tick, min_cell_sample=args.min_sample)
+    report["detector"] = detector.diagnostics()
     print(json.dumps(report, indent=2, ensure_ascii=False) if args.json else _format(report))
     if args.csv:
         journal.to_csv(args.csv)
