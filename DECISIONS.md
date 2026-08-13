@@ -3752,6 +3752,73 @@ Log (§2.5), pas un champ mutable. Les deux derniers sont purs et courts.
 21 tests neufs, 4 tests existants mis à jour (F2 les fait changer de verdict) → **1353 passed**,
 ruff clean.
 
+## D-078 · Simulateur d'execution FIFO — le biais le plus couteux du backtest de scalping
+
+`backend/app/execution_sim.py`. 33 tests. Phase P3, intervertie avec P2 sur arbitrage operateur.
+
+### Pourquoi ce module passe AVANT la journalisation des 60 setups
+
+L'artefact v1.7 nomme lui-meme le biais : « un ordre limite n'est pas rempli au simple touche ;
+il entre en fin de file FIFO et n'est execute que quand le volume devant lui est consomme. C'est
+le biais le plus couteux d'un backtest de scalping ». Sur un TP a 5 ticks, supposer le fill au
+touche transforme des trades **jamais remplis** en gagnants. Journaliser 60 setups avant d'avoir
+ce module aurait produit des resultats faux, pas seulement absents.
+
+### Quatre defauts de l'artefact, corriges
+
+1. **Drapeau inverse.** `if (vol > 0 && !this.requireTrade === false)` : en JS,
+   `(!requireTrade) === false` signifie « requireTrade est vrai ». Mettre le drapeau a `false`
+   (« ne pas exiger d'echange ») **empechait** tout remplissage au lieu de l'assouplir. Le
+   comportement n'est plus derriere un drapeau ambigu.
+2. **Latence non rejouable.** `_lat()` tire `Math.random()`, en contradiction avec l'invariant
+   n°1 de l'artefact — fonctions pures a etat injecte, « ce qui rend le backtest rejouable a
+   l'identique ». Generateur seme et injecte ; verrouille par un test qui compare deux
+   executions a graine egale.
+3. **File d'attente optimiste par defaut.** `queueAhead` valait 0 sauf mention : le cas par
+   defaut etait « premier de la file », l'hypothese la plus favorable qui soit. La file se
+   **deduit du carnet** a l'envoi ; **sans carnet ni file explicite, l'ordre est REFUSE**. Se
+   placer premier faute de donnees recreerait exactement le biais combattu.
+4. **Carnet epuise maquille.** L'artefact completait au dernier niveau ± 2 ticks sans le dire.
+   Ici la part non servie est rapportee (`unfilled_qty`, `book_exhausted`), jamais inventee.
+
+Un cinquieme ecart, moins visible : `marketOrder` ne consommait pas le carnet — deux ordres au
+meme instant obtenaient tous deux le meilleur niveau, soit de la liquidite fabriquee.
+`market_order_consuming` rend le carnet residuel.
+
+### Ce que l'essai manuel montre — et ce qu'il ne montre PAS
+
+Meme tape, deux hypotheses : le comptage naif retient chaque touche comme un TP gagne, le FIFO
+ne retient que ceux dont la file a reellement ete consommee. Le mecanisme fonctionne et se voit.
+
+**Mais la MAGNITUDE mesuree n'est pas une propriete du marche.** Le scenario tire le volume
+echange en `uniform(0, 2 x file)`, si bien que le volume depasse la file une fois sur deux **par
+construction** — d'ou ~45-50 % de surestimation quelle que soit la taille de file (47 %, 44,5 %,
+51,5 % pour 10, 40 et 100 lots : le chiffre ne bouge pas, ce qui trahit l'artefact de scenario).
+Ce nombre mesure mon hypothese, pas ES.
+
+La vraie magnitude depend de la distribution volume-au-prix contre profondeur de file, qui est
+une propriete empirique des donnees MBO reelles. C'est precisement ce que le rejeu Parquet/MBO
+(P3, item 1) doit fournir. **Aucun chiffre de surestimation ne sera inscrit dans la doc avant
+d'etre mesure sur des donnees reelles.**
+
+### Aucun ordre reel (§2.1)
+
+Le module simule un appariement ; aucune dependance reseau. Un test de garde interdit
+`requests`, `httpx`, `socket`, `broker`, `submit_order`, `aiohttp` dans la source — la frontiere
+est facile a franchir sans y penser une fois qu'un simulateur produit des `Fill` credibles.
+
+### Invariant n°4 preserve — on freine les envois, jamais les sorties
+
+Le gouverneur gele les ENVOIS apres N annulations rapides, mais `cancel()` n'est jamais bloquee,
+et les motifs protecteurs (`RISK_HALT`, `NEWS_BLACKOUT`, `SESSION_END`, `OPERATOR`) ne sont ni
+comptes ni entraves : un arret de risque ne doit pas pouvoir declencher le gel qui l'empecherait
+de se repeter.
+
+### Reste de P3
+
+Item 1 (rejeu Parquet/MBO, incrementation du carnet L2/L3 tick-by-tick) et item 3 (cablage L4
+`gates.eval` sur le point d'armement du detecteur de sweep) ne sont pas dans ce commit.
+
 ## D-077 · L3 `o5.kurtosis` cablee — les barres ES qui n'existaient pas
 
 `backend/app/es_bars.py`, `build_o5_tick` dans `app/loops/wiring.py`. 19 tests.
