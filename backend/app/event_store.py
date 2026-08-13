@@ -54,6 +54,20 @@ BEGIN SELECT RAISE(ABORT, 'journal_entries is append-only'); END;
 CREATE TRIGGER IF NOT EXISTS journal_no_delete BEFORE DELETE ON journal_entries
 BEGIN SELECT RAISE(ABORT, 'journal_entries is append-only'); END;
 
+CREATE TABLE IF NOT EXISTS setup_journal (
+  seq      INTEGER PRIMARY KEY AUTOINCREMENT,
+  id       TEXT NOT NULL UNIQUE,
+  ts       REAL NOT NULL,
+  kind     TEXT NOT NULL CHECK (kind IN ('setup_armed','setup_outcome')),
+  setup_id TEXT NOT NULL,
+  payload  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS setup_journal_by_setup ON setup_journal (setup_id);
+CREATE TRIGGER IF NOT EXISTS setup_journal_no_update BEFORE UPDATE ON setup_journal
+BEGIN SELECT RAISE(ABORT, 'setup_journal is append-only'); END;
+CREATE TRIGGER IF NOT EXISTS setup_journal_no_delete BEFORE DELETE ON setup_journal
+BEGIN SELECT RAISE(ABORT, 'setup_journal is append-only'); END;
+
 CREATE TABLE IF NOT EXISTS setting_events (
   seq      INTEGER PRIMARY KEY AUTOINCREMENT,
   id       TEXT NOT NULL UNIQUE,
@@ -164,6 +178,40 @@ class EventStore:
             rows = self._conn.execute(query, params).fetchall()
         return [{"seq": r["seq"], "id": r["id"], "ts": r["ts"], "kind": r["kind"],
                  **json.loads(r["payload"])} for r in rows]
+
+    def append_setup(self, kind: str, setup_id: str, payload: dict[str, Any],
+                     ts: Optional[float] = None) -> dict[str, Any]:
+        """Journal des setups (P2, D-082) — même grammaire et mêmes garde-fous que le Decision
+        Log : `setup_armed` est immuable, `setup_outcome` est un event ULTÉRIEUR qui le
+        RÉFÉRENCE par `setup_id`. Aucun chemin ne met à jour un armement : le corriger
+        signifierait réécrire l'histoire de la calibration."""
+        if kind not in ("setup_armed", "setup_outcome"):
+            raise ValueError(f"unknown setup journal kind: {kind}")
+        if not setup_id:
+            raise ValueError("setup_id est obligatoire — sans lui l'issue ne référence rien")
+        entry = {"id": str(uuid.uuid4()), "ts": ts if ts is not None else time.time(),
+                 "kind": kind, "setup_id": setup_id, **payload}
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO setup_journal (id, ts, kind, setup_id, payload) VALUES (?,?,?,?,?)",
+                (entry["id"], entry["ts"], kind, setup_id,
+                 json.dumps(payload, ensure_ascii=False)))
+            self._conn.commit()
+        return entry
+
+    def setup_entries(self, kind: Optional[str] = None) -> list[dict[str, Any]]:
+        """Rejeu ordonné du journal. `seq` (et non `ts`) porte l'ordre : deux events peuvent
+        partager un horodatage, jamais un numéro de séquence."""
+        query = "SELECT seq, id, ts, kind, setup_id, payload FROM setup_journal"
+        params: list[Any] = []
+        if kind:
+            query += " WHERE kind = ?"
+            params.append(kind)
+        query += " ORDER BY seq ASC"
+        with self._lock:
+            rows = self._conn.execute(query, params).fetchall()
+        return [{"seq": r["seq"], "id": r["id"], "ts": r["ts"], "kind": r["kind"],
+                 "setup_id": r["setup_id"], **json.loads(r["payload"])} for r in rows]
 
     def save_snapshot(self, payload: dict[str, Any]) -> str:
         snap_id = str(uuid.uuid4())

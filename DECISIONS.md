@@ -3752,6 +3752,69 @@ Log (§2.5), pas un champ mutable. Les deux derniers sont purs et courts.
 21 tests neufs, 4 tests existants mis à jour (F2 les fait changer de verdict) → **1353 passed**,
 ruff clean.
 
+## D-082 · Infrastructure P2 — le journal des setups et la matrice de calibration
+
+`backend/app/setup_journal.py`, `app/calibration.py`, table `setup_journal` dans l'event store.
+21 tests. **Ecrite AVANT les donnees**, pour qu'aucune decision de mesure ne soit prise sous la
+pression d'un fichier deja la.
+
+### Une seule question
+
+> Les setups marques `FLAG` par les balises O1-O5 ont-ils un taux de reussite degrade ?
+
+La matrice de calibration croise chaque balise avec chaque statut et rend, par cellule : nombre
+de setups, non remplis, taux de non-remplissage, trades denoues, taux de reussite. Elle **compte**
+et dit quand elle ne peut pas compter. Elle ne conclut rien — un test verifie qu'aucune
+formulation conclusive (`has_edge`, `is_profitable`, `works`…) n'existe dans le module.
+
+### Grammaire event-sourced, reprise telle quelle
+
+`setup_armed` est immuable (ecrit par L4 a l'armement), `setup_outcome` est un event ULTERIEUR
+qui le reference par `setup_id`, l'etat courant est une projection. L'append-only est garanti par
+des triggers SQLite — `UPDATE` et `DELETE` levent `IntegrityError`, verifie par test. Aucun
+chemin ne corrige un armement : le reecrire signifierait reecrire l'histoire de la calibration.
+
+Un second armement pour un meme `setup_id` ne remplace pas le premier — il est conserve au
+journal et compte dans `duplicates`. L'ecraser laisserait croire a une correction propre alors
+qu'une double emission est une anomalie. Idem pour une seconde issue, et une issue orpheline
+reste au journal mais n'entre pas dans la projection : elle ne reference rien, donc ne mesure
+rien.
+
+### Quatre regles d'honnetete, toutes testees
+
+1. **`NO_FILL` hors du denominateur du taux de reussite**, mais remonte a cote au meme rang.
+   « La strategie gagne-t-elle ? » et « les entrees sont-elles servies ? » sont deux questions ;
+   les melanger rend les deux illisibles.
+2. **Sous l'echantillon minimal, le taux vaut `None`**, pas un chiffre — un taux sur trois trades
+   n'est pas une mesure, c'est du bruit avec une decimale. La cellule porte `INSUFFICIENT_DATA`.
+3. **Un setup sans issue reste `PENDING`**, jamais un resultat neutre. Et les `PENDING` sont
+   exclus du denominateur du taux de non-remplissage : sinon il baisserait mecaniquement a
+   chaque armement, sans qu'aucune entree n'ait ete servie ni refusee.
+4. **Process et resultat jamais consolides** (§2.7) : le volet resultat reste masque sous
+   `RESULT_SCORE_MIN_TRADES`.
+
+Export CSV a colonnes **fixes et ordonnees** — un export dont les colonnes varient selon les
+donnees presentes n'est pas comparable d'une passe a l'autre. Un `None` s'exporte VIDE : la
+chaine « None » dans un CSV se relit comme une valeur et fausserait toute reprise en pandas.
+
+### La commande qui tournera le jour ou le fichier arrive
+
+    python -m app.calibration seance.parquet --csv setups.csv
+
+Enchaine Parquet -> carnet -> armement -> simulateur FIFO -> issues -> journal -> matrice, sans
+etape manuelle. **Le detecteur d'armement est INJECTE** : sans detecteur fourni, la passe ne
+fabrique aucun setup — elle le dit et rend des zeros. Des armements arbitraires produiraient une
+matrice d'allure complete mesurant un generateur, pas une strategie.
+
+Exerce sur la fixture : ingestion 7/7, 0 rejet, 0 setup, tous les taux a `—`. Aucun chiffre
+invente pour combler le vide.
+
+### Ce que la passe reelle mesurera
+
+Le **taux de non-remplissage** est la mesure laissee non chiffree depuis D-078 : c'est lui qui
+donne la magnitude reelle du biais de touche. Un backtest naif l'affiche structurellement a 0 %.
+Il manque desormais une seule chose : le fichier.
+
 ## D-081 · Harnais de rejeu bout-en-bout — la boucle du PnL est fermee
 
 `backend/app/replay_harness.py`. 15 tests. MBO -> carnet -> armement -> simulateur FIFO ->

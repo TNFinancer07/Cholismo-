@@ -27,6 +27,7 @@ from .log_scraper import LogTailer, nt8_daily_log_path, startup_report
 from .loops.wiring import build_supervisor
 from .options_context import OptionsContextReader
 from .redis_state import RedisState
+from .setup_journal import SetupJournal
 from .snapshot import capture_snapshot
 from .sse import broadcaster
 
@@ -128,7 +129,8 @@ async def lifespan(app: FastAPI):
     # quelques minutes, là où O5 réclame une fenêtre de deux heures qui doit s'ACCUMULER.
     app.state.loops = build_supervisor(app.state.options_context, broadcaster,
                                        read_tape=lambda: _tape_field(app.state.engine),
-                                       read_book=lambda: _order_book_field(app.state.engine))
+                                       read_book=lambda: _order_book_field(app.state.engine),
+                                       journal_append=SetupJournal().record_armed)
     # L4 : la boucle événementielle qui journalise O1-O5 à chaque armement. Elle hérite des
     # garde-fous du contrat (drop-if-busy, plafond de durée, filet d'exception) — un gate
     # consultatif ne doit jamais pouvoir ralentir ni casser le chemin d'émission.
