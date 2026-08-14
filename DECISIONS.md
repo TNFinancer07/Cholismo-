@@ -3752,6 +3752,51 @@ Log (§2.5), pas un champ mutable. Les deux derniers sont purs et courts.
 21 tests neufs, 4 tests existants mis à jour (F2 les fait changer de verdict) → **1353 passed**,
 ruff clean.
 
+## D-106 · Icebergs et churn — « spoofing » est une intention, pas une mesure
+
+Optimisation #6. Affine `OF1`/`OF2` en distinguant, sur un niveau, la liquidité qui **se fait
+consommer** de celle qui **disparaît sans être touchée**. Les deux ressemblent à un mur qui
+s'efface à l'écran ; elles ne disent pas du tout la même chose d'un sweep.
+
+Rien de neuf n'est mesuré : `LevelState` suivait déjà `added/cancelled/traded` par niveau. Le
+module **dérive**. Seul ajout au carnet : `peak_size`, la plus grande taille jamais affichée d'un
+coup.
+
+### Le nom du champ est la décision
+
+Le spoofing est une **intention** — placer sans intention d'exécuter. Une intention ne s'observe
+pas dans un carnet. Ce qu'on observe est un taux d'annulation élevé sur du volume jamais exécuté,
+ce qui a des causes légitimes : market-making, couverture, retrait sur mouvement, algorithme de
+repositionnement.
+
+Étiqueter un niveau `SPOOF` dans un terminal présenterait une **accusation comme une mesure**, et
+un opérateur agissant dessus agirait sur une inférence déguisée en fait. Le champ s'appelle donc
+`churn`, et son libellé écran dit ce qu'il est : « annulé sans exécution ». Un test verrouille le
+vocabulaire — le mot n'apparaît dans la source que dans l'explication du refus.
+
+### Le pic, et pourquoi pas la taille courante
+
+L'iceberg se mesure en comparant le volume ÉCHANGÉ à ce que le carnet a **montré**. Comparer à la
+taille *courante* serait absurde : juste après un balayage elle vaut zéro, et le rapport serait
+infini ou indéfini. D'où `peak_size`, seule référence stable.
+
+### `None` n'est pas `False`
+
+Un niveau sous le plancher d'activité n'est pas « vérifié sans iceberg », il est **non mesurable**.
+Deux ordres posés puis retirés donnent 100 % d'annulation — qui ne décrit que deux ordres. Les
+verdicts sont donc ternaires, et un test vérifie que `None` et `False` ne se confondent jamais.
+
+C'est le quatrième piège de `HANDOFF.md` sous une autre forme : ici le faux ami n'est pas un zéro
+mais un booléen par défaut.
+
+### Seuils
+Tous PLACEHOLDER (`ICEBERG_TRADED_MULTIPLE=3`, `MIN_ADDED_VOLUME=20`, `CHURN_CANCEL_RATIO=0.85`),
+isolés, et **le rapport porte les valeurs qui l'ont produit** avec `calibrated: false` — une
+conclusion doit rester rattachable aux nombres qui l'ont produite.
+
+### Vérif
+12 tests neufs → **1856 passed**, ruff clean, mypy 15 fichiers.
+
 ## D-105 · `ResilienceView` routée — et un test de routage qui ne rend pas l'App
 
 La vue existait, testée, et **aucun onglet n'y menait**. C'est le même défaut qu'en D-096 (le

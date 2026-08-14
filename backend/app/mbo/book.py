@@ -63,6 +63,11 @@ class LevelState:
     added_volume: float = 0.0
     cancelled_volume: float = 0.0
     traded_volume: float = 0.0
+    #: Plus grande taille JAMAIS affichée d'un coup à ce niveau (D-106). C'est la référence de
+    #: l'iceberg : un volume échangé très supérieur à ce que le carnet a montré signale une
+    #: réinjection masquée. Sans ce pic, on ne pourrait comparer qu'à la taille courante — qui
+    #: vaut souvent zéro juste après un balayage, et rendrait le rapport infini.
+    peak_size: float = 0.0
 
 
 @dataclass
@@ -165,6 +170,7 @@ class MboBook:
         level.size += event.size
         level.order_count += 1
         level.added_volume += event.size
+        level.peak_size = max(level.peak_size, level.size)
         return True
 
     def _modify(self, event: MboEvent) -> bool:
