@@ -160,3 +160,27 @@ def test_un_drawdown_maximal_se_mesure_depuis_le_PIC_pas_depuis_zero():
 def test_un_percentile_sur_liste_VIDE_rend_None_et_non_zero():
     from app.resilience import _percentile
     assert _percentile([], 0.95) is None, "0 se lirait « aucun drawdown »"
+
+
+# ---------------------------------------------------------------- endpoint (D-104)
+
+def test_l_endpoint_rend_les_DEUX_calculs_et_ne_les_confond_pas():
+    """Ils se lisent ensemble mais leur nature diffère : l'un explore des hypothèses et est
+    toujours calculable, l'autre part de données réelles et refuse sous échantillon insuffisant."""
+    from fastapi.testclient import TestClient
+    from app.api import router
+    from fastapi import FastAPI
+
+    app = FastAPI()
+    app.include_router(router)
+    with TestClient(app) as client:
+        res = client.get("/analyses/resilience")
+    assert res.status_code == 200
+    corps = res.json()
+
+    assert corps["sensitivity"]["kind"] == "sensitivity_map"
+    assert "INCONNU" in corps["sensitivity"]["disclaimer"]
+    # Sans trades réconciliés, le biais REFUSE — et la carte, elle, reste calculée.
+    assert corps["survivor_bias"]["kind"] == "survivor_bias"
+    assert corps["survivor_bias"]["status"] in ("NOT_ENOUGH_DATA", "NO_RUIN_OBSERVED", "OK")
+    assert len(corps["sensitivity"]["cells"]) == 4

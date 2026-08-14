@@ -14,7 +14,7 @@ from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from pydantic import BaseModel, Field, model_validator
 from sse_starlette.sse import EventSourceResponse
 
-from . import config, journal, live_mode, projections, recap, settings
+from . import config, journal, live_mode, projections, recap, resilience, settings
 from .datasource import scenarios
 from .datasource.mock import SOURCES
 from .datasource.replay import ReplayDataSource
@@ -89,6 +89,30 @@ async def analyses_trades() -> dict[str, Any]:
 
 
 # ---------- Robustesse — Walk-Forward + Monte Carlo sur trades réconciliés (D-043) ----------
+
+@router.get("/analyses/resilience")
+async def analyses_resilience() -> dict[str, Any]:
+    """Carte de sensibilité à la ruine (D-102) + biais du survivant (D-103).
+
+    Les DEUX sont rendus ensemble parce qu'ils se lisent ensemble, mais leur nature diffère et la
+    réponse le dit :
+
+    - `sensitivity` explore des HYPOTHÈSES (slippage × taux de réussite) et n'a besoin d'aucune
+      donnée historique — toujours calculable, jamais une prédiction du risque de CE compte ;
+    - `survivor_bias` part des R-multiples RÉCONCILIÉS et refuse de chiffrer sous échantillon
+      insuffisant (`NOT_ENOUGH_DATA`).
+
+    Les confondre serait l'erreur que ces deux calculs existent pour éviter. ADVISORY, jamais un
+    ordre (§2.1). Calcul CPU-borné, offloadé hors de la boucle d'événements.
+    """
+    def _compute() -> dict[str, Any]:
+        store = get_store()
+        return {"sensitivity": resilience.sensitivity_map(),
+                "survivor_bias": resilience.survivor_bias(
+                    projections._reconciled_r_multiples(store))}
+
+    return await asyncio.to_thread(_compute)
+
 
 @router.get("/analyses/robustness")
 async def analyses_robustness() -> dict[str, Any]:

@@ -3752,6 +3752,39 @@ Log (§2.5), pas un champ mutable. Les deux derniers sont purs et courts.
 21 tests neufs, 4 tests existants mis à jour (F2 les fait changer de verdict) → **1353 passed**,
 ruff clean.
 
+## D-104 · `/analyses/resilience` et son écran — trois choix pour qu'on n'y lise pas une prédiction
+
+L'endpoint rend les deux calculs **ensemble**, parce qu'ils se lisent ensemble — mais leur nature
+diffère et la réponse le dit : `sensitivity` explore des hypothèses et est toujours calculable ;
+`survivor_bias` part des R-multiples réconciliés et refuse sous échantillon insuffisant. Les
+confondre serait l'erreur que ces deux calculs existent pour éviter.
+
+### L'écran est le maillon faible, pas le calcul
+
+Un tableau de nombres colorés se lit comme une mesure, quoi qu'en dise la docstring du module qui
+l'a produit. Trois choix d'affichage, aucun décoratif :
+
+1. **Le disclaimer en TÊTE**, encadré, jamais en note de bas de tableau. Ce qu'on lit en dernier,
+   on ne le lit pas.
+2. **Le badge `HYPOTHÈSE` sur CHAQUE cellule.** Une capture d'écran de la grille circule sans son
+   contexte ; le badge doit voyager avec elle.
+3. **Pas de dégradé.** Un gradient continu suggère une mesure fine là où la grille n'a que quatre
+   points. On affiche le nombre et une **classe nommée** (faible / notable / élevé) — forme et
+   texte, jamais la seule couleur (§3).
+
+### Les deux zéros, tenus jusqu'à l'écran
+
+Le travail des tranches 2 et 3 aurait été perdu si l'écran les avait aplatis :
+- biais non mesurable → « non mesurable » **et** la phrase « rien n'a été exclu, donc rien à
+  biaiser (et non : un biais nul) » ;
+- échantillon insuffisant → le refus est affiché avec son compte (`2/4`), et **aucun chiffre de
+  DD95 n'apparaît** — un test vérifie leur absence du DOM, pas seulement leur valeur.
+
+### Vérif
+1 test backend + 7 frontend → **1844 backend**, **156 frontend**, ruff + mypy + `tsc` propres.
+Le test du badge compte les occurrences (`4` pour une grille 2×2) : vérifier qu'il existe
+« quelque part » laisserait passer un badge posé une seule fois en en-tête.
+
 ## D-103 · Biais du survivant — et « aucune ruine » n'est pas « aucun biais »
 
 Tranche 3, la seule des trois qui puisse changer une conclusion. Calculer le DD95 sur les seules
