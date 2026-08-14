@@ -14,7 +14,7 @@
 import { useTerminal } from '@/store/terminal'
 import { Panel } from '@/components/ui/panel'
 import { cn } from '@/lib/utils'
-import type { OrderFlowGate, OrderFlowShadow } from '@/types/schema'
+import type { OrderFlowGate, OrderFlowShadow, OrderFlowThreshold } from '@/types/schema'
 
 const GATE_LABELS: Record<'b1' | 'b2', { code: string; label: string }> = {
   b1: { code: 'OF1', label: 'rechargement du mur' },
@@ -41,7 +41,24 @@ export function verdictTexte(v: boolean | null | undefined): { txt: string; icon
     : { txt: 'refusée', icone: '✕', cls: 'text-bias-down' }
 }
 
-function LigneGate({ gate, code, label }: { gate?: OrderFlowGate; code: string; label: string }) {
+/** Repère de seuil. `op` est affiché AVEC la valeur : « 0.4 » seul ne dit pas de quel côté il
+ *  faut être, et B2 change de sens selon la direction du sweep. Absent → « — », jamais un
+ *  seuil supposé. */
+export function Seuil({ t }: { t?: OrderFlowThreshold | null }) {
+  if (!t || !Number.isFinite(t.value)) {
+    return <span className="text-term-faint" title="instrument non calibré">—</span>
+  }
+  return (
+    <span className={t.applied ? 'text-term-dim' : 'text-term-faint'}
+      title={t.applied ? 'seuil appliqué par le moteur' : 'seuil de référence — NON appliqué'}>
+      {t.op} {t.value}{t.applied ? '' : ' (réf.)'}
+    </span>
+  )
+}
+
+function LigneGate({ gate, code, label, seuil }: {
+  gate?: OrderFlowGate; code: string; label: string; seuil?: OrderFlowThreshold | null
+}) {
   const src = verdictTexte(gate?.verdict_source)
   const ih = verdictTexte(gate?.verdict_inhouse)
   // `agree` n'est vrai/faux que si les DEUX verdicts existent ; `null` = indécidable, et
@@ -56,6 +73,9 @@ function LigneGate({ gate, code, label }: { gate?: OrderFlowGate; code: string; 
       </td>
       <td className={cn('py-0.5 pr-2 tabular-nums', ih.cls)} title={`mesure maison : ${ih.txt}`}>
         <span aria-hidden>{ih.icone}</span> {fmtMesure(gate?.inhouse)}
+      </td>
+      <td className="py-0.5 pr-2 text-xxs tabular-nums" data-testid={`of-seuil-${code}`}>
+        <Seuil t={seuil} />
       </td>
       <td className="py-0.5 text-xxs">
         {accord === null || accord === undefined ? (
@@ -88,12 +108,13 @@ export function OrderFlowGatesPanel() {
                 <th className="text-left font-normal">gate</th>
                 <th className="text-left font-normal">proxy</th>
                 <th className="text-left font-normal">maison</th>
+                <th className="text-left font-normal">seuil</th>
                 <th className="text-left font-normal">verdict</th>
               </tr>
             </thead>
             <tbody>
-              <LigneGate gate={shadow.b1} {...GATE_LABELS.b1} />
-              <LigneGate gate={shadow.b2} {...GATE_LABELS.b2} />
+              <LigneGate gate={shadow.b1} {...GATE_LABELS.b1} seuil={shadow.thresholds?.b1} />
+              <LigneGate gate={shadow.b2} {...GATE_LABELS.b2} seuil={shadow.thresholds?.b2} />
             </tbody>
           </table>
           {shadow.missing && shadow.missing.length > 0 && (
@@ -128,8 +149,11 @@ export function OrderFlowMeasuresPanel() {
                 <tr key={cle} className="border-t border-term-border/50">
                   <td className="py-0.5 pr-2 font-bold text-term-text">{MEASURE_LABELS[cle].code}</td>
                   <td className="py-0.5 pr-2 text-term-dim">{MEASURE_LABELS[cle].label}</td>
-                  <td className="py-0.5 tabular-nums text-term-text" data-testid={`of-${cle}`}>
+                  <td className="py-0.5 pr-2 tabular-nums text-term-text" data-testid={`of-${cle}`}>
                     {fmtMesure(shadow[cle])}
+                  </td>
+                  <td className="py-0.5 text-xxs tabular-nums" data-testid={`of-seuil-${MEASURE_LABELS[cle].code}`}>
+                    <Seuil t={shadow.thresholds?.[cle]} />
                   </td>
                 </tr>
               ))}

@@ -542,6 +542,25 @@ export interface OrderFlowGate {
   delta?: number | null
 }
 
+/** Seuil EFFECTIF d'une gate (D-101) — publié par le backend, jamais écrit en dur ici :
+ *  une copie divergerait en silence à la première recalibration.
+ *  `op` compte autant que `value` — B2 compare `>=` sur un BID_SWEEP et `<=` sur un ASK_SWEEP.
+ *  `applied: false` = seuil de RÉFÉRENCE d'une mesure non gatante (OF3/OF4). */
+export interface OrderFlowThreshold {
+  value: number
+  op: '>=' | '<='
+  applied: boolean
+}
+
+export interface OrderFlowThresholds {
+  instrument: string
+  b1: OrderFlowThreshold | null
+  /** `null` sans direction de sweep : il n'y a alors pas de seuil à montrer. */
+  b2: OrderFlowThreshold | null
+  b3: OrderFlowThreshold | null
+  b4: OrderFlowThreshold | null
+}
+
 export interface OrderFlowShadow {
   /** Ligne lisible en tête — accord, désaccord (et sur quoi), ou non mesurable. */
   resume: string
@@ -552,6 +571,8 @@ export interface OrderFlowShadow {
   /** MESURÉES, jamais gatantes dans cette tranche. */
   b3?: number | null
   b4?: number | null
+  /** Absents si l'instrument n'est pas calibré — aucun repère à placer, pas un zéro. */
+  thresholds?: OrderFlowThresholds | null
   missing?: string[]
 }
 

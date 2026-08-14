@@ -163,8 +163,43 @@ def orderflow_shadow(schema: Any, snapshot: OrderFlowSnapshot) -> dict:
             # que la décision de les faire gater se prenne sur des observations, pas sur une idée.
             "b3": snapshot.rejection_delta_ratio,
             "b4": snapshot.post_sweep_aggression_ratio,
+            "thresholds": _thresholds(t, direction),
             "missing": list(snapshot.missing),
         }
     except Exception:                                  # noqa: BLE001 — observation, pas décision
         return {"resume": "comparaison non mesurable (erreur d'observation)",
                 "source": config.LSR_ORDERFLOW_SOURCE}
+
+
+def _thresholds(t: Any, direction: Optional[str]) -> Optional[dict]:
+    """Seuils EFFECTIFS des gates OF, pour que l'écran place ses repères sur la règle réelle
+    (D-101) — au lieu de les écrire en dur, ce qui les ferait diverger en silence le jour d'une
+    recalibration.
+
+    **B2 est DIRECTIONNEL** : la porte compare `>= t` sur un BID_SWEEP et `<= 1 - t` sur un
+    ASK_SWEEP. Publier le seul `t` placerait le repère du mauvais côté de la jauge sur la moitié
+    des sweeps. On publie donc le seuil effectif AVEC son opérateur, et `None` sans direction —
+    sans sweep orienté, il n'y a pas de seuil à montrer.
+
+    `applied` distingue les gates qui DÉCIDENT (B1/B2) des mesures dont le seuil n'est qu'une
+    référence non appliquée (B3/B4, non gatantes dans cette tranche). Sans ce drapeau, afficher
+    quatre repères identiques laisserait croire que les quatre pèsent sur l'armement.
+
+    Instrument non calibré → `None` : pas de seuil inventé (§3).
+    """
+    if t is None:
+        return None
+    b2: Optional[dict] = None
+    if direction == "BID_SWEEP":
+        b2 = {"value": t.b2_tape_flip_threshold, "op": ">=", "applied": True}
+    elif direction == "ASK_SWEEP":
+        b2 = {"value": round(1.0 - t.b2_tape_flip_threshold, 6), "op": "<=", "applied": True}
+    return {
+        "instrument": config.LSR_INSTRUMENT,
+        "b1": {"value": t.b1_min_wall_refill_ratio, "op": ">=", "applied": True},
+        "b2": b2,
+        # Seuils de RÉFÉRENCE : la mesure est publiée, la porte n'est pas branchée (seuils non
+        # calibrés). L'opérateur découle du nom du champ — `min_` / `max_` sont sans ambiguïté.
+        "b3": {"value": t.b3_min_delta_ratio, "op": ">=", "applied": False},
+        "b4": {"value": t.b4_max_post_sweep_aggression, "op": "<=", "applied": False},
+    }

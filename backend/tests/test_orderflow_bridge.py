@@ -178,3 +178,56 @@ def test_ombre_ne_LEVE_jamais_meme_sur_un_schema_absurde():
     from app.orderflow import OrderFlowSnapshot
     sh = orderflow_shadow(object(), OrderFlowSnapshot(now=T0, window_s=30.0))
     assert isinstance(sh, dict) and "source" in sh
+
+
+# ---------------------------------------------------------------- seuils OF (D-101)
+
+def test_les_seuils_publies_sont_ceux_du_MOTEUR_pas_des_copies():
+    """Écrits en dur à l'écran, ils divergeraient en silence à la première recalibration."""
+    from app import config, lsr_tuning
+    from app.orderflow.bridge import _thresholds
+
+    t = lsr_tuning.tuning(config.LSR_INSTRUMENT)
+    pub = _thresholds(t, "BID_SWEEP")
+    assert pub["b1"]["value"] == t.b1_min_wall_refill_ratio
+    assert pub["b3"]["value"] == t.b3_min_delta_ratio
+    assert pub["b4"]["value"] == t.b4_max_post_sweep_aggression
+
+
+def test_le_seuil_B2_est_DIRECTIONNEL():
+    """La porte compare `>= t` sur un BID_SWEEP et `<= 1 - t` sur un ASK_SWEEP. Publier le seul
+    `t` placerait le repère du mauvais côté de la jauge sur la moitié des sweeps."""
+    from app import config, lsr_tuning
+    from app.orderflow.bridge import _thresholds
+
+    t = lsr_tuning.tuning(config.LSR_INSTRUMENT)
+    bid = _thresholds(t, "BID_SWEEP")["b2"]
+    ask = _thresholds(t, "ASK_SWEEP")["b2"]
+
+    assert bid == {"value": t.b2_tape_flip_threshold, "op": ">=", "applied": True}
+    assert ask["op"] == "<=" and abs(ask["value"] - (1.0 - t.b2_tape_flip_threshold)) < 1e-9
+    assert bid["value"] != ask["value"], "un seuil unique trahirait la règle réelle"
+
+
+def test_SANS_direction_il_n_y_a_pas_de_seuil_B2_a_montrer():
+    from app import config, lsr_tuning
+    from app.orderflow.bridge import _thresholds
+
+    assert _thresholds(lsr_tuning.tuning(config.LSR_INSTRUMENT), None)["b2"] is None
+
+
+def test_un_instrument_NON_CALIBRE_ne_publie_AUCUN_seuil():
+    """Pas de seuil inventé (§3) — l'absence doit rester une absence."""
+    from app.orderflow.bridge import _thresholds
+
+    assert _thresholds(None, "BID_SWEEP") is None
+
+
+def test_applied_distingue_les_gates_DECISIONNELLES_des_mesures():
+    """Quatre repères identiques laisseraient croire que les quatre pèsent sur l'armement."""
+    from app import config, lsr_tuning
+    from app.orderflow.bridge import _thresholds
+
+    pub = _thresholds(lsr_tuning.tuning(config.LSR_INSTRUMENT), "BID_SWEEP")
+    assert pub["b1"]["applied"] is True and pub["b2"]["applied"] is True
+    assert pub["b3"]["applied"] is False and pub["b4"]["applied"] is False

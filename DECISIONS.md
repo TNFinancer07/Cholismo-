@@ -3752,6 +3752,41 @@ Log (§2.5), pas un champ mutable. Les deux derniers sont purs et courts.
 21 tests neufs, 4 tests existants mis à jour (F2 les fait changer de verdict) → **1353 passed**,
 ruff clean.
 
+## D-101 · Les seuils OF viennent du moteur — et B2 est directionnel
+
+Tranche 1 du chantier P3. La maquette v17 affichait « seuil ≥ 0.40 » en dur ; les porter tels
+quels aurait figé un nombre qui **divergerait en silence** à la première recalibration. Le seuil
+se publie donc, il ne se recopie pas.
+
+### Le piège était dans B2
+
+La porte B2 compare `>= t` sur un **BID_SWEEP** et `<= 1 - t` sur un **ASK_SWEEP**. Publier le
+seul `t` (0.6) aurait placé le repère du mauvais côté de la jauge sur **la moitié des sweeps** —
+un repère faux est pire qu'un repère absent, parce qu'il a l'air d'une mesure.
+
+On publie donc le seuil **effectif avec son opérateur** : `>= 0.6` sur BID, `<= 0.4` sur ASK.
+Sans direction de sweep, `b2` vaut `null` — il n'y a pas de seuil à montrer.
+
+### `applied` sépare ce qui décide de ce qui informe
+
+B1/B2 décident ; B3/B4 sont mesurées mais **non gatantes** (seuils non calibrés). Quatre repères
+d'apparence identique laisseraient croire que les quatre pèsent sur l'armement. Le drapeau
+`applied` traverse jusqu'à l'écran, où les seuils non appliqués portent « (réf.) ».
+
+L'opérateur de B3/B4 découle du nom du champ (`min_` → `>=`, `max_` → `<=`) : sans ambiguïté, et
+noté comme tel.
+
+Instrument non calibré → `thresholds: null`, pas de seuil inventé (§3).
+
+### Côté React
+
+Le repère affiche **l'opérateur avec la valeur** : « 0.4 » seul ne dit pas de quel côté il faut
+être. Un test pose un seuil à `0.99` et vérifie qu'il s'affiche — c'est la preuve qu'aucune
+valeur n'est écrite en dur dans le composant, ce qui était tout l'objet de la tranche.
+
+### Vérif
+5 tests backend + 6 frontend → **1826 backend**, **149 frontend**, ruff + mypy + `tsc` propres.
+
 ## D-100 · Tradovate — le codec, et la frontière §2.1 rendue structurelle
 
 La plateforme du challenge devient **Tradovate**. Son API sert deux besoins : le flux de marché

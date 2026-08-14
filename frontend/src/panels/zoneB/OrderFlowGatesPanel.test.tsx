@@ -137,3 +137,54 @@ describe('panneau de mesures', () => {
     expect(container.textContent).not.toMatch(/franchie|refusée|DÉSACCORD/)
   })
 })
+
+// ------------------------------------------------------------------ seuils (D-101)
+
+const SEUILS = {
+  instrument: 'MES',
+  b1: { value: 0.4, op: '>=' as const, applied: true },
+  b2: { value: 0.4, op: '<=' as const, applied: true },   // ASK_SWEEP : le sens s'inverse
+  b3: { value: 0.3, op: '>=' as const, applied: false },
+  b4: { value: 0.3, op: '<=' as const, applied: false },
+}
+
+describe('repères de seuil', () => {
+  it('affiche l\'OPÉRATEUR avec la valeur — « 0.4 » seul ne dit pas de quel côté être', () => {
+    poser({ ...COMPLET, thresholds: SEUILS })
+    render(<OrderFlowGatesPanel />)
+    expect(screen.getByTestId('of-seuil-OF1').textContent).toContain('>=')
+    expect(screen.getByTestId('of-seuil-OF1').textContent).toContain('0.4')
+  })
+
+  it('rend le seuil B2 DIRECTIONNEL tel que publié, sans le recalculer', () => {
+    poser({ ...COMPLET, thresholds: SEUILS })
+    render(<OrderFlowGatesPanel />)
+    expect(screen.getByTestId('of-seuil-OF2').textContent).toContain('<=')
+  })
+
+  it('marque « réf. » les seuils NON appliqués', () => {
+    poser({ ...COMPLET, thresholds: SEUILS })
+    render(<OrderFlowMeasuresPanel />)
+    expect(screen.getByTestId('of-seuil-OF3').textContent).toContain('réf.')
+    expect(screen.getByTestId('of-seuil-OF4').textContent).toContain('réf.')
+  })
+
+  it('un seuil ABSENT reste « — », jamais un seuil supposé', () => {
+    poser({ ...COMPLET, thresholds: null })
+    render(<OrderFlowGatesPanel />)
+    expect(screen.getByTestId('of-seuil-OF1').textContent).toBe('—')
+  })
+
+  it('B2 sans direction de sweep n\'affiche AUCUN repère', () => {
+    poser({ ...COMPLET, thresholds: { ...SEUILS, b2: null } })
+    render(<OrderFlowGatesPanel />)
+    expect(screen.getByTestId('of-seuil-OF2').textContent).toBe('—')
+  })
+
+  it('aucun seuil n\'est écrit en dur dans le composant', () => {
+    /* Le point de la tranche : une copie divergerait en silence à la recalibration. */
+    poser({ ...COMPLET, thresholds: { ...SEUILS, b1: { value: 0.99, op: '>=', applied: true } } })
+    render(<OrderFlowGatesPanel />)
+    expect(screen.getByTestId('of-seuil-OF1').textContent).toContain('0.99')
+  })
+})
