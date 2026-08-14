@@ -1,0 +1,281 @@
+"""Cholismo Terminal — backend entrypoint. FastAPI (REST + SSE), Redis (intra-session),
+SQLite (append-only event store). The hot path is deterministic; AI is async-only."""
+from __future__ import annotations
+
+import asyncio
+import logging
+import time
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from . import config
+from .account_provider import MockAccountProvider, NT8FileAccountProvider
+from .ai.tasks import AITasks
+from .api import router
+from .datasource.live import LiveDataSource, resolve_client
+from .datasource.mock import MOCK_PREFIX, MockDataSource
+from .datasource.replay import ReplayDataSource
+from .macro_news import MacroNewsProvider
+from .risk_sizer import APEX_EOD_50K, apex_eod_account
+from .engine import Engine
+from .event_store import get_store
+from .recon import reconcile_entry_fill
+from .external import OWNED_FIELDS as EXTERNAL_FIELDS
+from .external import build_default as build_external
+from .external.macro_series import OWNED_FIELDS as MACRO_FIELDS
+from .external.macro_series import MacroSeriesProvider
+from .log_scraper import LogTailer, nt8_daily_log_path, startup_report
+from .loops.wiring import build_supervisor
+from .options_context import OptionsContextReader
+from .redis_state import RedisState
+from .setup_journal import SetupJournal
+from .snapshot import capture_snapshot
+from .sse import broadcaster
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
+log = logging.getLogger("cholismo.main")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    app.state.redis = RedisState()
+    get_store()  # create DB + append-only triggers up front
+    # MarketDataSource is the single swappable seam (CLAUDE §4): replace MockDataSource
+    # with a real feed implementation without touching the engine.
+    # Source de compte (D-047/D-048) : NT8FileAccountProvider si un export NinjaTrader est
+    # configuré (NT8_ACCOUNT_FILE) — vraies photos datées par le mtime, boucle async démarrée
+    # ci-dessous ; sinon MockAccountProvider `always_fresh` = broker SIMULÉ du stack démo
+    # (Apex 50K EOD, jour neuf). Sans source, AUCUN manifeste ne sort (à l'aveugle = non, §3).
+    if config.NT8_ACCOUNT_FILE:
+        app.state.account_provider = NT8FileAccountProvider(
+            config.NT8_ACCOUNT_FILE, preset=APEX_EOD_50K)
+    else:
+        app.state.account_provider = MockAccountProvider(
+            state=apex_eod_account(APEX_EOD_50K), always_fresh=True)
+    # Calendrier macro (D-050) : porte F0 active seulement si un flux est configuré — sans lui,
+    # la protection de facto reste le couplage news du détecteur D-028 + le blackout humain.
+    app.state.news_provider = (MacroNewsProvider(config.MACRO_NEWS_FEED_URL)
+                               if config.MACRO_NEWS_FEED_URL else None)
+    # Sources externes Niveau 3 (D-062) : calendrier éco F5 + VIX F3. Opt-in — sans
+    # EXTERNAL_DATA=1, rien ne tourne. Décidé AVANT la source de marché, car c'est lui qui
+    # détermine les champs que le mock ne doit plus produire.
+    app.state.external = build_external() if config.EXTERNAL_DATA else None
+    # Pont registre → ContextSchema (D-063) : les 53 séries interrogeables alimentent enfin le
+    # canal lent. Il ne revendique QUE les champs qu'il remplit réellement — aujourd'hui
+    # `real_rates` ; les autres restent bloqués par le registre, avec leur motif.
+    app.state.macro_series = MacroSeriesProvider() if config.EXTERNAL_DATA else None
+
+    # Le mode replay se choisit au démarrage, par la couture unique (§4) : le moteur ne sait
+    # pas laquelle des trois sources est branchée. `REPLAY_FILE` absent = source mock.
+    # Un connecteur RÉEL a la priorité sur tout (D-097). `CLIENTS` est vide aujourd'hui :
+    # `resolve_client` rend donc `None`, et l'on retombe sur le comportement documenté plus bas.
+    # Ce n'est pas un repli silencieux — le mock s'annonce (D-093).
+    live_client = resolve_client(config.MICROSTRUCTURE_SOURCE)
+    if live_client is not None:
+        app.state.datasource = LiveDataSource(live_client,
+                                              source_name=config.MICROSTRUCTURE_SOURCE)
+        await app.state.datasource.start()
+        log.warning("MODE LIVE : microstructure servie par « %s » — les lectures portent son nom.",
+                    config.MICROSTRUCTURE_SOURCE)
+    elif config.REPLAY_FILE:
+        app.state.datasource = ReplayDataSource(config.REPLAY_FILE, speed=config.REPLAY_SPEED,
+                                                autoplay=config.REPLAY_AUTOPLAY)
+        log.warning("MODE REPLAY : %s — les prints sont REJOUÉS, pas du direct (source=replay)",
+                    config.REPLAY_FILE)
+    else:
+        # Le mock ne produit PAS les champs qu'une source réelle alimente (D-062). Les laisser
+        # produire puis se faire écraser donnerait le même écran par accident d'ordonnancement,
+        # et un `vix` différent selon l'ordre des ticks n'est pas une donnée.
+        app.state.datasource = MockDataSource(
+            skip_fields=((*EXTERNAL_FIELDS, *MACRO_FIELDS)
+                         if app.state.external is not None else ()))
+        # Symétrique de l'avertissement du rejeu (D-093). Le rejeu criait « ce n'est pas du
+        # direct » ; le mock se taisait — l'asymétrie faisait partie du défaut. `%s` rappelle
+        # que `MICROSTRUCTURE_SOURCE` ne branche RIEN : c'est une étiquette d'identité, aucun
+        # connecteur live n'existe encore dans ce dépôt.
+        log.warning("MODE SIMULÉ : aucune source live — toute lecture est estampillée « %s* ». "
+                    "MICROSTRUCTURE_SOURCE=%r nomme l'identité logique, il ne branche aucun "
+                    "connecteur.", MOCK_PREFIX, config.MICROSTRUCTURE_SOURCE)
+    if app.state.external is not None:
+        # INFO, pas un avertissement : il n'y a plus de conflit, il y a un propriétaire. La
+        # contrepartie est réelle et doit être lisible — sans source externe joignable, ces
+        # champs deviennent ABSENT et Phase 0 bloque (fail-closed §3), au lieu d'afficher du mock.
+        log.info("EXTERNAL_DATA actif — champs alimentés par une source réelle : %s "
+                 "(le mock ne les produit plus ; muets = ABSENT, jamais du mock déguisé). "
+                 "Détail du pont macro : python -m app.external.macro_series",
+                 ", ".join((*EXTERNAL_FIELDS, *MACRO_FIELDS)))
+
+    # Sources externes Niveau 3 (D-062) : calendrier éco F5 + VIX F3. Opt-in — sans
+    # EXTERNAL_DATA=1, rien ne tourne et le mock reste seul maître de `vix`/`macro_releases`.
+    # Le module ne DÉCIDE rien : il alimente deux champs que les couches déterministes
+    # existantes exploitent déjà (compute_macro_risk, update_regime, VIX_CRIT).
+    # L4 `gates.eval` (D-080) : la boucle est construite plus bas (elle a besoin du moteur pour
+    # lire tape/carnet) ; l'indirection par `app.state` évite une dépendance circulaire tout en
+    # gardant UN seul point d'armement.
+    app.state.engine = Engine(app.state.datasource, app.state.redis,
+                              account_provider=app.state.account_provider,
+                              news_provider=app.state.news_provider,
+                              on_arm=lambda manifest: _on_arm(app, manifest))
+    if isinstance(app.state.account_provider, NT8FileAccountProvider):
+        await app.state.account_provider.start()
+    if app.state.news_provider is not None:
+        await app.state.news_provider.start()
+    if app.state.external is not None:
+        await app.state.external.start(app.state.redis)
+    if app.state.macro_series is not None:
+        await app.state.macro_series.start(app.state.redis)
+    await app.state.engine.start()
+    # AI: async only, out of the hot path (CLAUDE §2.8); no keys -> explicit UNAVAILABLE.
+    app.state.ai = AITasks(app.state.engine)
+    await app.state.ai.start()
+    # log_scraper (D-031): OBSERVATION seule (§2.1) — sur un fill NT8 DÉJÀ passé par l'humain,
+    # capture un snapshot déterministe. Async non-bloquant (§7). Désactivé sans dossier NT8.
+    # Diagnostic de démarrage actionnable : dit s'il est actif, quel fichier il suit, sinon
+    # comment l'activer — l'opérateur sait tout de suite sans lire le code (§polish).
+    log.info(startup_report(config.LOG_SCRAPER_ENABLED, config.NT8_LOG_DIR))
+    app.state.log_scraper = _build_log_scraper(app.state.engine)
+    if app.state.log_scraper is not None:
+        await app.state.log_scraper.start()
+    # L2 `options.sync` (D-075) : CONSOMME `options:context:latest` publié par le service
+    # autonome `workers/options_worker.py`. Sans worker démarré, la boucle échoue à chaque tick
+    # et passe STALLED — ce qui est la VÉRITÉ, et se lit sur le canal `options`. Aucune valeur
+    # n'est inventée pour combler le vide (§3).
+    app.state.options_context = OptionsContextReader()
+    # L3 `o5.kurtosis` (D-077) : la source de barres est le TAPE du ContextSchema — les prints
+    # déjà assemblés par le moteur (observation seule, §2.1). On lit la projection publique
+    # plutôt que les tampons internes du moteur : le tampon de prints du footprint est borné à
+    # quelques minutes, là où O5 réclame une fenêtre de deux heures qui doit s'ACCUMULER.
+    app.state.loops = build_supervisor(app.state.options_context, broadcaster,
+                                       read_tape=lambda: _tape_field(app.state.engine),
+                                       read_book=lambda: _order_book_field(app.state.engine),
+                                       # Le vecteur de features (D-108) a besoin du schéma
+                                       # COMPLET : VIX, CVD, news, session. La boucle L4 ne lisait
+                                       # que le contexte options.
+                                       read_schema=lambda: _schema_of(app.state.engine),
+                                       journal_append=SetupJournal().record_armed)
+    # L4 : la boucle événementielle qui journalise O1-O5 à chaque armement. Elle hérite des
+    # garde-fous du contrat (drop-if-busy, plafond de durée, filet d'exception) — un gate
+    # consultatif ne doit jamais pouvoir ralentir ni casser le chemin d'émission.
+    app.state.gates_loop = app.state.loops.get("gates.eval")
+    await app.state.loops.start_all()
+    try:
+        yield
+    finally:
+        await app.state.loops.stop_all()
+        await app.state.options_context.close()
+        if app.state.log_scraper is not None:
+            await app.state.log_scraper.stop()
+        if isinstance(app.state.account_provider, NT8FileAccountProvider):
+            await app.state.account_provider.stop()          # sortie propre : boucle de poll annulée
+        if app.state.news_provider is not None:
+            await app.state.news_provider.stop()
+        if app.state.external is not None:
+            await app.state.external.stop()          # sortie propre : worker annulé
+        if app.state.macro_series is not None:
+            await app.state.macro_series.stop()
+        await app.state.ai.stop()
+        await app.state.engine.stop()
+        await app.state.redis.close()
+
+
+def _on_arm(app: FastAPI, manifest) -> None:
+    """Armement d'un setup → L4 évalue O1-O5 (D-080). Consultatif : appelé APRÈS l'émission du
+    manifeste, donc structurellement incapable de la retenir. Le drop-if-busy du contrat de
+    boucle s'applique — deux armements simultanés n'écriraient pas deux fois la même entrée."""
+    loop = getattr(app.state, "gates_loop", None)
+    if loop is None:
+        return
+    import asyncio
+    asyncio.get_running_loop().create_task(loop.run_once(manifest))
+
+
+def _schema_of(engine: Engine):
+    """Schéma courant pour le vecteur de features. `None` si illisible — un vecteur avec ses
+    absences déclarées vaut mieux qu'une exception dans la boucle d'armement."""
+    try:
+        return engine.snapshot().get("schema")
+    except Exception:
+        log.exception("schéma illisible pour le vecteur de features")
+        return None
+
+
+def _order_book_field(engine: Engine):
+    """Carnet agrégé courant, converti pour le simulateur FIFO. Fail-closed : carnet absent ou
+    non FRESH → `None`, et L4 rapporte `NO_BOOK` plutôt qu'une file supposée nulle (D-080)."""
+    from .execution_sim import book_from_levels
+    try:
+        field = engine.snapshot()["schema"]["s1_state"]["order_book"]
+    except Exception:
+        return None
+    if not isinstance(field, dict) or field.get("freshness") != "FRESH":
+        return None
+    value = field.get("value")
+    if not isinstance(value, dict):
+        return None
+    return book_from_levels(bids=value.get("bids"), asks=value.get("asks"))
+
+
+def _tape_field(engine: Engine) -> dict | None:
+    """Champ `tape` du ContextSchema (D-026 : prints observés, plus récent en tête), lu depuis la
+    projection publique du moteur — qui enveloppe le schéma sous la clé `schema`.
+
+    **Aucun `except` fourre-tout ici, et c'est délibéré** : la première version en portait un, et
+    quand le chemin d'accès s'est révélé faux, L3 a échoué 58 fois d'affilée en annonçant
+    `tape_not_fresh`. Le symptôme accusait le feed alors que la faute était dans ce chemin. Un
+    filet trop large ne protège pas, il déguise. Le tampon de prints du footprint, lui, est borné
+    à quelques minutes, là où O5 réclame une fenêtre de deux heures qui doit s'ACCUMULER."""
+    snapshot = engine.snapshot()
+    schema = snapshot.get("schema") if isinstance(snapshot, dict) else None
+    s1 = schema.get("s1_state") if isinstance(schema, dict) else None
+    tape = s1.get("tape") if isinstance(s1, dict) else None
+    return tape if isinstance(tape, dict) else None
+
+
+def _build_log_scraper(engine: Engine) -> LogTailer | None:
+    """Construit le tailer NT8 si activé ET si un dossier de log est fourni. Fail-closed :
+    pas de dossier → None (aucun scraper), jamais un chemin deviné."""
+    if not config.LOG_SCRAPER_ENABLED or not config.NT8_LOG_DIR:
+        return None
+
+    async def _on_fill(match) -> None:
+        # Un fill constaté (jamais provoqué) → capture instantanée. Le fill est EMBARQUÉ dans le
+        # snapshot (Trade Reconciliator D-033). Confirmation console actionnable : l'opérateur
+        # voit le côté, l'instrument, le prix, et le CHEMIN écrit. Toute erreur de capture est
+        # isolée (le tailer survit) et dit quoi vérifier.
+        price = "?" if match.price is None else match.price
+        now = time.time()
+        fill = {"instrument": match.instrument, "side": match.side, "price": match.price,
+                "quantity": match.quantity, "ts": now, "raw": match.raw}
+        # Réconciliation d'ENTRÉE (D-098) : le fill devient un event rattaché à sa décision GO,
+        # sans OutcomeEvent — le trade est ouvert, son résultat n'existe pas encore. Supprime la
+        # dépendance à l'import CSV manuel pour la moitié « entrée » de la preuve comportementale.
+        # Isolée du snapshot : une réconciliation en échec ne doit pas coûter la capture.
+        try:
+            ev = await asyncio.to_thread(reconcile_entry_fill, get_store(), fill, now)
+            log.info("log_scraper: fill rattaché à la décision %s (matched=%s)",
+                     ev.get("decision_id") or "—", ev.get("matched"))
+        except Exception:
+            log.exception("log_scraper: réconciliation d'entrée en échec — le fill reste "
+                          "observable dans le snapshot, à rapprocher à la main")
+        try:
+            res = await capture_snapshot(engine, now, fill=fill)
+            log.info("log_scraper: fill NT8 détecté (%s %s @ %s) → snapshot ÉCRIT : %s",
+                     match.side or "?", match.instrument or "?", price, res.get("json_path"))
+        except Exception:
+            log.exception("log_scraper: fill détecté (%s @ %s) mais capture de snapshot "
+                          "ÉCHOUÉE — vérifier SNAPSHOT_DIR (droits d'écriture / espace disque)",
+                          match.instrument or "?", price)
+
+    return LogTailer(
+        lambda: nt8_daily_log_path(config.NT8_LOG_DIR, time.time()) or "",
+        _on_fill,
+        poll_seconds=config.LOG_SCRAPER_POLL_SECONDS,
+    )
+
+
+app = FastAPI(title="Cholismo Terminal", version="1.0.0", lifespan=lifespan)
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"],
+                   allow_headers=["*"])
+app.include_router(router)

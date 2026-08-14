@@ -40,6 +40,12 @@ Priorité de build = §10. On construit depuis l'usage réel, pas la complétude
    est une **projection** (grammaire Murex/Calypso réelle). Voir `PRD §Zone D`.
 6. **Discipline dans l'infra, pas dans la volonté.**
 7. **Process score ≠ result score.** Jamais consolidés ; result score affiché après 20+ trades.
+   Le **Cortex Cognitif** (D-035) opérationnalise ce score de *processus* : sur les trades
+   réconciliés, 3 biais **déterministes** — **FOMO** (durée courte sur anomalie de delta),
+   **EXEC_TOO_LONG** (durée > seuil), **REVENGE** (< 3 min après une perte) — alimentent un
+   **Psych-Score /100** (% de trades sans biais). **Advisory pur** : il annote, ne bloque ni ne
+   modifie jamais l'exécution (§2.1) ; jamais consolidé avec le P&L (result). Règles + seuils :
+   `DECISIONS.md` D-033/D-035.
 8. **Claude n'est JAMAIS synchrone dans le hot path live.** Le chemin décision live est
    rapide et déterministe. Claude (scoring) et Gemini (audit) sont **périodiques/async**.
    Voir §7 budget latence.
@@ -50,14 +56,17 @@ Priorité de build = §10. On construit depuis l'usage réel, pas la complétude
 
 | Profil | Domaine | Bloc | Couleur |
 |---|---|---|---|
-| **Sony (S1)** | Intraday microstructure, order flow, SVS v3.0, S1 mean reversion | `s1_state` | **CYAN** |
-| **Youssef (S2)** | Macro FX, matrice Bridgewater, cascade, EUR/USD | `s2_state` | **VIOLET** |
+| **Sony (S1)** | Intraday microstructure, order flow, SVS v3.0, S1 mean reversion | `s1_state` | **ROUGE framboise** (D-024) |
+| **Youssef (S2)** | Macro FX, matrice Bridgewater, cascade, EUR/USD | `s2_state` | **JAUNE citron** (D-024) |
 | **Router** | Arbitrage / signal unifié | `unified_signal_output` | **OR (bordure/trait, pas remplissage)** |
 
 Statuts risque : **VERT / JAUNE / ROUGE**. ⚠️ **Le risque n'est jamais encodé par la seule
 couleur** : toujours **forme + icône + position** en plus (daltonisme rouge/vert ~8 % des
-hommes). Le Router passe en **or/bordure** pour ne pas entrer en collision avec le JAUNE (amber).
-Dark-mode, densité Bloomberg, monospace pour les chiffres.
+hommes). ⚠️ Les couleurs opérateur (rouge/jaune, arbitrage opérateur D-024) voisinent avec
+les statuts de risque : leurs **teintes sont distinctes** (framboise ≠ rouge saumon du
+risque ; citron ≠ ambre du risque ≠ or Router) et **chaque bloc porte un badge texte**
+`S1 · SONY` / `S2 · YOUSSEF` / `ROUTER` / `SYSTÈME` (mixte : `S1 + S2`) — la couleur
+opérateur n'est jamais seule. Dark-mode, densité maximale, monospace pour les chiffres.
 
 ---
 
@@ -149,3 +158,81 @@ comme logique métier canonique. En cas de doute → `PLACEHOLDER`, et consigne 
 Suis `TASKS.md` dans l'ordre, commit atomique par tâche. Un panneau = un composant lisant **un**
 champ du schéma. Isole toute formule non figée (`v1 provisional`). Ne pose de question que sur
 contradiction réelle de spec ; sinon applique et note l'hypothèse dans `DECISIONS.md`.
+
+---
+
+## 13. Systèmes de loop — DÉVELOPPEMENT
+
+> Ces boucles **opérationnalisent la §12** (méthode de travail) ; leurs garde-fous héritent de la
+> **§2** (contraintes dures). Le principe design « inspiré, jamais copié » guide la Loop 6.
+> Les boucles d'exécution *dans* le terminal sont décrites dans **`RUNTIME_LOOPS.md`**.
+> Chaque boucle est aussi câblée à une skill Claude Code (`.claude/skills/`).
+
+**Contrat commun : Déclencheur → Étapes → Condition de sortie → Garde-fous.**
+On répète jusqu'à la condition de sortie. 3 itérations sans progrès mesurable → on **stoppe et on
+remonte le blocage** (pas de brute-force).
+
+### Loop 0 — Décision de stack — ✅ RÉSOLU (voir §4)
+Le stack est figé (§4 : FastAPI + Pydantic v2 + Redis + SSE + SQLite / React + TS + Vite + Tailwind
++ zustand / LangGraph + n8n). Boucle conservée pour mémoire ; à ne rejouer qu'en cas de remise en
+cause majeure, avec un ADR dans `docs/adr/`.
+
+### Loop 1 — Développement de feature  ·  skill `/feature`
+1. **Clarifier** — 1 phrase + cas limites, avant de coder. Ambigu → question (cf. §12).
+2. **Plan** — plus petite tranche livrable ; décris l'interface publique (un panneau = un champ du schéma).
+3. **Test d'abord** — au moins un test qui échoue et décrit le comportement voulu.
+4. **Implémenter** — le minimum pour passer au vert.
+5. **Auto-revue** — relis le diff comme celui d'un inconnu.
+6. **Vérifier** — tests + lint + essai manuel réel.
+7. **Commit** — atomique (§12), dépôt vert.
+- **Sortie** : tranche fonctionnelle, DoD ok, essai manuel concluant. **Garde-fou** : une feature par commit.
+
+### Loop 2 — Correction de bug  ·  skill `/bugfix`
+1. **Reproduire** (suite d'actions minimale — pas de fix sans repro). 2. **Capturer** par un test de
+régression. 3. **Isoler** la cause racine, pas le symptôme. 4. **Corriger** ciblé. 5. **Confirmer**
+(régression + tests verts). 6. **Prévenir** (où ailleurs ce bug ?).
+- **Sortie** : repro impossible, régression verte, rien d'autre cassé. **Garde-fou** : jamais masquer le symptôme.
+
+### Loop 3 — Refactor sûr  ·  skill `/refactor`
+1. **Filet de tests** couvrant l'existant d'abord. 2. **Micro-étapes**, verts entre chaque.
+3. **Zéro changement de comportement**. 4. **Commit fréquent**.
+- **Sortie** : code plus clair, comportement identique prouvé. **Garde-fou** : jamais refactor + feature ensemble.
+
+### Loop 4 — Devil's advocate  ·  skill `/devil`
+1. **Attaquer** : 3 façons de casser (entrée vide/énorme, saisie invalide, coupure du flux marché,
+terminal redimensionné, Ctrl-C au mauvais moment). 2. **Cas limite oublié** (état partagé, ordre,
+ressource non libérée). 3. **Questionner le design** (plus simple ?). 4. **Intégrer** / documenter les risques.
+- **Sortie** : 3 scénarios gérés ou documentés hors-scope. **Garde-fou** : revue honnête, jamais complaisante.
+
+### Loop 5 — Polish UX  ·  skill `/polish`
+1. **Latence perçue** : feedback < 100 ms (cohérent §7). 2. **Messages** lisibles/actionnables.
+3. **Cohérence** (raccourcis, vocabulaire, code couleur §3). 4. **Sortie propre** (Ctrl-C, quit).
+5. **Découvrabilité** (help / ?).
+- **Sortie** : utilisateur sans doc comprend, jamais bloqué sans message. **Garde-fou** : lisibilité > décoration.
+
+### Loop 6 — Langage visuel & inspiration  ·  skill `/design`  ·  « inspiré, jamais copié »
+1. **Extraire les principes, pas les pixels** des terminaux financiers (densité, clavier-first,
+latence faible, layout tabulaire monospace, couleur sémantique, panneaux composables).
+2. **Traduire en identité propre** (design tokens, nomenclature de commandes maison).
+3. **Checklist anti-copie** : pas de charte signature reprise, pas de codes propriétaires (`<GO>`),
+pas de layout/logo/nom identifiable → doute = on s'éloigne.
+4. **Documenter** `docs/design-language.md`.
+- **Sortie** : design distinctement cholismo, chaque emprunt justifié. **Garde-fou** : l'IDÉE, jamais l'EXPRESSION protégée.
+
+### Enchaînement
+```
+Loop 0 (résolu) → Loop 6 (design, à l'évolution UI)
+                         │
+   ┌────► Loop 1 (feature) ─► Loop 4 (revue) ─► Loop 5 (polish) ─► /done ─► /commit
+   │            Loop 2 (bug) ─┤
+   │            Loop 3 (refactor) ─┘
+   └── par jalon (§10) — dépôt toujours vert entre deux loops ───────
+```
+
+### Skills transverses (`.claude/skills/`)
+`/loop-check` audite les boucles runtime (`engine.py`, `ai/tasks.py`…) contre les pièges de
+`RUNTIME_LOOPS.md` · `/done` vérifie la Definition of Done · `/commit` produit un commit atomique.
+
+### Voir aussi
+- **`RUNTIME_LOOPS.md`** — boucles d'exécution du terminal (principale, rendu, input, données, retry, watchdog, arrêt gracieux).
+- **`.claude/skills/`** — une skill par loop, invocables via `/nom`.

@@ -5,3 +5,5 @@ redis>=5.0,<6
 sse-starlette>=2.1,<3
 python-multipart>=0.0.9,<1
 httpx>=0.27,<1
+# Orchestration graph-state (CLAUDE §4) — détection Liquidity Sweep DÉTERMINISTE, sans LLM.
+langgraph>=1.2,<2

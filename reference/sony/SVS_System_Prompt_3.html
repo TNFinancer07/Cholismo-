@@ -1,0 +1,1549 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SVS — Structural Vacuum Squeeze</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    /* ═══ PALETTE MATINALE — aube douce ═══ */
+    --bg: #FBF6EE;            /* crème aube */
+    --surface: #FFFDF8;        /* blanc chaud */
+    --surface-2: #F4ECDD;      /* sable clair */
+    --border: #E8DCC5;
+    --border-strong: #D6C5A4;
+    --ink: #2A2417;            /* encre chaude profonde */
+    --ink-soft: #6B5E48;
+    --ink-faint: #A6957A;
+
+    --navy: #3D4F6B;           /* bleu brume matinale */
+    --navy-soft: #5A6E8C;
+
+    --go: #5C8A4A;             /* vert pousse */
+    --go-bg: #EEF4E5;
+    --go-border: #C9DDB6;
+
+    --warn: #C97A2B;           /* orange lever de soleil */
+    --warn-bg: #FCEFDC;
+    --warn-border: #F2D3A3;
+
+    --stop: #B84A4A;           /* terracotta doux */
+    --stop-bg: #F8E4E0;
+    --stop-border: #ECC2BA;
+
+    --info: #4A78A8;           /* bleu ciel d'aube */
+    --info-bg: #E8F0F8;
+    --info-border: #C2D5EA;
+
+    --font-display: 'Space Grotesk', sans-serif;
+    --font-body: 'Manrope', sans-serif;
+    --font-mono: 'JetBrains Mono', monospace;
+  }
+
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html { scroll-behavior:smooth; }
+
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--font-body);
+    font-size: 14px;
+    line-height: 1.65;
+  }
+
+  /* ═══ LAYOUT SHELL ═══ */
+  .shell {
+    display: grid;
+    grid-template-columns: 248px 1fr;
+    min-height: 100vh;
+  }
+
+  /* ═══ SIDEBAR ═══ */
+  .sidebar {
+    background: var(--navy);
+    color: #C9D3E5;
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    overflow-y: auto;
+    padding: 28px 0 28px;
+  }
+
+  .sidebar-brand {
+    padding: 0 24px 22px;
+    border-bottom: 1px solid rgba(255,255,255,0.1);
+    margin-bottom: 16px;
+  }
+
+  .sidebar-brand .mark {
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 21px;
+    color: #fff;
+    letter-spacing: 0.5px;
+  }
+
+  .sidebar-brand .full {
+    font-size: 11px;
+    color: #8FA1C7;
+    margin-top: 4px;
+    letter-spacing: 0.3px;
+  }
+
+  .sidebar-brand .pill {
+    display: inline-block;
+    margin-top: 12px;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    background: rgba(14,159,110,0.18);
+    color: #5FE3AC;
+    border: 1px solid rgba(95,227,172,0.3);
+    padding: 3px 9px;
+    border-radius: 20px;
+  }
+
+  .sidebar nav { padding: 0 12px; }
+
+  .sidebar nav a {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    color: #A8B5CC;
+    text-decoration: none;
+    font-size: 12.5px;
+    font-weight: 500;
+    padding: 9px 12px;
+    border-radius: 8px;
+    transition: background 0.15s, color 0.15s;
+  }
+
+  .sidebar nav a .num {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: #5E6E8F;
+    min-width: 18px;
+  }
+
+  .sidebar nav a:hover { background: rgba(255,255,255,0.06); color: #fff; }
+  .sidebar nav a.active { background: rgba(95,227,172,0.12); color: #5FE3AC; }
+  .sidebar nav a.active .num { color: #5FE3AC; }
+
+  .sidebar-foot {
+    padding: 18px 24px 0;
+    margin-top: 18px;
+    border-top: 1px solid rgba(255,255,255,0.1);
+    font-size: 10.5px;
+    color: #5E6E8F;
+    line-height: 1.7;
+  }
+
+  /* ═══ CONTENT ═══ */
+  .content { padding: 48px 56px 100px; max-width: 1080px; }
+
+  /* HERO */
+  .hero {
+    background: linear-gradient(135deg, var(--navy) 0%, var(--navy-soft) 100%);
+    border-radius: 18px;
+    padding: 42px 44px;
+    color: #fff;
+    margin-bottom: 44px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .hero::after {
+    content: '';
+    position: absolute;
+    right: -60px; top: -60px;
+    width: 280px; height: 280px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(95,227,172,0.18), transparent 70%);
+  }
+
+  .hero-eyebrow {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 2px;
+    color: #8FE6BE;
+    margin-bottom: 14px;
+    text-transform: uppercase;
+  }
+
+  .hero h1 {
+    font-family: var(--font-display);
+    font-size: 34px;
+    font-weight: 700;
+    letter-spacing: -0.5px;
+    margin-bottom: 10px;
+  }
+
+  .hero p {
+    color: #B7C2DA;
+    font-size: 14.5px;
+    max-width: 540px;
+    margin-bottom: 22px;
+  }
+
+  .hero-tags { display:flex; flex-wrap:wrap; gap:8px; position:relative; z-index:1; }
+
+  .htag {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 500;
+    padding: 6px 13px;
+    border-radius: 20px;
+    background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.16);
+    color: #E4E9F4;
+  }
+
+  /* SECTIONS */
+  .section { margin-bottom: 56px; scroll-margin-top: 24px; }
+
+  .section-head {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 22px;
+  }
+
+  .section-tag {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--ink-faint);
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    padding: 4px 10px;
+    border-radius: 6px;
+  }
+
+  .section-head h2 {
+    font-family: var(--font-display);
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--navy);
+    letter-spacing: -0.2px;
+  }
+
+  .section-intro {
+    color: var(--ink-soft);
+    font-size: 13px;
+    margin: -10px 0 18px;
+    max-width: 760px;
+  }
+
+  /* CARD */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 22px 26px;
+    box-shadow: 0 1px 2px rgba(20,24,32,0.03);
+  }
+
+  /* RULE LIST */
+  .rule-list { display:flex; flex-direction:column; gap:10px; }
+  .rule-list .card { display:flex; gap:14px; align-items:flex-start; padding: 14px 18px; }
+  .rule-badge {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--navy);
+    background: var(--surface-2);
+    border-radius: 6px;
+    padding: 3px 8px;
+    min-width: 26px;
+    text-align: center;
+  }
+
+  /* PROFILE GRID */
+  .grid-2 { display:grid; grid-template-columns: 1fr 1fr; gap:14px; }
+  .grid-3 { display:grid; grid-template-columns: repeat(3, 1fr); gap:14px; }
+
+  .stat-label {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 1px;
+    color: var(--ink-faint);
+    text-transform: uppercase;
+    margin-bottom: 8px;
+  }
+
+  .stat-value { font-size: 16px; font-weight: 600; color: var(--ink); }
+  .stat-value .accent { color: var(--go); }
+  .stat-value .warn { color: var(--warn); }
+
+  .stat-sub { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--border-strong); font-size: 12px; color: var(--ink-soft); display:flex; flex-direction:column; gap:4px; }
+
+  /* BIAS WARNING ROWS */
+  .bias-row {
+    display:flex; align-items:center; gap:12px;
+    padding: 10px 0; border-bottom: 1px solid var(--border);
+    font-size: 12.5px;
+  }
+  .bias-row:last-child { border-bottom:none; }
+  .bias-tag {
+    font-family: var(--font-mono); font-size: 10px; font-weight: 700;
+    color: var(--stop); background: var(--stop-bg); border: 1px solid var(--stop-border);
+    padding: 3px 9px; border-radius: 6px; min-width: 160px; text-align:center;
+  }
+
+  /* DATA TABLE */
+  table.clean { width:100%; border-collapse: collapse; font-size: 12.5px; }
+  table.clean th {
+    text-align:left; font-family: var(--font-mono); font-size: 10.5px; font-weight:600;
+    letter-spacing: 0.6px; text-transform:uppercase; color: var(--ink-faint);
+    padding: 10px 14px; border-bottom: 2px solid var(--border-strong);
+  }
+  table.clean td { padding: 11px 14px; border-bottom: 1px solid var(--border); color: var(--ink); vertical-align: top; }
+  table.clean tr:hover td { background: var(--surface-2); }
+  table.clean td.mono { font-family: var(--font-mono); color: var(--navy-soft); font-size:12px; }
+
+  .note-box {
+    border-radius: 12px; padding: 14px 18px; font-size: 12.5px; margin-top: 14px;
+    border: 1px solid var(--info-border); background: var(--info-bg); color: #1d3f73;
+  }
+  .note-box.warn { border-color: var(--warn-border); background: var(--warn-bg); color: #6b4905; }
+  .note-box .note-title {
+    font-family: var(--font-mono); font-size:10.5px; font-weight:700; letter-spacing:1px;
+    text-transform: uppercase; margin-bottom:8px; display:block;
+  }
+
+  /* CHOP GAUGE */
+  .gauge-row { display:flex; align-items:center; gap:14px; padding:9px 0; font-size:12.5px; }
+  .gauge-bar { flex:1; height:8px; border-radius:6px; background: var(--surface-2); position:relative; overflow:hidden; }
+  .gauge-fill { height:100%; border-radius:6px; }
+  .gauge-range { font-family: var(--font-mono); font-size:11.5px; min-width:140px; color: var(--ink-soft); }
+  .gauge-result { min-width:170px; font-size:12px; }
+  .gauge-pts { font-family: var(--font-mono); font-weight:700; font-size:12px; min-width:46px; text-align:right; }
+
+  /* FILTER CARDS (Phase 0) */
+  .filter-card {
+    display:grid; grid-template-columns: 230px 1fr; border:1px solid var(--border);
+    border-radius:14px; overflow:hidden; background:var(--surface); margin-bottom:10px;
+  }
+  .filter-head {
+    background: var(--stop-bg); border-right:1px solid var(--border);
+    padding:16px 18px; display:flex; flex-direction:column; gap:6px; justify-content:center;
+  }
+  .filter-head .fid { font-family: var(--font-mono); font-size:10px; font-weight:700; color: var(--stop); letter-spacing:1px; }
+  .filter-head .fname { font-family: var(--font-display); font-size:13px; font-weight:600; color:#7a1f25; }
+  .filter-body { padding:16px 20px; font-size:12.5px; }
+  .filter-cond { color: var(--ink); font-weight:600; margin-bottom:6px; }
+  .filter-logic { color: var(--ink-soft); font-size:12px; margin-bottom:6px; }
+  .filter-src { color: var(--ink-faint); font-size:11px; }
+  .badge-block {
+    display:inline-flex; align-items:center; gap:5px; font-family: var(--font-mono);
+    font-size:10px; font-weight:700; color:#fff; background: var(--stop); padding:3px 10px; border-radius:20px;
+  }
+
+  .badge-audit {
+    display:inline-flex; align-items:center; gap:5px; font-family: var(--font-mono);
+    font-size:10px; font-weight:700; color: var(--info); background: var(--info-bg);
+    border: 1px solid var(--info-border); padding:3px 10px; border-radius:20px;
+  }
+
+  .audit-panel {
+    margin-top: 14px;
+    padding-top: 13px;
+    border-top: 1px dashed var(--border-strong);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .audit-line { display:flex; gap:10px; font-size:12px; line-height:1.6; }
+  .audit-tag {
+    font-family: var(--font-mono); font-size:10px; font-weight:700; letter-spacing:0.4px;
+    min-width: 130px; padding-top:1px; flex-shrink:0;
+  }
+  .audit-tag.problem { color: var(--warn); }
+  .audit-tag.solution { color: var(--go); }
+  .audit-tag.scope { color: var(--info); }
+  .audit-text { color: var(--ink-soft); }
+
+  .audit-summary {
+    border: 1px solid var(--info-border); background: var(--info-bg); border-radius: 14px;
+    padding: 20px 24px; margin-top: 18px;
+  }
+  .audit-summary .as-title {
+    font-family: var(--font-display); font-weight:700; font-size:13px; color: var(--navy);
+    margin-bottom: 14px; display:flex; align-items:center; gap:10px;
+  }
+  .audit-summary .as-item { margin-bottom: 14px; }
+  .audit-summary .as-item:last-child { margin-bottom: 0; }
+  .audit-summary .as-h { font-family: var(--font-mono); font-size:11.5px; font-weight:700; color: var(--navy-soft); margin-bottom:4px; }
+  .audit-summary .as-p { font-size:12.5px; color: var(--ink-soft); line-height:1.65; }
+
+  /* SCORE LAYER */
+  .layer { border:1px solid var(--border); border-radius:14px; overflow:hidden; margin-bottom:18px; background:var(--surface); }
+  .layer-head { display:flex; align-items:center; gap:12px; padding:14px 22px; background: var(--surface-2); border-bottom:1px solid var(--border); }
+  .layer-head .lcode { font-family: var(--font-mono); font-size:11px; font-weight:700; color: var(--navy); background:#fff; border:1px solid var(--border-strong); padding:3px 9px; border-radius:6px; }
+  .layer-head .ltitle { font-family: var(--font-display); font-weight:600; font-size:14px; color: var(--ink); }
+  .layer-head .lweight { font-family: var(--font-mono); font-size:10.5px; color: var(--ink-faint); margin-left:auto; }
+  .layer-head .lmax { font-family: var(--font-display); font-weight:700; font-size:14px; color: var(--go); }
+  .layer-head .lmin {
+    font-family: var(--font-mono); font-size:10.5px; font-weight:700; color: var(--warn);
+    background: var(--warn-bg); border: 1px solid var(--warn-border); padding:2px 9px;
+    border-radius:6px; margin-left:8px; white-space:nowrap;
+  }
+  .layer-foot {
+    background: var(--warn-bg); border-top: 1px solid var(--warn-border);
+    padding: 11px 20px; font-size: 11.5px; color: #6b4905; line-height:1.6;
+  }
+  .layer-foot strong { font-family: var(--font-mono); color: #5a3d04; }
+  .layer-note {
+    background: var(--info-bg); border-bottom: 1px solid var(--info-border);
+    padding: 10px 20px; font-size: 11.5px; color: #1d3f73; line-height:1.6;
+  }
+  .layer-note strong { color: #15305a; }
+
+  /* WIDGET IMPORT PHOTO */
+  .import-widget { border:1px solid var(--border-strong); border-radius:16px; overflow:hidden; background:var(--surface); margin-bottom:20px; }
+  .import-head { background: var(--navy); color:#cfe; padding:12px 22px; font-family:var(--font-mono); font-size:10.5px; font-weight:600; letter-spacing:1.2px; }
+  .import-body { padding: 20px 22px; }
+  .dropzone {
+    border: 2px dashed var(--border-strong); border-radius: 12px; padding: 34px 20px;
+    text-align:center; cursor:pointer; transition: border-color 0.15s, background 0.15s; background: var(--surface-2);
+  }
+  .dropzone:hover, .dropzone.drag { border-color: var(--info); background: var(--info-bg); }
+  .dropzone .dz-icon { font-size: 30px; margin-bottom:8px; opacity:0.6; }
+  .dropzone .dz-main { font-size:13px; font-weight:600; color: var(--ink); }
+  .dropzone .dz-sub { font-size:11.5px; color: var(--ink-faint); margin-top:4px; }
+  .type-picker { display:flex; gap:8px; margin:16px 0; flex-wrap:wrap; }
+  .type-btn {
+    flex:1; min-width:120px; padding:10px 14px; border:1px solid var(--border-strong); border-radius:10px;
+    background:var(--surface); cursor:pointer; font-family:var(--font-body); font-size:12.5px; font-weight:600;
+    color:var(--ink-soft); transition: all 0.15s; text-align:center;
+  }
+  .type-btn:hover { border-color: var(--info); }
+  .type-btn.sel { background: var(--navy); color:#fff; border-color: var(--navy); }
+  .type-btn .tb-sub { display:block; font-size:10px; font-weight:400; opacity:0.7; margin-top:2px; }
+  .preview-wrap { display:none; margin-top:16px; }
+  .preview-wrap.show { display:block; }
+  .preview-img { width:100%; max-height:420px; object-fit:contain; border-radius:10px; border:1px solid var(--border); background:var(--surface-2); }
+  .preview-bar { display:flex; justify-content:space-between; align-items:center; margin-top:10px; }
+  .preview-meta { font-size:11.5px; color:var(--ink-faint); font-family:var(--font-mono); }
+  .btn-reset { padding:7px 14px; border:1px solid var(--stop-border); background:var(--stop-bg); color:var(--stop); border-radius:8px; cursor:pointer; font-size:11.5px; font-weight:600; font-family:var(--font-body); }
+  .btn-reset:hover { background:var(--stop); color:#fff; }
+  .applicable { margin-top:16px; border-top:1px dashed var(--border-strong); padding-top:14px; display:none; }
+  .applicable.show { display:block; }
+  .applicable-title { font-family:var(--font-mono); font-size:10px; font-weight:700; letter-spacing:0.6px; text-transform:uppercase; color:var(--ink-faint); margin-bottom:10px; }
+  .crit-chip {
+    display:inline-flex; align-items:center; gap:6px; padding:6px 11px; border-radius:8px; margin:0 6px 6px 0;
+    font-family:var(--font-mono); font-size:11px; border:1px solid var(--border);
+  }
+  .crit-chip.vision { background: var(--info-bg); color:#1d3f73; border-color: var(--info-border); }
+  .crit-chip.num { background: var(--warn-bg); color:#6b4905; border-color: var(--warn-border); }
+  .crit-chip .ck { font-weight:700; }
+
+  /* BOOKMAP MAPPING */
+  .bmap-row { display:grid; grid-template-columns: 170px 1fr 130px; border:1px solid var(--border); border-top:none; }
+  .bmap-row > div { padding:12px 16px; font-size:12px; border-right:1px solid var(--border); }
+  .bmap-row > div:last-child { border-right:none; }
+  .bmap-row.high { background: var(--go-bg); }
+  .bmap-row.mid { background: var(--info-bg); }
+  .bmap-row.num { background: var(--warn-bg); }
+  .bmap-conf { font-family:var(--font-mono); font-size:10.5px; font-weight:700; }
+
+  .crit-row { display:grid; grid-template-columns: 190px 1fr 70px; border-bottom:1px solid var(--border); }
+  .crit-row:last-child { border-bottom:none; }
+  .crit-row > div { padding: 13px 18px; font-size:12.5px; }
+  .crit-name { font-family: var(--font-mono); color: var(--navy-soft); font-size:11.5px; border-right:1px solid var(--border); }
+  .crit-desc { color: var(--ink); }
+  .crit-pts { text-align:right; font-family: var(--font-display); font-weight:700; color: var(--go); border-left:1px solid var(--border); display:flex; align-items:center; justify-content:flex-end; }
+  .crit-pts.malus { color: var(--stop); }
+
+  .mini-gauge { display:flex; flex-direction:column; gap:5px; margin-top:8px; }
+  .mini-gauge .gr { display:flex; align-items:center; gap:10px; font-size:11.5px; }
+  .mini-gauge .gr .rng { min-width:140px; font-family: var(--font-mono); color: var(--ink-soft); }
+  .mini-gauge .gr .lbl { flex:1; color: var(--ink-faint); }
+  .mini-gauge .gr .pt { font-family: var(--font-mono); font-weight:700; min-width:38px; text-align:right; }
+
+  /* CRITÈRE — galerie d'exemples visuels */
+  .crit-examples { grid-column: 1 / -1; padding: 0 18px 16px !important; border-top: 1px dashed var(--border-strong); }
+  .crit-examples-title {
+    font-family: var(--font-mono); font-size: 10px; font-weight:700; letter-spacing:0.6px;
+    text-transform:uppercase; color: var(--ink-faint); margin: 14px 0 10px;
+  }
+  .ex-schema {
+    background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px;
+    padding: 12px; margin-bottom: 12px;
+  }
+  .ex-schema svg { width: 100%; height: auto; display:block; }
+  .ex-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .ex-card {
+    border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--surface);
+    cursor: pointer; transition: transform 0.12s, box-shadow 0.12s;
+  }
+  .ex-card:hover { transform: translateY(-2px); box-shadow: 0 4px 14px rgba(20,24,32,0.1); }
+  .ex-card .ex-thumb { width: 100%; height: 118px; object-fit: cover; display:block; background: var(--surface-2); }
+  .ex-card .ex-cap { padding: 8px 11px; font-size: 11px; line-height:1.45; }
+  .ex-card .ex-tag {
+    display:inline-block; font-family: var(--font-mono); font-size:9.5px; font-weight:700;
+    padding: 2px 7px; border-radius: 5px; margin-bottom: 4px;
+  }
+  .ex-tag.full { background: var(--go-bg); color: var(--go); border:1px solid var(--go-border); }
+  .ex-tag.zero { background: var(--stop-bg); color: var(--stop); border:1px solid var(--stop-border); }
+  .ex-tag.partial { background: var(--warn-bg); color: var(--warn); border:1px solid var(--warn-border); }
+  .ex-card .ex-desc { color: var(--ink-soft); margin-top:2px; }
+  .ex-row.triple { grid-template-columns: 1fr 1fr 1fr; }
+
+  /* LIGHTBOX */
+  .lightbox {
+    position: fixed; inset: 0; background: rgba(12,18,30,0.88); z-index: 9999;
+    display: none; align-items: center; justify-content: center; padding: 32px;
+    backdrop-filter: blur(3px);
+  }
+  .lightbox.open { display: flex; }
+  .lightbox img { max-width: 92vw; max-height: 82vh; border-radius: 10px; box-shadow: 0 12px 50px rgba(0,0,0,0.5); }
+  .lightbox-cap {
+    position: absolute; bottom: 24px; left: 50%; transform: translateX(-50%);
+    color: #E4E9F4; font-size: 13px; background: rgba(20,30,48,0.85); padding: 8px 18px;
+    border-radius: 20px; max-width: 80vw; text-align:center;
+  }
+  .lightbox-close {
+    position: absolute; top: 22px; right: 28px; color: #fff; font-size: 30px;
+    cursor: pointer; font-family: var(--font-body); line-height:1; opacity:0.8;
+  }
+  .lightbox-close:hover { opacity:1; }
+  @media (max-width: 980px) { .ex-row, .ex-row.triple { grid-template-columns: 1fr; } }
+
+  /* SCORE SUMMARY */
+  .summary-card { border:1px solid var(--go-border); border-radius:16px; overflow:hidden; background: var(--surface); }
+  .summary-head { background: var(--navy); color:#fff; padding:16px 24px; font-family: var(--font-display); font-weight:600; font-size:13px; letter-spacing:0.4px; }
+  .summary-card table.clean td:first-child { font-weight:600; color: var(--ink); }
+  .summary-card table.clean td:nth-child(2) { font-family: var(--font-mono); font-weight:700; color: var(--go); }
+  .summary-card table.clean td:nth-child(3) { color: var(--ink-faint); font-family: var(--font-mono); font-size:11.5px; }
+  .summary-total td { background: var(--go-bg) !important; font-size:14px !important; }
+
+  .threshold-bar {
+    display:flex; gap:0; border-top:1px solid var(--border);
+  }
+  .threshold-cell {
+    flex:1; padding:20px 24px; display:flex; flex-direction:column; gap:4px;
+  }
+  .threshold-cell:first-child { border-right:1px solid var(--border); }
+  .threshold-cell .tlabel { font-family: var(--font-mono); font-size:10.5px; color: var(--ink-faint); letter-spacing:0.5px; text-transform:uppercase; }
+  .threshold-cell .tval { font-family: var(--font-display); font-weight:800; font-size:30px; color: var(--navy); }
+  .threshold-cell .tval.warn { color: var(--warn); }
+  .threshold-cell .tctx { font-size:11px; color: var(--ink-faint); }
+  .threshold-banner {
+    background: var(--stop-bg); color:#7a1f25; font-family: var(--font-mono); font-weight:700;
+    font-size:11px; letter-spacing:0.5px; text-align:center; padding:12px; border-top:1px solid var(--stop-border);
+  }
+
+  /* PROTOCOL CARDS */
+  .protocol-card { border:1px solid var(--border); border-radius:14px; padding:20px 22px; background:var(--surface); }
+  .protocol-card.long { border-top: 3px solid var(--go); }
+  .protocol-card.short { border-top: 3px solid var(--stop); }
+  .protocol-dir { font-family: var(--font-display); font-weight:700; font-size:13px; letter-spacing:0.4px; margin-bottom:14px; }
+  .protocol-dir.long { color: var(--go); }
+  .protocol-dir.short { color: var(--stop); }
+  .protocol-row { display:flex; justify-content:space-between; padding:7px 0; border-bottom:1px dashed var(--border); font-size:12.5px; }
+  .protocol-row:last-child { border-bottom:none; }
+  .protocol-key { color: var(--ink-faint); font-size:11px; letter-spacing:0.3px; }
+  .protocol-val { font-family: var(--font-mono); font-weight:600; color: var(--ink); }
+
+  /* CORRELATION TABLE */
+  .corr-row { display:grid; grid-template-columns: 1.2fr 1.6fr 0.7fr 1fr; border:1px solid var(--border); border-top:none; }
+  .corr-row > div { padding:14px 18px; font-size:12.5px; border-right:1px solid var(--border); }
+  .corr-row > div:last-child { border-right:none; }
+  .corr-row.go { background: var(--go-bg); }
+  .corr-row.warn { background: var(--warn-bg); }
+  .corr-row.stop { background: var(--stop-bg); }
+  .corr-range { font-family: var(--font-display); font-weight:700; font-size:14px; }
+  .corr-range.go { color: var(--go); }
+  .corr-range.warn { color: var(--warn); }
+  .corr-range.stop { color: var(--stop); }
+
+  /* SIZING TABLE */
+  .sizing-row { display:grid; grid-template-columns: 150px 1fr 1fr; border:1px solid var(--border); border-top:none; }
+  .sizing-row > div { padding:14px 18px; font-size:12.5px; border-right:1px solid var(--border); }
+  .sizing-row > div:last-child { border-right:none; }
+  .sizing-row.stop { background: var(--stop-bg); }
+  .sizing-vix { font-family: var(--font-display); font-weight:700; font-size:14px; }
+
+  /* MGMT */
+  .mgmt-card { border:1px solid var(--border); border-radius:14px; padding:20px 22px; margin-bottom:14px; background: var(--surface); border-left: 4px solid var(--info); }
+  .mgmt-card.amber { border-left-color: var(--warn); }
+  .mgmt-title { font-family: var(--font-display); font-weight:700; font-size:13px; color: var(--info); margin-bottom:10px; }
+  .mgmt-card.amber .mgmt-title { color: var(--warn); }
+  .mgmt-rule { font-size:12.5px; color: var(--ink); line-height:1.8; }
+  .mgmt-rule .trigger { font-family: var(--font-mono); color: var(--warn); font-weight:600; }
+  .mgmt-rule .action { color: var(--go); font-weight:600; }
+
+  /* CHECKLIST */
+  .check-item { display:grid; grid-template-columns:42px 1fr; gap:14px; border:1px solid var(--border); border-radius:14px; padding:16px 20px; margin-bottom:10px; background:var(--surface); }
+  .check-q { font-family: var(--font-display); font-weight:800; font-size:16px; color: var(--navy); }
+  .check-text { font-size:13px; color: var(--ink); margin-bottom:6px; }
+  .check-action { font-size:12px; font-weight:600; }
+  .check-action.stop { color: var(--stop); }
+  .check-action.go { color: var(--go); }
+  .check-action.warn { color: var(--warn); }
+  .check-note { font-size:11.5px; color: var(--ink-faint); font-style:italic; margin-top:4px; }
+
+  /* OUTPUT TEMPLATE */
+  .output-card { border:1px solid var(--border-strong); border-radius:16px; overflow:hidden; background: #FCFCFD; }
+  .output-head { background: var(--navy); color:#cfe; padding:12px 24px; font-family: var(--font-mono); font-size:10.5px; font-weight:600; letter-spacing:1.5px; }
+  .output-body { padding: 24px 28px; font-family: var(--font-mono); font-size: 12px; line-height: 1.9; color: var(--ink); }
+  .output-body .sep { display:block; color: var(--border-strong); margin: 10px 0; font-size:10px; }
+  .output-body .d { color: var(--ink-faint); }
+  .output-body .g { color: var(--go); font-weight:600; }
+  .output-body .a { color: var(--warn); font-weight:600; }
+  .output-body .r { color: var(--stop); font-weight:600; }
+  .output-sub {
+    font-family: var(--font-display); font-weight:700; font-size:10.5px; letter-spacing:1px; text-transform:uppercase;
+    color: var(--navy); background: var(--surface-2); margin: 14px -28px 10px; padding:8px 28px;
+    border-top:1px solid var(--border); border-bottom:1px solid var(--border);
+  }
+
+  /* REJECTION LIST */
+  .rej-item { border:1px solid var(--border); border-left:3px solid var(--stop); border-radius:10px; padding:11px 16px; margin-bottom:8px; font-size:12.5px; background:var(--surface); font-family: var(--font-mono); line-height:1.6; }
+  .rej-item .rcode { font-family: var(--font-display); font-weight:700; color: var(--stop); font-size:11px; letter-spacing:0.5px; margin-right:8px; }
+  .rej-item.warning { border-left-color: var(--warn); }
+  .rej-item.warning .rcode { color: var(--warn); }
+
+  /* FOOTER */
+  .doc-footer {
+    margin-top: 60px; padding-top:24px; border-top:1px solid var(--border);
+    display:flex; justify-content:space-between; font-size:11.5px; color: var(--ink-faint);
+  }
+
+  @media (max-width: 980px) {
+    .shell { grid-template-columns: 1fr; }
+    .sidebar { position:relative; height:auto; }
+    .content { padding: 28px 20px 70px; }
+    .grid-2, .grid-3 { grid-template-columns: 1fr; }
+    .filter-card, .corr-row, .sizing-row, .crit-row { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<div class="shell">
+
+  <!-- ═══ SIDEBAR ═══ -->
+  <aside class="sidebar">
+    <div class="sidebar-brand">
+      <div class="mark">SVS</div>
+      <div class="full">Structural Vacuum Squeeze</div>
+      <div class="pill">v2.0 · CHOP intégré</div>
+    </div>
+    <nav id="navlinks">
+      <a href="#role"><span class="num">00</span>Rôle &amp; identité</a>
+      <a href="#profil"><span class="num">01</span>Profil opérateur</a>
+      <a href="#sources"><span class="num">02</span>Sources de données</a>
+      <a href="#filtres"><span class="num">03</span>Filtres absolus</a>
+      <a href="#scoring"><span class="num">04</span>Matrice de scoring</a>
+      <a href="#entree"><span class="num">05</span>Protocole d'entrée</a>
+      <a href="#nqes"><span class="num">06</span>Early warning NQ/ES</a>
+      <a href="#sortie"><span class="num">07</span>Gestion &amp; sortie</a>
+      <a href="#sizing"><span class="num">08</span>Position sizing</a>
+      <a href="#checklist"><span class="num">09</span>Checklist psy</a>
+      <a href="#format"><span class="num">10</span>Format de sortie</a>
+      <a href="#rejets"><span class="num">11</span>Catalogue de rejets</a>
+      <a href="#vision"><span class="num">12</span>Analyse visuelle (IA)</a>
+    </nav>
+    <div class="sidebar-foot">
+      Session prime<br>09h30 → 11h00<br>ES / corrélat NQ
+    </div>
+  </aside>
+
+  <!-- ═══ CONTENT ═══ -->
+  <main class="content">
+
+    <div class="hero">
+      <div class="hero-eyebrow">Système de Trading · Document de Référence</div>
+      <h1>SVS — Structural Vacuum Squeeze</h1>
+      <p>Stratégie de breakout ES/NQ exploitant les vides de liquidité (LVN) après cassure de Value Area. Filtres absolus, scoring pondéré, exécution mécanique — sans discrétion.</p>
+      <div class="hero-tags">
+        <span class="htag">ES — S&amp;P 500 Futures</span>
+        <span class="htag">Corrélat NQ</span>
+        <span class="htag">Calibration dynamique · 60 trades</span>
+        <span class="htag">Seuil score ≥ 88/100</span>
+      </div>
+    </div>
+
+    <!-- §0 RÔLE -->
+    <section class="section" id="role">
+      <div class="section-head"><span class="section-tag">§0</span><h2>Rôle &amp; identité</h2></div>
+      <div class="rule-list">
+        <div class="card"><span class="rule-badge">01</span><div>Aucun signal spontané n'est généré. Le système réagit uniquement aux inputs de l'opérateur.</div></div>
+        <div class="card"><span class="rule-badge">02</span><div>Tout rejet est formulé ainsi : <span style="font-family:var(--font-mono);color:var(--warn)">REJET — [Motif exact]. Prochain scan admissible : [H+Xmin].</span></div></div>
+        <div class="card"><span class="rule-badge">03</span><div>Si l'opérateur reformule pour contourner un rejet : <span style="font-family:var(--font-mono);color:var(--stop)">REJET CONFIRMÉ — Tentative de contournement détectée. Lockout 20 minutes activé.</span></div></div>
+        <div class="card"><span class="rule-badge">04</span><div>Aucun commentaire, aucune nuance, aucune temporisation. L'algorithme s'applique tel quel.</div></div>
+        <div class="card"><span class="rule-badge">05</span><div><strong>Anti-contournement :</strong> un trade rejeté reste rejeté pendant <strong style="color:var(--stop)">20 minutes</strong>, même avec de nouveaux arguments — aucune reformulation ne permet de passer outre avant l'expiration du lockout. Passé ce délai, seul un setup réellement nouveau (cassure différente, données rafraîchies) peut être réévalué, pas une nouvelle tentative de plaider la même configuration.</div></div>
+      </div>
+    </section>
+
+    <!-- §1 PROFIL -->
+    <section class="section" id="profil">
+      <div class="section-head"><span class="section-tag">§1</span><h2>Profil opérateur &amp; cadre</h2></div>
+      <div class="grid-2" style="margin-bottom:14px;">
+        <div class="card">
+          <div class="stat-label">Archétype</div>
+          <div class="stat-value">Analyste-sniper structurel</div>
+          <div style="font-size:12px;color:var(--ink-soft);margin-top:4px;">Momentum par vide de liquidité</div>
+        </div>
+        <div class="card">
+          <div class="stat-label">Instrument</div>
+          <div class="stat-value"><span class="accent">ES</span> — S&amp;P 500 Futures</div>
+          <div style="font-size:12px;color:var(--ink-soft);margin-top:4px;">Corrélat : NQ — Nasdaq Futures</div>
+        </div>
+        <div class="card">
+          <div class="stat-label">Fenêtre prime</div>
+          <div class="stat-value">09h30 → 11h00</div>
+          <div style="font-size:12px;color:var(--ink-soft);margin-top:4px;">Session matinale, heure locale</div>
+        </div>
+        <div class="card">
+          <div class="stat-label">Phase actuelle</div>
+          <div class="stat-value warn">Calibration dynamique</div>
+          <div class="stat-sub">
+            <div>↳ Taille nominale : <strong>50%</strong> du sizing standard</div>
+            <div>↳ Durée : <strong>60 premiers trades</strong></div>
+            <div>↳ Compteur fourni par l'opérateur [Trade #X/60]</div>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="stat-label" style="margin-bottom:10px;">Biais surveillés — triggers internes</div>
+        <div class="bias-row"><span class="bias-tag">FOMO</span> Input soumis &gt; 3 min après la cassure initiale → REJET automatique</div>
+        <div class="bias-row"><span class="bias-tag">REVENGE TRADING</span> Input soumis dans les 20 min suivant un trade perdant → REJET automatique</div>
+        <div class="bias-row"><span class="bias-tag">ANTI-CONTOURNEMENT</span> Trade rejeté re-soumis avec de nouveaux arguments avant 20 min → REJET CONFIRMÉ, lockout reconduit</div>
+        <div class="bias-row"><span class="bias-tag">SLIPPAGE MATIN</span> Utilisation d'un ordre Market → blocage automatique</div>
+        <div class="bias-row"><span class="bias-tag">FRÉQUENCE HORS-FENÊTRE</span> 2ᵉ trade en zone morte (&gt;30 min hors 09h30–11h00) dans la même semaine glissante (7 jours) → REJET, plafond 1/semaine atteint — veto dur, score ignoré même à 100/100</div>
+      </div>
+      <div class="note-box warn" style="margin-top:14px;">
+        <span class="note-title">Pourquoi un plafond de fréquence, séparé du malus de score</span>
+        Le malus de session (§4) teste la qualité du signal — il n'empêche pas à lui seul un abus de fréquence, parce que rien n'empêche de scorer ponctuellement quelques points de plus sur des critères subjectifs (sentiment, absorption) quand l'envie de trader hors-fenêtre est forte. C'est exactement le risque déjà neutralisé pour l'anti-contournement : un filtre de score seul ne suffit jamais contre la rationalisation, il faut un verrou comportemental indépendant du score. Seule la zone morte compte pour ce plafond — la zone tampon est déjà auto-régulée par son propre malus et sa liquidité encore correcte.
+      </div>
+    </section>
+
+    <!-- §2 SOURCES -->
+    <section class="section" id="sources">
+      <div class="section-head"><span class="section-tag">§2</span><h2>Sources de données canoniques</h2></div>
+      <div class="card" style="padding:0;overflow:hidden;">
+        <table class="clean">
+          <tr><th>Indicateur</th><th>Source officielle</th><th>Fréquence</th></tr>
+          <tr><td>VAH / VAL / POC</td><td>Volume Profile multi-session (Sierra Chart / NinjaTrader)</td><td>Avant chaque session</td></tr>
+          <tr><td>Low Volume Node (LVN)</td><td>Volume Profile visible sur chart principal</td><td>Temps réel</td></tr>
+          <tr><td>VPOC Migration</td><td>Volume Profile en mode rolling session</td><td>Temps réel</td></tr>
+          <tr><td>Footprint (imbalances)</td><td>NinjaTrader ou Bookmap — Footprint 1 minute</td><td>Temps réel</td></tr>
+          <tr><td>CVD (Cumulative Delta)</td><td>Indicateur CVD — reset à chaque ouverture de session</td><td>Temps réel</td></tr>
+          <tr><td>DOM / Bookmap</td><td>Bookmap heatmap — blocs limites visibles</td><td>Temps réel</td></tr>
+          <tr><td class="mono">Choppiness Index</td><td>CHOP(14) — timeframe 15 min (ES), reset session</td><td>Temps réel</td></tr>
+          <tr><td>VIX Spot</td><td>CBOE VIX ($VIX)</td><td>Ouverture + continu</td></tr>
+          <tr><td>VIX9D</td><td>CBOE VIX9D (very short-term)</td><td>Ouverture</td></tr>
+          <tr><td>VIX3M</td><td>CBOE VIX3M (3-month)</td><td>Ouverture</td></tr>
+          <tr><td>VIX Basis</td><td>VIX Spot vs. /VX Front Month Futures</td><td>Ouverture</td></tr>
+          <tr><td>Put/Call Ratio</td><td>CBOE Total P/C Ratio — rolling 1h — cboe.com</td><td>Toutes les 15 min</td></tr>
+          <tr><td>Volume de cassure</td><td>Volume bougie de cassure vs. moyenne des 5 précédentes</td><td>À la cassure</td></tr>
+          <tr><td>Corrélation NQ/ES</td><td>Indicateur corrélation rolling 3 min</td><td>Temps réel</td></tr>
+          <tr><td>Calendrier macro T1</td><td>Econoday.com ou ForexFactory.com (filtre rouge uniquement)</td><td>Avant chaque session</td></tr>
+        </table>
+      </div>
+
+      <div class="note-box warn">
+        <span class="note-title">Événements macro Tier 1 — seuls déclencheurs du filtre news</span>
+        NFP · CPI · Core PCE · FOMC Statement · FOMC Minutes · GDP · ISM Manufacturing · Retail Sales
+      </div>
+
+      <div class="note-box">
+        <span class="note-title">Choppiness Index — lecture de référence · CHOP(14) 15min · plage 0→100</span>
+        <div class="gauge-row"><span class="gauge-range">CHOP &lt; 38.2</span><div class="gauge-bar"><div class="gauge-fill" style="width:90%;background:var(--go)"></div></div><span class="gauge-result">Tendance forte — vélocité max</span><span class="gauge-pts" style="color:var(--go)">+4</span></div>
+        <div class="gauge-row"><span class="gauge-range">38.2 ≤ CHOP &lt; 50</span><div class="gauge-bar"><div class="gauge-fill" style="width:60%;background:var(--go)"></div></div><span class="gauge-result">Tendance modérée</span><span class="gauge-pts" style="color:var(--go)">+2</span></div>
+        <div class="gauge-row"><span class="gauge-range">50 ≤ CHOP &lt; 61.8</span><div class="gauge-bar"><div class="gauge-fill" style="width:35%;background:var(--warn)"></div></div><span class="gauge-result">Zone grise — warning émis</span><span class="gauge-pts" style="color:var(--ink-faint)">0</span></div>
+        <div class="gauge-row"><span class="gauge-range" style="color:var(--stop)">CHOP ≥ 61.8</span><div class="gauge-bar"><div class="gauge-fill" style="width:100%;background:var(--stop)"></div></div><span class="gauge-result" style="color:var(--stop)">Marché choppy — bloquant</span><span class="gauge-pts" style="color:var(--stop)">⛔</span></div>
+      </div>
+    </section>
+
+    <!-- §3 FILTRES -->
+    <section class="section" id="filtres">
+      <div class="section-head"><span class="section-tag">§3</span><h2>Phase 0 — Filtres absolus</h2></div>
+      <p class="section-intro">Ces 6 conditions sont vérifiées <strong>avant tout calcul de score</strong>. Une seule condition active = rejet inconditionnel, quelle que soit la qualité du setup. Chaque carte inclut désormais le résultat de l'audit avocat du diable — problème identifié et correction proposée, non encore appliquée aux seuils en vigueur.</p>
+
+      <div class="filter-card">
+        <div class="filter-head"><span class="fid">FILTRE 1A</span><span class="fname">Obstacle structurel proche</span><span class="badge-block">⛔ Bloquant</span><span class="badge-audit">🔍 Audit</span></div>
+        <div class="filter-body">
+          <div class="filter-cond">HVN ou niveau macro à moins de 8 ticks du trigger</div>
+          <div class="filter-logic">L'autoroute LVN est bloquée avant même de démarrer.</div>
+          <div class="filter-src">Seuil fixe à 8 ticks — le Choppiness Index gère la dynamique directionnelle (Filtre 1B), les deux sont complémentaires.</div>
+          <div class="audit-panel">
+            <div class="audit-line"><span class="audit-tag problem">⚠ Problème</span><span class="audit-text">« Niveau macro » n'est pas défini (round numbers ? prior day H/L ? niveau hebdo ?) — seul filtre à source non fermée, alors que le §0 impose une exécution mécanique sans discrétion. Seuil fixe de 8 ticks indépendant du régime de volatilité, incohérent avec le sizing VIX-tiered (§8) qui lui scale dynamiquement.</span></div>
+            <div class="audit-line"><span class="audit-tag solution">✓ Correction</span><span class="audit-text">Fermer la définition de « niveau macro » par une liste explicite (prior day H/L, VAH/VAL hebdo, niveaux psychologiques ronds). Indexer le seuil de ticks sur l'ATR ou le palier VIX en vigueur plutôt qu'un chiffre fixe.</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="filter-card">
+        <div class="filter-head"><span class="fid">FILTRE 1B</span><span class="fname">Marché choppy (CHOP Index)</span><span class="badge-block">⛔ Bloquant</span><span class="badge-audit">🔍 Audit</span></div>
+        <div class="filter-body">
+          <div class="filter-cond">CHOP(14) 15min ≥ 61.8 au moment du déclenchement</div>
+          <div class="filter-logic">Le marché est non-directionnel — la cassure sera absorbée, pas poursuivie.</div>
+          <div class="filter-src">Source : CHOP(14) sur chart 15min, NinjaTrader / Sierra Chart</div>
+          <div class="audit-panel">
+            <div class="audit-line"><span class="audit-tag problem">⚠ Problème</span><span class="audit-text">Lecture en snapshot unique, sans confirmation — alors que le filtre de sortie CVD (§7) exige 2 bougies consécutives. Asymétrie de rigueur entre entrée et sortie. Le CHOP 15min peut aussi être en retard sur un breakout qui se forme en quelques minutes au sein de la bougie en cours.</span></div>
+            <div class="audit-line"><span class="audit-tag solution">✓ Correction</span><span class="audit-text">Exiger 2 lectures CHOP consécutives ≥61.8 pour confirmer le blocage, ou croiser avec un CHOP(14) 5min en confirmation rapide près de l'ouverture.</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="filter-card">
+        <div class="filter-head"><span class="fid">FILTRE 2</span><span class="fname">Divergence de flux</span><span class="badge-block">⛔ Bloquant</span><span class="badge-audit">🔍 Audit</span></div>
+        <div class="filter-body">
+          <div class="filter-cond">Delta de la bougie de cassure opposé à la direction, ou absorption active visible sur le Footprint 1min</div>
+          <div class="filter-logic">Le breakout n'est pas alimenté par de l'agressivité réelle.</div>
+          <div class="audit-panel">
+            <div class="audit-line"><span class="audit-tag problem">⚠ Problème</span><span class="audit-text">« Absorption active visible » est un jugement visuel non quantifié — seul filtre bloquant reposant sur une appréciation qualitative, alors que le critère stacked_imbalances du scoring (C2) a lui un seuil précis (ratio ≥3:1).</span></div>
+            <div class="audit-line"><span class="audit-tag solution">✓ Correction</span><span class="audit-text">Aligner sur la définition stacked_imbalances déjà existante : ratio ≥3:1 contre la direction sur ≥2 niveaux Footprint consécutifs = absorption confirmée.</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="filter-card">
+        <div class="filter-head"><span class="fid">FILTRE 3</span><span class="fname">Publication macro Tier 1</span><span class="badge-block">⛔ Bloquant</span><span class="badge-audit">🔍 Audit</span></div>
+        <div class="filter-body">
+          <div class="filter-cond">Événement Tier 1 dans la fenêtre ±30 min du déclenchement</div>
+          <div class="filter-logic">Invalidation du contexte structurel par choc exogène.</div>
+          <div class="filter-src">Source : Econoday.com / ForexFactory.com (filtre rouge uniquement)</div>
+          <div class="audit-panel">
+            <div class="audit-line"><span class="audit-tag problem">⚠ Problème</span><span class="audit-text">Fenêtre fixe identique pour NFP et ISM Manufacturing, alors que leur empreinte de volatilité diffère fortement. FOMC en particulier a souvent un repricing prolongé via la conférence de presse, bien au-delà de 30 min.</span></div>
+            <div class="audit-line"><span class="audit-tag solution">✓ Correction</span><span class="audit-text">Différencier la fenêtre par type d'événement — FOMC Statement / Minutes en ±45-60 min, le reste des événements Tier 1 conserve ±30 min.</span></div>
+            <div class="audit-line"><span class="audit-tag scope">↔ Périmètre</span><span class="audit-text">Ne pas confondre avec C3 « Macro &amp; Timing » (§4) — deux mécanismes distincts malgré le nom partagé. Filtre 3 est un <strong>gate binaire</strong> (présence/absence d'un événement Tier 1 dans la fenêtre), évalué en Phase 0 avant tout calcul de score. C3 est une <strong>composante scorée</strong> (20% du score, basée sur l'heure de déclenchement et la structure VIX), évaluée après. Un événement Tier 1 imminent bloque le trade quel que soit le score C3 ; à l'inverse, un C3 faible ne déclenche jamais ce gate.</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="filter-card">
+        <div class="filter-head"><span class="fid">FILTRE 4</span><span class="fname">Purge de liquidité NQ/ES</span><span class="badge-block">⛔ Bloquant</span><span class="badge-audit">🔍 Audit</span></div>
+        <div class="filter-body">
+          <div class="filter-cond">Corrélation NQ/ES rolling 3 min &lt; +0.40, ou NQ diverge à l'opposé du ES</div>
+          <div class="filter-logic">Structure de marché invalide — le breadth ne confirme pas la cassure.</div>
+          <div class="audit-panel">
+            <div class="audit-line"><span class="audit-tag problem">⚠ Problème</span><span class="audit-text">Une corrélation rolling sur 3 min seulement est un échantillon statistiquement instable, surtout en breakout où les prix bougent par sauts discrets. Un seul print NQ isolé peut faire passer la corrélation de +0.9 à -0.2 sans réelle divergence de breadth.</span></div>
+            <div class="audit-line"><span class="audit-tag solution">✓ Correction</span><span class="audit-text">Exiger 2 lectures consécutives &lt;+0.40 avant blocage, ou élargir la fenêtre de calcul à 5 min pour stabiliser le coefficient.</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="filter-card">
+        <div class="filter-head"><span class="fid">FILTRE 5</span><span class="fname">Régime de crise VIX</span><span class="badge-block">⛔ Session suspendue</span><span class="badge-audit">🔍 Audit</span></div>
+        <div class="filter-body">
+          <div class="filter-cond">VIX Spot &gt; 30 à l'ouverture ou franchissement intraday</div>
+          <div class="filter-logic">Structure LVN invalidée par dislocation de liquidité systémique.</div>
+          <div class="filter-src">Action : session suspendue — aucun trade SVS autorisé sur la journée.</div>
+          <div class="audit-panel">
+            <div class="audit-line"><span class="audit-tag problem">⚠ Problème</span><span class="audit-text">Aucune clause de réarmement : un spike VIX&gt;30 transitoire à l'ouverture (gap, puis retour à 24 en 30 min) tue toute la session sans réévaluation. Choix peut-être intentionnel (conservatisme assumé) mais non explicité comme tel.</span></div>
+            <div class="audit-line"><span class="audit-tag solution">✓ Correction</span><span class="audit-text">Confirmer explicitement l'intention — soit garder la règle dure (tout print &gt;30 = journée off), soit ajouter une condition de réarmement (VIX repassé sous 30 sur X minutes consécutives avant réouverture de session).</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="audit-summary">
+        <div class="as-title">🔍 Synthèse de l'audit — problèmes transversaux</div>
+        <div class="as-item">
+          <div class="as-h">Rigueur incohérente entre filtres</div>
+          <div class="as-p">1B et 4 sont quantitatifs mais sans confirmation ; 2 est qualitatif sans seuil ; 1A et 3 référencent des sources non fermées. Seule la sortie CVD (§7) applique une vraie discipline de confirmation sur 2 bougies. Recommandation : harmoniser tous les filtres bloquants sur le même standard de confirmation que celui déjà utilisé en sortie.</div>
+        </div>
+        <div class="as-item">
+          <div class="as-h">Fail-fast vs évaluation complète non tranché</div>
+          <div class="as-p">Le format de sortie (§10) liste systématiquement les 6 filtres, ce qui suggère une évaluation complète plutôt qu'un court-circuit au premier échec. À documenter explicitement comme règle d'architecture, pour cohérence avec le pipeline d'intégration (n8n/LangGraph) et avec la Stratégie 2, qui elle applique un court-circuit fail-fast sur ses gates G1-G4.</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- §4 SCORING -->
+    <section class="section" id="scoring">
+      <div class="section-head"><span class="section-tag">§4</span><h2>Matrice de scoring SVS</h2></div>
+
+      <div class="card" style="margin-bottom:22px;background:var(--surface-2);border-style:dashed;">
+        <div class="stat-label">Formule de calcul — score max = 100 pts</div>
+        <div style="font-family:var(--font-mono);font-size:13px;margin-top:8px;line-height:2;">
+          SCORE = (structure × <span style="color:var(--warn);font-weight:700">0.35</span>) + (orderflow × <span style="color:var(--warn);font-weight:700">0.25</span>) + (macro × <span style="color:var(--warn);font-weight:700">0.20</span>)<br>
+          &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;+ (sentiment × <span style="color:var(--warn);font-weight:700">0.15</span>) + (qualité × <span style="color:var(--warn);font-weight:700">0.05</span>)
+        </div>
+      </div>
+
+      <div class="note-box warn" style="margin-bottom:22px;">
+        <span class="note-title">Principe de non-compensation par pilier</span>
+        Chaque couche C1-C5 a désormais un seuil minimum propre (60-76% de son max), affiché en regard de chaque couche ci-dessous. Si une seule couche n'atteint pas son seuil, le trade est rejeté — <strong>même si le score total franchit 88/100</strong>. Un score élevé sur une couche ne peut jamais compenser une couche déficitaire sur une autre. Les seuils sont fixes (option A) : ils ne se recalculent pas dynamiquement si un malus (late session) réduit le maximum réellement atteignable ce jour-là.
+      </div>
+
+      <div class="note-box" style="margin-bottom:22px;">
+        <span class="note-title">Pénalité de session — remplace le seuil fixe 95 hors-fenêtre</span>
+        Le score brut (5 piliers + floors, calculés normalement et intacts) reçoit un <strong>malus appliqué à l'agrégat</strong>, jamais à l'intérieur d'un pilier — distinct du malus late-session de C3/C5 ci-dessus, qui lui gère la fin de fenêtre (≥10h45, encore dans 09h30–11h00). Ce nouveau malus gère l'éloignement <strong>hors</strong> de la fenêtre entière. Le score ajusté (brut − malus) est ensuite comparé à un seuil unique de 88 — plus de double seuil 88/95.
+        <div class="mini-gauge" style="margin-top:12px;">
+          <div class="gr"><span class="rng">09h30–11h00 (fenêtre)</span><span class="lbl">Aucune pénalité</span><span class="pt" style="color:var(--go)">0</span></div>
+          <div class="gr"><span class="rng">≤ 30 min de la fenêtre</span><span class="lbl">Zone tampon — liquidité réduite mais correcte</span><span class="pt" style="color:var(--warn)">-3</span></div>
+          <div class="gr"><span class="rng">&gt; 30 min de la fenêtre</span><span class="lbl">Zone morte — creux structurel de liquidité</span><span class="pt" style="color:var(--stop)">-7</span></div>
+        </div>
+        <div style="font-size:11.5px;color:var(--ink-faint);margin-top:10px;">Le -7 n'est pas arbitraire : il reproduit exactement l'ancien écart 95-88=7 déjà validé par le système. Le -3 (zone tampon) est ~40% de ce delta — le chiffre le moins solidement justifié de ce mécanisme, à affiner avec de la donnée réelle de volume/spread par tranche horaire si disponible.</div>
+      </div>
+
+      <!-- C1 -->
+      <div class="layer">
+        <div class="layer-head"><span class="lcode">C1</span><span class="ltitle">Structure — garde-fou primaire</span><span class="lweight">Poids 35%</span><span class="lmax">35 pts</span><span class="lmin">Seuil min 26/35 (74%)</span></div>
+        <div class="layer-note">📡 <strong>Lecture Bookmap</strong> — workflow heatmap-primaire. <strong>autoroute_lvn</strong> se lit directement comme une zone sombre/fine de la heatmap (vide de liquidité au repos) : c'est le point fort natif de Bookmap, confiance haute. L'<strong>obstacle structurel</strong> (Filtre 1A) se lit comme un mur de liquidité dense. extraction_zone, vpoc_migration et poc_coherence nécessitent en revanche un overlay Volume Profile — Bookmap seul ne les montre pas. Détail du mapping et confiance en §12.</div>
+        <div class="crit-row"><div class="crit-name">extraction_zone</div><div class="crit-desc">Cassure franche VAH ou VAL — ≥ 3 sessions consécutives avec clôture confirmée au-delà de la VA concernée (daily close, pas intraday)</div><div class="crit-pts">+15</div></div>
+        <div class="crit-row"><div class="crit-examples"><div class="crit-examples-title">Exemples — cliquer pour agrandir</div><div class="ex-row"><div class="ex-card" data-cap="extraction_zone +15 — cassure VAH confirmée par 3 clôtures daily au-dessus de la Value Area"><div style="padding:6px"><svg viewBox="0 0 300 150" xmlns="http://www.w3.org/2000/svg" font-family="JetBrains Mono, monospace"><rect width="300" height="150" fill="white"/><rect x="0" y="78" width="300" height="40" fill="#F1F3F6"/><line x1="0" y1="78" x2="300" y2="78" stroke="#1B2A4A" stroke-width="1" stroke-dasharray="4 3"/><text x="6" y="74" font-size="9" fill="#1B2A4A">VAH</text><text x="250" y="113" font-size="9" fill="#8993A1">Value Area</text><line x1="40" y1="108" x2="40" y2="86" stroke="#0E9F6E" stroke-width="1.5"/><rect x="36" y="92" width="8" height="8" fill="#0E9F6E"/><line x1="64" y1="100" x2="64" y2="82" stroke="#0E9F6E" stroke-width="1.5"/><rect x="60" y="88" width="8" height="6" fill="#0E9F6E"/><line x1="88" y1="94" x2="88" y2="66" stroke="#0E9F6E" stroke-width="1.5"/><rect x="84" y="70" width="8" height="20" fill="#0E9F6E"/><line x1="112" y1="74" x2="112" y2="55" stroke="#0E9F6E" stroke-width="1.5"/><rect x="108" y="60" width="8" height="8" fill="#0E9F6E"/><line x1="136" y1="66" x2="136" y2="48" stroke="#0E9F6E" stroke-width="1.5"/><rect x="132" y="52" width="8" height="8" fill="#0E9F6E"/><line x1="160" y1="60" x2="160" y2="42" stroke="#0E9F6E" stroke-width="1.5"/><rect x="156" y="46" width="8" height="8" fill="#0E9F6E"/><line x1="184" y1="54" x2="184" y2="36" stroke="#0E9F6E" stroke-width="1.5"/><rect x="180" y="40" width="8" height="8" fill="#0E9F6E"/><text x="84" y="128" font-size="8" fill="#0E9F6E">cassure VAH</text><text x="120" y="30" font-size="9" fill="#0E9F6E">3 clôtures daily au-dessus ✓</text></svg></div><div class="ex-cap"><span class="ex-tag full">+15 plein score</span><div class="ex-desc">Cassure VAH + 3 clôtures daily au-dessus de la VA</div></div></div><div class="ex-card" data-cap="extraction_zone 0 — mèche au-dessus de la VAH puis retour dans la Value Area, aucune acceptation"><div style="padding:6px"><svg viewBox="0 0 300 150" xmlns="http://www.w3.org/2000/svg" font-family="JetBrains Mono, monospace"><rect width="300" height="150" fill="white"/><rect x="0" y="70" width="300" height="48" fill="#F1F3F6"/><line x1="0" y1="70" x2="300" y2="70" stroke="#1B2A4A" stroke-width="1" stroke-dasharray="4 3"/><text x="6" y="66" font-size="9" fill="#1B2A4A">VAH</text><line x1="50" y1="106" x2="50" y2="86" stroke="#0E9F6E" stroke-width="1.5"/><rect x="46" y="92" width="8" height="8" fill="#0E9F6E"/><line x1="80" y1="98" x2="80" y2="78" stroke="#0E9F6E" stroke-width="1.5"/><rect x="76" y="84" width="8" height="8" fill="#0E9F6E"/><line x1="120" y1="84" x2="120" y2="48" stroke="#C8313A" stroke-width="1.5"/><line x1="120" y1="84" x2="120" y2="92" stroke="#C8313A" stroke-width="1.5"/><rect x="116" y="84" width="8" height="8" fill="#C8313A"/><line x1="150" y1="104" x2="150" y2="86" stroke="#C8313A" stroke-width="1.5"/><rect x="146" y="90" width="8" height="8" fill="#C8313A"/><line x1="180" y1="112" x2="180" y2="94" stroke="#C8313A" stroke-width="1.5"/><rect x="176" y="98" width="8" height="8" fill="#C8313A"/><text x="100" y="42" font-size="8" fill="#C8313A">mèche rejetée</text><text x="110" y="134" font-size="9" fill="#C8313A">retour dans la VA — pas d'acceptation ✗</text></svg></div><div class="ex-cap"><span class="ex-tag zero">0 contre-exemple</span><div class="ex-desc">Mèche rejetée, retour dans la VA, pas d'acceptation</div></div></div></div></div></div>
+        <div class="crit-row"><div class="crit-name">autoroute_lvn</div><div class="crit-desc">LVN de ≥ 10 ticks immédiatement disponible post-cassure — aucun HVN intermédiaire visible</div><div class="crit-pts">+9</div></div>
+        <div class="crit-row"><div class="crit-examples"><div class="crit-examples-title">Exemples — cliquer pour agrandir</div><div class="ex-row"><div class="ex-card" data-cap="autoroute_lvn +9 — LVN d'au moins 10 ticks immédiatement disponible, aucun HVN intermédiaire"><div style="padding:6px"><svg viewBox="0 0 300 150" xmlns="http://www.w3.org/2000/svg" font-family="JetBrains Mono, monospace"><rect width="300" height="150" fill="white"/><rect x="0" y="95" width="70" height="14" fill="#8993A1" opacity="0.5"/><rect x="0" y="80" width="20" height="14" fill="#8993A1" opacity="0.5"/><rect x="0" y="65" width="16" height="14" fill="#8993A1" opacity="0.5"/><rect x="0" y="50" width="64" height="14" fill="#8993A1" opacity="0.5"/><text x="24" y="76" font-size="8" fill="#0E9F6E">LVN</text><rect x="80" y="65" width="210" height="29" fill="#0E9F6E" opacity="0.08"/><line x1="110" y1="104" x2="110" y2="86" stroke="#0E9F6E" stroke-width="1.5"/><rect x="106" y="90" width="8" height="10" fill="#0E9F6E"/><line x1="140" y1="92" x2="140" y2="68" stroke="#0E9F6E" stroke-width="1.5"/><rect x="136" y="72" width="8" height="16" fill="#0E9F6E"/><line x1="170" y1="74" x2="170" y2="56" stroke="#0E9F6E" stroke-width="1.5"/><rect x="166" y="60" width="8" height="10" fill="#0E9F6E"/><line x1="200" y1="62" x2="200" y2="46" stroke="#0E9F6E" stroke-width="1.5"/><rect x="196" y="50" width="8" height="8" fill="#0E9F6E"/><text x="120" y="120" font-size="9" fill="#0E9F6E">≥10 ticks sans HVN — traversée rapide ✓</text></svg></div><div class="ex-cap"><span class="ex-tag full">+9 plein score</span><div class="ex-desc">LVN ≥10 ticks libre, aucun HVN sur le chemin</div></div></div><div class="ex-card" data-cap="autoroute_lvn 0 — un HVN intermédiaire bloque l'autoroute de liquidité"><div style="padding:6px"><svg viewBox="0 0 300 150" xmlns="http://www.w3.org/2000/svg" font-family="JetBrains Mono, monospace"><rect width="300" height="150" fill="white"/><rect x="0" y="95" width="70" height="14" fill="#8993A1" opacity="0.5"/><rect x="0" y="78" width="74" height="14" fill="#C8313A" opacity="0.4"/><rect x="0" y="61" width="60" height="14" fill="#8993A1" opacity="0.5"/><text x="20" y="89" font-size="8" fill="#C8313A">HVN</text><line x1="120" y1="104" x2="120" y2="86" stroke="#0E9F6E" stroke-width="1.5"/><rect x="116" y="90" width="8" height="10" fill="#0E9F6E"/><line x1="150" y1="92" x2="150" y2="78" stroke="#0E9F6E" stroke-width="1.5"/><rect x="146" y="82" width="8" height="6" fill="#0E9F6E"/><line x1="170" y1="78" x2="210" y2="78" stroke="#C8313A" stroke-width="2"/><text x="110" y="120" font-size="9" fill="#C8313A">HVN intermédiaire bloque l'autoroute ✗</text></svg></div><div class="ex-cap"><span class="ex-tag zero">0 contre-exemple</span><div class="ex-desc">HVN intermédiaire qui bloque la traversée</div></div></div></div></div></div>
+        <div class="crit-row">
+          <div class="crit-name">chop_directional</div>
+          <div class="crit-desc">
+            Choppiness Index(14) 15min au moment du signal :
+            <div class="mini-gauge">
+              <div class="gr"><span class="rng">CHOP &lt; 38.2</span><span class="lbl">Tendance forte</span><span class="pt" style="color:var(--go)">+4</span></div>
+              <div class="gr"><span class="rng">38.2 ≤ CHOP &lt; 50</span><span class="lbl">Tendance modérée</span><span class="pt" style="color:var(--go)">+2</span></div>
+              <div class="gr"><span class="rng">50 ≤ CHOP &lt; 61.8</span><span class="lbl">Zone grise</span><span class="pt" style="color:var(--ink-faint)">0</span></div>
+              <div class="gr"><span class="rng" style="color:var(--stop)">CHOP ≥ 61.8</span><span class="lbl" style="color:var(--stop)">Bloquant Phase 0</span><span class="pt" style="color:var(--stop)">⛔</span></div>
+            </div>
+          </div>
+          <div class="crit-pts">+4/+2/0</div>
+        </div>
+        <div class="crit-row"><div class="crit-examples"><div class="crit-examples-title">Exemples — cliquer pour agrandir</div><div class="ex-row triple"><div class="ex-card" data-cap="chop_directional +4 — Choppiness Index sous 38.2, tendance forte et directionnelle"><div style="padding:6px"><svg viewBox="0 0 300 150" xmlns="http://www.w3.org/2000/svg" font-family="JetBrains Mono, monospace"><rect width="300" height="150" fill="white"/><polyline points="20,110 50,98 80,100 110,80 140,82 170,60 200,62 230,40 260,42 285,28" fill="none" stroke="#0E9F6E" stroke-width="2"/><text x="20" y="30" font-size="10" fill="#0E9F6E">CHOP &lt; 38.2</text><text x="20" y="135" font-size="9" fill="#15181E">Tendance forte, directionnelle → +4</text></svg></div><div class="ex-cap"><span class="ex-tag full">+4 fort</span><div class="ex-desc">CHOP &lt;38.2 — marché clairement directionnel</div></div></div><div class="ex-card" data-cap="chop_directional +2 — Choppiness Index entre 38.2 et 50, tendance modérée"><div style="padding:6px"><svg viewBox="0 0 300 150" xmlns="http://www.w3.org/2000/svg" font-family="JetBrains Mono, monospace"><rect width="300" height="150" fill="white"/><polyline points="20,100 50,88 80,96 110,82 140,90 170,74 200,82 230,66 260,72 285,58" fill="none" stroke="#B5790A" stroke-width="2"/><text x="20" y="30" font-size="10" fill="#B5790A">38.2 ≤ CHOP &lt; 50</text><text x="20" y="135" font-size="9" fill="#15181E">Tendance modérée, hésitante → +2</text></svg></div><div class="ex-cap"><span class="ex-tag partial">+2 modéré</span><div class="ex-desc">38.2 ≤ CHOP &lt;50 — tendance hésitante</div></div></div><div class="ex-card" data-cap="chop_directional 0 — Choppiness Index en zone grise 50–61.8, aucune direction nette"><div style="padding:6px"><svg viewBox="0 0 300 150" xmlns="http://www.w3.org/2000/svg" font-family="JetBrains Mono, monospace"><rect width="300" height="150" fill="white"/><polyline points="20,80 50,68 80,86 110,70 140,88 170,66 200,84 230,70 260,86 285,72" fill="none" stroke="#8993A1" stroke-width="2"/><line x1="20" y1="78" x2="285" y2="78" stroke="#8993A1" stroke-width="0.7" stroke-dasharray="3 3"/><text x="20" y="30" font-size="10" fill="#8993A1">50 ≤ CHOP &lt; 61.8</text><text x="20" y="135" font-size="9" fill="#15181E">Zone grise, sans direction → 0</text></svg></div><div class="ex-cap"><span class="ex-tag zero">0 zone grise</span><div class="ex-desc">50 ≤ CHOP &lt;61.8 — pas de direction</div></div></div></div></div></div>
+        <div class="crit-row"><div class="crit-name">vpoc_migration</div><div class="crit-desc">VPOC de session migre activement en direction de la cassure (≥ 2 bougies consécutives)</div><div class="crit-pts">+5</div></div>
+        <div class="crit-row"><div class="crit-examples"><div class="crit-examples-title">Exemples — cliquer pour agrandir</div><div class="ex-row"><div class="ex-card" data-cap="vpoc_migration +5 — le VPOC de session migre activement vers la cassure sur au moins 2 bougies"><div style="padding:6px"><svg viewBox="0 0 300 150" xmlns="http://www.w3.org/2000/svg" font-family="JetBrains Mono, monospace"><rect width="300" height="150" fill="white"/><line x1="40" y1="95" x2="60" y2="95" stroke="#1B2A4A" stroke-width="3"/><line x1="90" y1="82" x2="110" y2="82" stroke="#1B2A4A" stroke-width="3"/><line x1="140" y1="68" x2="160" y2="68" stroke="#1B2A4A" stroke-width="3"/><line x1="190" y1="54" x2="210" y2="54" stroke="#0E9F6E" stroke-width="3"/><polyline points="50,95 100,82 150,68 200,54" fill="none" stroke="#0E9F6E" stroke-width="1" stroke-dasharray="4 3"/><text x="40" y="115" font-size="9" fill="#0E9F6E">VPOC migre vers la cassure (≥2 bougies) ✓</text><text x="180" y="48" font-size="8" fill="#0E9F6E">VPOC</text></svg></div><div class="ex-cap"><span class="ex-tag full">+5 plein score</span><div class="ex-desc">VPOC migre vers la cassure sur ≥2 bougies</div></div></div><div class="ex-card" data-cap="vpoc_migration 0 — le VPOC reste stationnaire, aucune migration directionnelle"><div style="padding:6px"><svg viewBox="0 0 300 150" xmlns="http://www.w3.org/2000/svg" font-family="JetBrains Mono, monospace"><rect width="300" height="150" fill="white"/><line x1="40" y1="80" x2="60" y2="80" stroke="#1B2A4A" stroke-width="3"/><line x1="90" y1="78" x2="110" y2="78" stroke="#1B2A4A" stroke-width="3"/><line x1="140" y1="82" x2="160" y2="82" stroke="#1B2A4A" stroke-width="3"/><line x1="190" y1="79" x2="210" y2="79" stroke="#C8313A" stroke-width="3"/><text x="40" y="115" font-size="9" fill="#C8313A">VPOC stagne — pas de migration ✗</text></svg></div><div class="ex-cap"><span class="ex-tag zero">0 contre-exemple</span><div class="ex-desc">VPOC stagne, aucune migration</div></div></div></div></div></div>
+        <div class="crit-row"><div class="crit-name">poc_coherence</div><div class="crit-desc">POC de la VA cassée positionné du côté opposé à la direction du breakout (VA réellement déséquilibrée)</div><div class="crit-pts">+2</div></div>
+        <div class="crit-row"><div class="crit-examples"><div class="crit-examples-title">Exemples — cliquer pour agrandir</div><div class="ex-row"><div class="ex-card" data-cap="poc_coherence +2 — POC positionné du côté opposé à la cassure, Value Area réellement déséquilibrée"><div style="padding:6px"><svg viewBox="0 0 300 150" xmlns="http://www.w3.org/2000/svg" font-family="JetBrains Mono, monospace"><rect width="300" height="150" fill="white"/><rect x="60" y="60" width="180" height="50" fill="#F1F3F6"/><line x1="60" y1="60" x2="240" y2="60" stroke="#1B2A4A" stroke-width="1" stroke-dasharray="3 2"/><text x="244" y="64" font-size="8" fill="#1B2A4A">VAH</text><line x1="60" y1="102" x2="240" y2="102" stroke="#0E9F6E" stroke-width="2"/><text x="244" y="106" font-size="8" fill="#0E9F6E">POC</text><path d="M150 60 L150 35" stroke="#0E9F6E" stroke-width="2" marker-end="url(#ar)"/><defs><marker id="ar" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8 z" fill="#0E9F6E"/></marker></defs><text x="40" y="130" font-size="9" fill="#0E9F6E">POC bas + cassure haut = VA déséquilibrée ✓</text></svg></div><div class="ex-cap"><span class="ex-tag full">+2 plein score</span><div class="ex-desc">POC opposé à la cassure = VA déséquilibrée</div></div></div><div class="ex-card" data-cap="poc_coherence 0 — POC du même côté que la cassure, pas de déséquilibre exploitable"><div style="padding:6px"><svg viewBox="0 0 300 150" xmlns="http://www.w3.org/2000/svg" font-family="JetBrains Mono, monospace"><rect width="300" height="150" fill="white"/><rect x="60" y="50" width="180" height="60" fill="#F1F3F6"/><line x1="60" y1="50" x2="240" y2="50" stroke="#1B2A4A" stroke-width="1" stroke-dasharray="3 2"/><text x="244" y="54" font-size="8" fill="#1B2A4A">VAH</text><line x1="60" y1="60" x2="240" y2="60" stroke="#C8313A" stroke-width="2"/><text x="244" y="64" font-size="8" fill="#C8313A">POC</text><path d="M150 50 L150 30" stroke="#C8313A" stroke-width="2"/><text x="40" y="130" font-size="9" fill="#C8313A">POC collé à la cassure = pas de déséquilibre ✗</text></svg></div><div class="ex-cap"><span class="ex-tag zero">0 contre-exemple</span><div class="ex-desc">POC collé à la cassure = pas de déséquilibre</div></div></div></div></div></div>
+        <div class="layer-foot">⚠ <strong>Compensation interdite</strong> — si C1 &lt; 26/35, rejet du trade même si le score total ≥ seuil de session.</div>
+      </div>
+
+      <!-- C2 -->
+      <div class="layer">
+        <div class="layer-head"><span class="lcode">C2</span><span class="ltitle">Order Flow — le carburant delta</span><span class="lweight">Poids 25%</span><span class="lmax">25 pts</span><span class="lmin">Seuil min 19/25 (76%)</span></div>
+        <div class="layer-note">📡 <strong>Lecture Bookmap</strong> — <strong>dom_sweeping</strong> est le critère natif Bookmap par excellence : la heatmap montre visuellement un bloc limite exécuté (consommé en étant tradé) vs retiré (pulled), confiance haute. <strong>alignement_cvd</strong> se lit via l'add-on CVD de Bookmap, confiance moyenne-haute. ⚠ <strong>stacked_imbalances</strong> et <strong>delta_cassure</strong> restent chiffrés (footprint natif) : sur Bookmap leur proxy visuel est l'absorption / le sweep agressif, mais convertir ces deux critères en pure lecture visuelle réintroduit la non-déterminisme que §12 cherche à éviter — garder un chiffre de confirmation (même estimé depuis les labels de taille Bookmap). Mapping complet en §12.</div>
+        <div class="crit-row"><div class="crit-name">stacked_imbalances</div><div class="crit-desc">≥ 3 niveaux de prix consécutifs sur Footprint 1min, ratio ≥ 3:1 (Ask/Bid pour LONG, Bid/Ask pour SHORT)</div><div class="crit-pts">+10</div></div>
+        <div class="crit-row"><div class="crit-examples"><div class="crit-examples-title">Exemples — cliquer pour agrandir</div><div class="ex-row"><div class="ex-card" data-cap="stacked_imbalances +10 — au moins 3 niveaux de prix consécutifs avec ratio ≥3:1 côté agressif"><div style="padding:6px"><svg viewBox="0 0 300 150" xmlns="http://www.w3.org/2000/svg" font-family="JetBrains Mono, monospace"><rect width="300" height="150" fill="white"/><text x="20" y="22" font-size="9" fill="#15181E">Bid × Ask — Footprint 1min</text><text x="60" y="45" font-size="9" fill="#8993A1" text-anchor="end">12</text><text x="78" y="45" font-size="9" fill="#0E9F6E" font-weight="700">41</text><text x="120" y="45" font-size="8" fill="#0E9F6E">3.4:1 ✓</text><text x="60" y="62" font-size="9" fill="#8993A1" text-anchor="end">9</text><text x="78" y="62" font-size="9" fill="#0E9F6E" font-weight="700">38</text><text x="120" y="62" font-size="8" fill="#0E9F6E">4.2:1 ✓</text><text x="60" y="79" font-size="9" fill="#8993A1" text-anchor="end">14</text><text x="78" y="79" font-size="9" fill="#0E9F6E" font-weight="700">45</text><text x="120" y="79" font-size="8" fill="#0E9F6E">3.2:1 ✓</text><text x="60" y="96" font-size="9" fill="#8993A1" text-anchor="end">30</text><text x="78" y="96" font-size="9" fill="#8993A1" font-weight="400">33</text><text x="60" y="113" font-size="9" fill="#8993A1" text-anchor="end">28</text><text x="78" y="113" font-size="9" fill="#8993A1" font-weight="400">30</text><text x="20" y="138" font-size="9" fill="#0E9F6E">3 niveaux empilés ≥3:1 côté Ask ✓</text></svg></div><div class="ex-cap"><span class="ex-tag full">+10 plein score</span><div class="ex-desc">≥3 niveaux empilés à ratio ≥3:1</div></div></div><div class="ex-card" data-cap="stacked_imbalances 0 — imbalances dispersées et isolées, pas d'empilement de 3 niveaux"><div style="padding:6px"><svg viewBox="0 0 300 150" xmlns="http://www.w3.org/2000/svg" font-family="JetBrains Mono, monospace"><rect width="300" height="150" fill="white"/><text x="20" y="22" font-size="9" fill="#15181E">Bid × Ask — Footprint 1min</text><text x="60" y="50" font-size="9" fill="#8993A1" text-anchor="end">22</text><text x="78" y="50" font-size="9" fill="#8993A1" font-weight="400">26</text><text x="120" y="50" font-size="8" fill="#C8313A">1.2:1 ✗</text><text x="60" y="70" font-size="9" fill="#8993A1" text-anchor="end">31</text><text x="78" y="70" font-size="9" fill="#8993A1" font-weight="400">28</text><text x="120" y="70" font-size="8" fill="#C8313A">0.9:1 ✗</text><text x="60" y="90" font-size="9" fill="#8993A1" text-anchor="end">19</text><text x="78" y="90" font-size="9" fill="#0E9F6E" font-weight="700">41</text><text x="120" y="90" font-size="8" fill="#B5790A">2.1:1</text><text x="20" y="132" font-size="9" fill="#C8313A">Imbalances isolées, non empilées ✗</text></svg></div><div class="ex-cap"><span class="ex-tag zero">0 contre-exemple</span><div class="ex-desc">Imbalances isolées, non empilées</div></div></div></div></div></div>
+        <div class="crit-row"><div class="crit-name">alignement_cvd</div><div class="crit-desc">CVD de session casse ses propres extrêmes en synchronisation avec le prix (même bougie ou la suivante)</div><div class="crit-pts">+7</div></div>
+        <div class="crit-row"><div class="crit-examples"><div class="crit-examples-title">Exemples — cliquer pour agrandir</div><div class="ex-row"><div class="ex-card" data-cap="alignement_cvd +7 — le CVD casse ses propres extrêmes en synchronisation avec le prix"><div style="padding:6px"><svg viewBox="0 0 300 150" xmlns="http://www.w3.org/2000/svg" font-family="JetBrains Mono, monospace"><rect width="300" height="150" fill="white"/><polyline points="20,90 60,80 100,60 140,45 180,32 220,22 260,14" fill="none" stroke="#1B2A4A" stroke-width="1.6"/><text x="225" y="12" font-size="8" fill="#1B2A4A">prix</text><polyline points="20,128 60,120 100,104 140,92 180,78 220,66 260,56" fill="none" stroke="#0E9F6E" stroke-width="1.6"/><text x="225" y="66" font-size="8" fill="#0E9F6E">CVD</text><text x="20" y="146" font-size="9" fill="#0E9F6E">CVD casse ses extrêmes avec le prix ✓</text></svg></div><div class="ex-cap"><span class="ex-tag full">+7 plein score</span><div class="ex-desc">CVD casse ses extrêmes avec le prix</div></div></div><div class="ex-card" data-cap="alignement_cvd 0 — le prix progresse mais le CVD diverge, aucune synchronisation"><div style="padding:6px"><svg viewBox="0 0 300 150" xmlns="http://www.w3.org/2000/svg" font-family="JetBrains Mono, monospace"><rect width="300" height="150" fill="white"/><polyline points="20,90 60,78 100,60 140,46 180,34 220,24 260,16" fill="none" stroke="#1B2A4A" stroke-width="1.6"/><text x="225" y="14" font-size="8" fill="#1B2A4A">prix ↑</text><polyline points="20,110 60,104 100,108 140,100 180,106 220,102 260,108" fill="none" stroke="#C8313A" stroke-width="1.6"/><text x="225" y="100" font-size="8" fill="#C8313A">CVD plat</text><text x="20" y="140" font-size="9" fill="#C8313A">Prix monte, CVD ne suit pas → divergence ✗</text></svg></div><div class="ex-cap"><span class="ex-tag zero">0 contre-exemple</span><div class="ex-desc">Prix monte, CVD plat → divergence</div></div></div></div></div></div>
+        <div class="crit-row"><div class="crit-name">delta_cassure</div><div class="crit-desc">Delta cumulatif de la bougie de cassure ≥ 60% du volume total de cette bougie</div><div class="crit-pts">+5</div></div>
+        <div class="crit-row"><div class="crit-examples"><div class="crit-examples-title">Exemples — cliquer pour agrandir</div><div class="ex-row"><div class="ex-card" data-cap="delta_cassure +5 — delta cumulatif de la bougie de cassure ≥60% du volume total"><div style="padding:6px"><svg viewBox="0 0 300 150" xmlns="http://www.w3.org/2000/svg" font-family="JetBrains Mono, monospace"><rect width="300" height="150" fill="white"/><rect x="120" y="30" width="60" height="90" fill="#F1F3F6" stroke="#E3E7ED"/><rect x="120" y="66" width="60" height="54" fill="#0E9F6E" opacity="0.75"/><text x="150" y="98" font-size="11" fill="white" text-anchor="middle" font-weight="700">68%</text><text x="150" y="50" font-size="9" fill="#8993A1" text-anchor="middle">32%</text><text x="60" y="138" font-size="9" fill="#0E9F6E">Delta ≥60% du volume de la bougie ✓</text></svg></div><div class="ex-cap"><span class="ex-tag full">+5 plein score</span><div class="ex-desc">Delta ≥60% du volume de la bougie</div></div></div><div class="ex-card" data-cap="delta_cassure 0 — delta sous 60%, agressivité directionnelle insuffisante"><div style="padding:6px"><svg viewBox="0 0 300 150" xmlns="http://www.w3.org/2000/svg" font-family="JetBrains Mono, monospace"><rect width="300" height="150" fill="white"/><rect x="120" y="30" width="60" height="90" fill="#F1F3F6" stroke="#E3E7ED"/><rect x="120" y="88" width="60" height="32" fill="#C8313A" opacity="0.6"/><text x="150" y="108" font-size="11" fill="white" text-anchor="middle" font-weight="700">41%</text><text x="60" y="138" font-size="9" fill="#C8313A">Delta &lt;60% — agressivité insuffisante ✗</text></svg></div><div class="ex-cap"><span class="ex-tag zero">0 contre-exemple</span><div class="ex-desc">Delta &lt;60% — agressivité insuffisante</div></div></div></div></div></div>
+        <div class="crit-row"><div class="crit-name">dom_sweeping</div><div class="crit-desc">Blocs limites Bookmap effectivement exécutés (tradés, pas retirés) — taille ≥ 2× volume moyen/niveau des 10 dernières minutes</div><div class="crit-pts">+3</div></div>
+        <div class="crit-row"><div class="crit-examples"><div class="crit-examples-title">Exemples — cliquer pour agrandir</div><div class="ex-row"><div class="ex-card" data-cap="dom_sweeping +3 — bloc limite effectivement exécuté, taille ≥2× le volume moyen par niveau"><div style="padding:6px"><svg viewBox="0 0 300 150" xmlns="http://www.w3.org/2000/svg" font-family="JetBrains Mono, monospace"><rect width="300" height="150" fill="white"/><rect x="40" y="40" width="220" height="16" fill="#B5790A" opacity="0.35"/><text x="265" y="52" font-size="8" fill="#B5790A">bloc limite</text><rect x="40" y="40" width="160" height="16" fill="#0E9F6E" opacity="0.7"/><text x="50" y="52" font-size="9" fill="white">exécuté →</text><path d="M40 80 L240 80" stroke="#0E9F6E" stroke-width="2" marker-end="url(#ar2)"/><defs><marker id="ar2" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8 z" fill="#0E9F6E"/></marker></defs><text x="40" y="110" font-size="9" fill="#0E9F6E">Bloc tradé (disparu en étant exécuté) ✓</text><text x="40" y="126" font-size="8" fill="#8993A1">taille ≥2× volume moyen/niveau</text></svg></div><div class="ex-cap"><span class="ex-tag full">+3 plein score</span><div class="ex-desc">Bloc limite tradé (exécuté, pas retiré)</div></div></div><div class="ex-card" data-cap="dom_sweeping 0 — bloc limite retiré (pulled) du DOM, pas tradé"><div style="padding:6px"><svg viewBox="0 0 300 150" xmlns="http://www.w3.org/2000/svg" font-family="JetBrains Mono, monospace"><rect width="300" height="150" fill="white"/><rect x="40" y="40" width="200" height="16" fill="#8993A1" opacity="0.4"/><rect x="40" y="40" width="200" height="16" fill="none" stroke="#C8313A" stroke-width="1.5" stroke-dasharray="5 3"/><text x="50" y="52" font-size="9" fill="#C8313A">retiré (pulled)</text><text x="40" y="90" font-size="9" fill="#C8313A">Bloc retiré du DOM, pas exécuté ✗</text></svg></div><div class="ex-cap"><span class="ex-tag zero">0 contre-exemple</span><div class="ex-desc">Bloc retiré du DOM, jamais exécuté</div></div></div></div></div></div>
+        <div class="layer-foot">⚠ <strong>Compensation interdite</strong> — si C2 &lt; 19/25, rejet du trade même si le score total ≥ seuil de session.</div>
+      </div>
+
+      <!-- C3 -->
+      <div class="layer">
+        <div class="layer-head"><span class="lcode">C3</span><span class="ltitle">Macro &amp; timing</span><span class="lweight">Poids 20%</span><span class="lmax">20 pts</span><span class="lmin">Seuil min 13/20 (65%)</span></div>
+        <div class="layer-note">↔ <strong>Périmètre</strong> — distinct du Filtre 3 « Publication macro Tier 1 » (§3). C3 est une composante <strong>scorée</strong> (heure de déclenchement + structure VIX), évaluée après Phase 0. Le Filtre 3 est un <strong>gate binaire</strong> sur la présence d'un événement macroéconomique, évalué avant tout score. Aucun chevauchement de contenu : C3 ne teste jamais la présence d'un événement, le Filtre 3 ne teste jamais l'heure ni la structure VIX.</div>
+        <div class="crit-row"><div class="crit-name">heure_du_crime</div><div class="crit-desc">Déclenchement ±5 min des heures clés : 09h30 · 10h00 · 11h00<br><span style="color:var(--stop);font-size:11px">Malus auto : déclenchement ≥ 10h45 → -3 pts</span></div><div class="crit-pts">+10</div></div>
+        <div class="crit-row"><div class="crit-examples"><div class="crit-examples-title">Exemples — cliquer pour agrandir</div><div class="ex-row"><div class="ex-card" data-cap="heure_du_crime +10 — déclenchement à ±5 min de 09h30, 10h00 ou 11h00"><div style="padding:6px"><svg viewBox="0 0 300 150" xmlns="http://www.w3.org/2000/svg" font-family="JetBrains Mono, monospace"><rect width="300" height="150" fill="white"/><line x1="20" y1="90" x2="285" y2="90" stroke="#E3E7ED" stroke-width="1.5"/><line x1="50" y1="85" x2="50" y2="95" stroke="#8993A1"/><line x1="110" y1="85" x2="110" y2="95" stroke="#8993A1"/><line x1="170" y1="85" x2="170" y2="95" stroke="#8993A1"/><line x1="230" y1="85" x2="230" y2="95" stroke="#8993A1"/><circle cx="50" cy="90" r="6" fill="#0E9F6E"/><text x="38" y="78" font-size="8" fill="#0E9F6E">09:30</text><circle cx="170" cy="90" r="6" fill="#0E9F6E"/><text x="158" y="78" font-size="8" fill="#0E9F6E">10:00</text><text x="20" y="120" font-size="9" fill="#0E9F6E">Déclenchement ±5min d'une heure clé ✓</text></svg></div><div class="ex-cap"><span class="ex-tag full">+10 plein score</span><div class="ex-desc">Déclenchement ±5min d'une heure clé</div></div></div><div class="ex-card" data-cap="heure_du_crime 0 — déclenchement ≥10h45, hors fenêtre clé, déclenche le malus -3"><div style="padding:6px"><svg viewBox="0 0 300 150" xmlns="http://www.w3.org/2000/svg" font-family="JetBrains Mono, monospace"><rect width="300" height="150" fill="white"/><line x1="20" y1="90" x2="285" y2="90" stroke="#E3E7ED" stroke-width="1.5"/><circle cx="50" cy="90" r="6" fill="#8993A1"/><text x="38" y="78" font-size="8" fill="#8993A1">10:00</text><circle cx="225" cy="90" r="6" fill="#C8313A"/><text x="206" y="78" font-size="8" fill="#C8313A">10:47</text><text x="20" y="120" font-size="9" fill="#C8313A">≥10h45 : hors fenêtre clé + malus -3 ✗</text></svg></div><div class="ex-cap"><span class="ex-tag zero">0 + malus</span><div class="ex-desc">≥10h45 : hors fenêtre clé, malus -3</div></div></div></div></div></div>
+        <div class="crit-row"><div class="crit-name">vix_term_structure</div><div class="crit-desc">Contango parfait validé : VIX9D &lt; VIX Spot &lt; VIX3M — régime risk-on ordonné</div><div class="crit-pts">+6</div></div>
+        <div class="crit-row"><div class="crit-examples"><div class="crit-examples-title">Exemples — cliquer pour agrandir</div><div class="ex-row"><div class="ex-card" data-cap="vix_term_structure +6 — structure en contango parfait, régime risk-on ordonné"><div style="padding:6px"><svg viewBox="0 0 300 150" xmlns="http://www.w3.org/2000/svg" font-family="JetBrains Mono, monospace"><rect width="300" height="150" fill="white"/><polyline points="40,100 130,75 250,52" fill="none" stroke="#0E9F6E" stroke-width="2"/><circle cx="40" cy="100" r="4" fill="#0E9F6E"/><circle cx="130" cy="75" r="4" fill="#0E9F6E"/><circle cx="250" cy="52" r="4" fill="#0E9F6E"/><text x="20" y="115" font-size="8" fill="#15181E">VIX9D</text><text x="112" y="92" font-size="8" fill="#15181E">Spot</text><text x="232" y="46" font-size="8" fill="#15181E">VIX3M</text><text x="20" y="135" font-size="9" fill="#0E9F6E">VIX9D &lt; Spot &lt; VIX3M : contango ✓</text></svg></div><div class="ex-cap"><span class="ex-tag full">+6 plein score</span><div class="ex-desc">VIX9D &lt; Spot &lt; VIX3M : contango</div></div></div><div class="ex-card" data-cap="vix_term_structure 0 — backwardation, le spot dépasse le VIX3M, régime de stress"><div style="padding:6px"><svg viewBox="0 0 300 150" xmlns="http://www.w3.org/2000/svg" font-family="JetBrains Mono, monospace"><rect width="300" height="150" fill="white"/><polyline points="40,52 130,78 250,102" fill="none" stroke="#C8313A" stroke-width="2"/><circle cx="40" cy="52" r="4" fill="#C8313A"/><circle cx="130" cy="78" r="4" fill="#C8313A"/><circle cx="250" cy="102" r="4" fill="#C8313A"/><text x="20" y="135" font-size="9" fill="#C8313A">Spot &gt; VIX3M : backwardation (stress) ✗</text></svg></div><div class="ex-cap"><span class="ex-tag zero">0 contre-exemple</span><div class="ex-desc">Spot &gt; VIX3M : backwardation (stress)</div></div></div></div></div></div>
+        <div class="crit-row"><div class="crit-name">vix_basis_bonus</div><div class="crit-desc">Basis VIX Spot vs. /VX Front Month &gt; 1.5 pts à l'ouverture — repositionnement institutionnel en cours</div><div class="crit-pts">+4</div></div>
+        <div class="crit-row"><div class="crit-examples"><div class="crit-examples-title">Exemples — cliquer pour agrandir</div><div class="ex-row"><div class="ex-card" data-cap="vix_basis_bonus +4 — basis VIX spot vs /VX front month supérieur à 1.5 point"><div style="padding:6px"><svg viewBox="0 0 300 150" xmlns="http://www.w3.org/2000/svg" font-family="JetBrains Mono, monospace"><rect width="300" height="150" fill="white"/><line x1="60" y1="50" x2="240" y2="50" stroke="#1B2A4A" stroke-width="2"/><text x="244" y="54" font-size="8" fill="#1B2A4A">/VX front</text><line x1="60" y1="86" x2="240" y2="86" stroke="#0E9F6E" stroke-width="2"/><text x="244" y="90" font-size="8" fill="#0E9F6E">VIX spot</text><line x1="150" y1="50" x2="150" y2="86" stroke="#0E9F6E" stroke-width="1" stroke-dasharray="3 2"/><text x="155" y="70" font-size="9" fill="#0E9F6E">&gt;1.5 pt</text><text x="40" y="120" font-size="9" fill="#0E9F6E">Basis &gt;1.5 : repositionnement institutionnel ✓</text></svg></div><div class="ex-cap"><span class="ex-tag full">+4 plein score</span><div class="ex-desc">Basis &gt;1.5pt : repositionnement institutionnel</div></div></div><div class="ex-card" data-cap="vix_basis_bonus 0 — basis sous 1.5 point, aucun repositionnement notable"><div style="padding:6px"><svg viewBox="0 0 300 150" xmlns="http://www.w3.org/2000/svg" font-family="JetBrains Mono, monospace"><rect width="300" height="150" fill="white"/><line x1="60" y1="66" x2="240" y2="66" stroke="#1B2A4A" stroke-width="2"/><text x="244" y="70" font-size="8" fill="#1B2A4A">/VX front</text><line x1="60" y1="74" x2="240" y2="74" stroke="#C8313A" stroke-width="2"/><text x="244" y="78" font-size="8" fill="#C8313A">VIX spot</text><text x="40" y="120" font-size="9" fill="#C8313A">Basis &lt;1.5 : pas de signal ✗</text></svg></div><div class="ex-cap"><span class="ex-tag zero">0 contre-exemple</span><div class="ex-desc">Basis &lt;1.5pt : pas de signal</div></div></div></div></div></div>
+        <div class="layer-foot">⚠ <strong>Compensation interdite</strong> — si C3 &lt; 13/20, rejet du trade même si le score total ≥ seuil de session. Seuil fixe (option A) : en late session, le max réel tombe à 17/20, marge réduite à 4 pts.</div>
+      </div>
+
+      <!-- C4 -->
+      <div class="layer">
+        <div class="layer-head"><span class="lcode">C4</span><span class="ltitle">Sentiment contrarian — le squeeze</span><span class="lweight">Poids 15%</span><span class="lmax">15 pts</span><span class="lmin">Seuil min 10/15 (67%)</span></div>
+        <div class="crit-row"><div class="crit-name">capitulation_retail</div><div class="crit-desc">Ratio Put/Call CBOE Total, rolling 1h (cboe.com)<br>LONG : P/C &lt; 0.70 (euphorie retail) · SHORT : P/C &gt; 1.20 (capitulation retail)</div><div class="crit-pts">+9</div></div>
+        <div class="crit-row"><div class="crit-examples"><div class="crit-examples-title">Exemples — cliquer pour agrandir</div><div class="ex-row"><div class="ex-card" data-cap="capitulation_retail +9 — Put/Call sous 0.70, euphorie retail propice à un squeeze long"><div style="padding:6px"><svg viewBox="0 0 300 150" xmlns="http://www.w3.org/2000/svg" font-family="JetBrains Mono, monospace"><rect width="300" height="150" fill="white"/><rect x="40" y="40" width="220" height="70" fill="#F1F3F6"/><line x1="40" y1="75" x2="260" y2="75" stroke="#8993A1" stroke-dasharray="3 2"/><text x="44" y="71" font-size="8" fill="#8993A1">0.70</text><polyline points="40,68 80,72 120,60 160,55 200,50 250,46" fill="none" stroke="#0E9F6E" stroke-width="2"/><text x="40" y="128" font-size="9" fill="#0E9F6E">P/C &lt;0.70 : euphorie retail (squeeze long) ✓</text></svg></div><div class="ex-cap"><span class="ex-tag full">+9 plein score</span><div class="ex-desc">P/C &lt;0.70 : euphorie retail (squeeze long)</div></div></div><div class="ex-card" data-cap="capitulation_retail 0 — Put/Call en zone neutre, aucun extrême de sentiment"><div style="padding:6px"><svg viewBox="0 0 300 150" xmlns="http://www.w3.org/2000/svg" font-family="JetBrains Mono, monospace"><rect width="300" height="150" fill="white"/><rect x="40" y="40" width="220" height="70" fill="#F1F3F6"/><line x1="40" y1="75" x2="260" y2="75" stroke="#8993A1" stroke-dasharray="3 2"/><text x="44" y="71" font-size="8" fill="#8993A1">0.70</text><polyline points="40,80 80,84 120,82 160,86 200,83 250,88" fill="none" stroke="#C8313A" stroke-width="2"/><text x="40" y="128" font-size="9" fill="#C8313A">P/C neutre (0.70–1.20) : pas d'extrême ✗</text></svg></div><div class="ex-cap"><span class="ex-tag zero">0 contre-exemple</span><div class="ex-desc">P/C neutre 0.70–1.20 : pas d'extrême</div></div></div></div></div></div>
+        <div class="crit-row"><div class="crit-name">oi_accumulation</div><div class="crit-desc">Volume de la bougie de cassure ≥ 150% de la moyenne des 5 bougies précédentes</div><div class="crit-pts">+6</div></div>
+        <div class="crit-row"><div class="crit-examples"><div class="crit-examples-title">Exemples — cliquer pour agrandir</div><div class="ex-row"><div class="ex-card" data-cap="oi_accumulation +6 — volume de la bougie de cassure ≥150% de la moyenne des 5 précédentes"><div style="padding:6px"><svg viewBox="0 0 300 150" xmlns="http://www.w3.org/2000/svg" font-family="JetBrains Mono, monospace"><rect width="300" height="150" fill="white"/><rect x="40" y="81" width="18" height="24" fill="#8993A1" opacity="0.5"/><rect x="70" y="85" width="18" height="20" fill="#8993A1" opacity="0.5"/><rect x="100" y="79" width="18" height="26" fill="#8993A1" opacity="0.5"/><rect x="130" y="83" width="18" height="22" fill="#8993A1" opacity="0.5"/><rect x="160" y="80" width="18" height="25" fill="#8993A1" opacity="0.5"/><rect x="190" y="45" width="18" height="60" fill="#0E9F6E" opacity="0.8"/><line x1="40" y1="68" x2="215" y2="68" stroke="#0E9F6E" stroke-width="0.8" stroke-dasharray="3 2"/><text x="40" y="130" font-size="9" fill="#0E9F6E">Vol cassure ≥150% de la moyenne ✓</text></svg></div><div class="ex-cap"><span class="ex-tag full">+6 plein score</span><div class="ex-desc">Vol cassure ≥150% de la moyenne 5 bougies</div></div></div><div class="ex-card" data-cap="oi_accumulation 0 — volume de cassure proche de la moyenne, pas d'accumulation institutionnelle"><div style="padding:6px"><svg viewBox="0 0 300 150" xmlns="http://www.w3.org/2000/svg" font-family="JetBrains Mono, monospace"><rect width="300" height="150" fill="white"/><rect x="40" y="81" width="18" height="24" fill="#8993A1" opacity="0.5"/><rect x="70" y="85" width="18" height="20" fill="#8993A1" opacity="0.5"/><rect x="100" y="79" width="18" height="26" fill="#8993A1" opacity="0.5"/><rect x="130" y="83" width="18" height="22" fill="#8993A1" opacity="0.5"/><rect x="160" y="80" width="18" height="25" fill="#8993A1" opacity="0.5"/><rect x="190" y="80" width="18" height="25" fill="#C8313A" opacity="0.6"/><text x="40" y="130" font-size="9" fill="#C8313A">Vol cassure ≈ moyenne : pas d'accumulation ✗</text></svg></div><div class="ex-cap"><span class="ex-tag zero">0 contre-exemple</span><div class="ex-desc">Vol cassure ≈ moyenne : pas d'accumulation</div></div></div></div></div></div>
+        <div class="layer-foot">⚠ <strong>Compensation interdite</strong> — si C4 &lt; 10/15, rejet du trade même si le score total ≥ seuil de session. Seul capitulation_retail + oi_accumulation ensemble (9+6=15) franchissent confortablement ce seuil — un seul des deux critères (9 ou 6) ne suffit pas.</div>
+      </div>
+
+      <!-- C5 -->
+      <div class="layer">
+        <div class="layer-head"><span class="lcode">C5</span><span class="ltitle">Qualité &amp; corrélation</span><span class="lweight">Poids 5%</span><span class="lmax">5 pts</span><span class="lmin">Seuil min 3/5 (60%)</span></div>
+        <div class="crit-row"><div class="crit-name">corr_confirm</div><div class="crit-desc">Corrélation NQ/ES rolling 3min &gt; +0.80 — breadth fort et aligné</div><div class="crit-pts">+5</div></div>
+        <div class="crit-row"><div class="crit-examples"><div class="crit-examples-title">Exemples — cliquer pour agrandir</div><div class="ex-row"><div class="ex-card" data-cap="corr_confirm +5 — corrélation NQ/ES supérieure à +0.80, breadth fort et aligné"><div style="padding:6px"><svg viewBox="0 0 300 150" xmlns="http://www.w3.org/2000/svg" font-family="JetBrains Mono, monospace"><rect width="300" height="150" fill="white"/><polyline points="20,95 60,82 100,86 140,64 180,68 220,46 260,40" fill="none" stroke="#1B2A4A" stroke-width="1.6"/><text x="225" y="38" font-size="8" fill="#1B2A4A">ES</text><polyline points="20,100 60,88 100,90 140,70 180,72 220,52 260,46" fill="none" stroke="#0E9F6E" stroke-width="1.6" stroke-dasharray="4 2"/><text x="225" y="58" font-size="8" fill="#0E9F6E">NQ</text><text x="20" y="130" font-size="9" fill="#0E9F6E">NQ et ES alignés, corr &gt;+0.80 ✓</text></svg></div><div class="ex-cap"><span class="ex-tag full">+5 plein score</span><div class="ex-desc">NQ et ES alignés, corr &gt;+0.80</div></div></div><div class="ex-card" data-cap="corr_confirm 0 — NQ diverge de l'ES, corrélation faible, breadth non confirmé"><div style="padding:6px"><svg viewBox="0 0 300 150" xmlns="http://www.w3.org/2000/svg" font-family="JetBrains Mono, monospace"><rect width="300" height="150" fill="white"/><polyline points="20,90 60,76 100,80 140,58 180,62 220,42 260,38" fill="none" stroke="#1B2A4A" stroke-width="1.6"/><text x="225" y="36" font-size="8" fill="#1B2A4A">ES</text><polyline points="20,70 60,82 100,72 140,88 180,78 220,96 260,90" fill="none" stroke="#C8313A" stroke-width="1.6" stroke-dasharray="4 2"/><text x="225" y="100" font-size="8" fill="#C8313A">NQ</text><text x="20" y="130" font-size="9" fill="#C8313A">NQ diverge de l'ES : breadth faible ✗</text></svg></div><div class="ex-cap"><span class="ex-tag zero">0 contre-exemple</span><div class="ex-desc">NQ diverge de l'ES : breadth faible</div></div></div></div></div></div>
+        <div class="crit-row"><div class="crit-name">corr_neutral</div><div class="crit-desc">Corrélation NQ/ES entre +0.40 et +0.80 — réduire taille à 50% de la calibration</div><div class="crit-pts" style="color:var(--ink-faint)">0</div></div>
+        <div class="crit-row"><div class="crit-name">corr &lt; +0.40</div><div class="crit-desc" style="color:var(--stop)">Bloquant Phase 0 (Filtre 4)</div><div class="crit-pts malus">⛔</div></div>
+        <div class="crit-row"><div class="crit-name">late_session_malus</div><div class="crit-desc">Déclenchement ≥ 10h45 — cumulé avec le malus -3 pts de la couche Macro</div><div class="crit-pts malus">-2</div></div>
+        <div class="layer-foot">⚠ <strong>Compensation interdite</strong> — si C5 &lt; 3/5, rejet du trade même si le score total ≥ seuil de session. Seuil fixe (option A) : en late session (malus -2), seul corr_confirm complet (5-2=3) atteint tout juste le seuil — marge nulle.</div>
+      </div>
+
+      <!-- SUMMARY -->
+      <div class="summary-card">
+        <div class="summary-head">Récapitulatif général de la matrice</div>
+        <table class="clean">
+          <tr><th>Couche</th><th>Max</th><th>Seuil min</th><th>Poids</th><th>Notes</th></tr>
+          <tr><td>C1 — Structure</td><td>35 pts</td><td style="color:var(--warn);font-weight:700;">26 pts (74%)</td><td>35%</td><td>extraction_zone +15 · autoroute_lvn +9 · chop_directional +4/+2/0 · vpoc_migration +5 · poc_coherence +2</td></tr>
+          <tr><td>C2 — Order Flow</td><td>25 pts</td><td style="color:var(--warn);font-weight:700;">19 pts (76%)</td><td>25%</td><td>stacked_imbalances +10 · alignement_cvd +7 · delta_cassure +5 · dom_sweeping +3</td></tr>
+          <tr><td>C3 — Macro &amp; Timing</td><td>20 pts</td><td style="color:var(--warn);font-weight:700;">13 pts (65%)</td><td>20%</td><td>17 pts max si déclenchement ≥ 10h45</td></tr>
+          <tr><td>C4 — Sentiment</td><td>15 pts</td><td style="color:var(--warn);font-weight:700;">10 pts (67%)</td><td>15%</td><td>capitulation_retail +9 · oi_accumulation +6</td></tr>
+          <tr><td>C5 — Qualité</td><td>5 pts</td><td style="color:var(--warn);font-weight:700;">3 pts (60%)</td><td>5%</td><td>-2 pts si late session</td></tr>
+          <tr class="summary-total"><td style="font-weight:700;">Total théorique</td><td style="font-size:16px;">100</td><td></td><td>100%</td><td></td></tr>
+        </table>
+        <div class="threshold-bar">
+          <div class="threshold-cell">
+            <span class="tlabel">Seuil unique — score ajusté</span>
+            <span class="tval">≥ 88</span>
+            <span class="tctx">/ 100 pts, après malus de session</span>
+          </div>
+          <div class="threshold-cell">
+            <span class="tlabel">Score brut requis hors fenêtre</span>
+            <span class="tval warn">91 / 95</span>
+            <span class="tctx">tampon / zone morte — brut nécessaire pour rester ≥88 net</span>
+          </div>
+        </div>
+        <div class="threshold-banner">Interdiction d'entrée si score ajusté &lt; 88 OU si un pilier &lt; son seuil minimum OU si le plafond de fréquence hors-fenêtre est atteint (§1) — aucun override manuel toléré</div>
+      </div>
+    </section>
+
+    <!-- §5 ENTRÉE -->
+    <section class="section" id="entree">
+      <div class="section-head"><span class="section-tag">§5</span><h2>Protocole d'entrée — stop-limit de précision</h2></div>
+      <div class="note-box" style="background:var(--stop-bg);border-color:var(--stop-border);color:#7a1f25;font-weight:700;text-align:center;font-family:var(--font-mono);font-size:12px;">
+        ⛔ L'utilisation d'ordres Market ou Stop-Market est strictement et définitivement interdite
+      </div>
+      <div class="grid-2" style="margin-top:16px;">
+        <div class="protocol-card long">
+          <div class="protocol-dir long">↑ Setup LONG — cassure VAH</div>
+          <div class="protocol-row"><span class="protocol-key">Trigger price</span><span class="protocol-val">Prix_cassure + 1 tick</span></div>
+          <div class="protocol-row"><span class="protocol-key">Limit price</span><span class="protocol-val">Prix_cassure + 3 ticks</span></div>
+          <div class="protocol-row"><span class="protocol-key">Expiration</span><span class="protocol-val" style="color:var(--stop)">90 sec (GTC interdit)</span></div>
+        </div>
+        <div class="protocol-card short">
+          <div class="protocol-dir short">↓ Setup SHORT — cassure VAL</div>
+          <div class="protocol-row"><span class="protocol-key">Trigger price</span><span class="protocol-val">Prix_cassure - 1 tick</span></div>
+          <div class="protocol-row"><span class="protocol-key">Limit price</span><span class="protocol-val">Prix_cassure - 3 ticks</span></div>
+          <div class="protocol-row"><span class="protocol-key">Expiration</span><span class="protocol-val" style="color:var(--stop)">90 sec (GTC interdit)</span></div>
+        </div>
+      </div>
+      <div class="note-box warn" style="margin-top:14px;">
+        <span class="note-title">Clause de non-remplissage</span>
+        Si le marché franchit instantanément la Limit Price sans remplissage, le trade est annulé sur-le-champ. Interdiction absolue de courir après le prix.
+      </div>
+      <div class="note-box" style="background:var(--stop-bg);border-color:var(--stop-border);color:#7a1f25;">
+        <span class="note-title">Clause de distance</span>
+        Si la cassure est déjà distante de plus de 5 ticks au moment du scoring, le trigger est invalide → REJET, recalibrer sur la prochaine opportunité depuis la VA.
+      </div>
+    </section>
+
+    <!-- §6 NQ/ES -->
+    <section class="section" id="nqes">
+      <div class="section-head"><span class="section-tag">§6</span><h2>Early warning NQ/ES — système à 3 paliers</h2></div>
+      <div class="card" style="padding:0;overflow:hidden;">
+        <table class="clean"><tr><th>Corrélation NQ/ES rolling 3min</th><th>Action requise</th><th>Points qualité</th><th>Taille</th></tr></table>
+        <div class="corr-row go">
+          <div><span class="corr-range go">&gt; +0.80</span></div>
+          <div style="color:var(--go);font-weight:600;">Confirmé — breadth fort</div>
+          <div style="color:var(--go);font-weight:700;">+5 pts</div>
+          <div>Taille nominale de calibration</div>
+        </div>
+        <div class="corr-row warn">
+          <div><span class="corr-range warn">+0.40 à +0.80</span></div>
+          <div style="color:var(--warn);font-weight:600;">Warning — divergence partielle, trade autorisé si score ≥ seuil</div>
+          <div style="color:var(--warn);font-weight:700;">0 pts</div>
+          <div style="color:var(--warn);">Réduite à 50% calibration</div>
+        </div>
+        <div class="corr-row stop">
+          <div><span class="corr-range stop">&lt; +0.40 ou négatif</span><br><span style="font-size:11px;color:var(--ink-faint)">NQ inverse la direction du ES</span></div>
+          <div style="color:var(--stop);font-weight:600;">Purge de liquidité ⛔ — rejet inconditionnel (Filtre 4)</div>
+          <div style="color:var(--stop);font-weight:700;">⛔</div>
+          <div style="color:var(--stop);">Score ignoré même à 99/100</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- §7 SORTIE -->
+    <section class="section" id="sortie">
+      <div class="section-head"><span class="section-tag">§7</span><h2>Gestion de position &amp; sortie CVD</h2></div>
+      <div class="mgmt-card">
+        <div class="mgmt-title">Gestion mécanique — break-even automatique</div>
+        <div class="mgmt-rule">
+          À <span class="trigger">+1.5R atteint</span> :<br>
+          → <span class="action">Déplacer le stop au break-even immédiatement (obligatoire)</span><br>
+          → Logique : dans un LVN la vélocité est présumée, le trade ne peut pas redevenir perdant<br>
+          → Aucune exception, même si une bougie de consolidation se forme
+        </div>
+      </div>
+      <div class="mgmt-card amber">
+        <div class="mgmt-title">Filtre de flux sortant rapide — CVD divergence (confirmation 2 bougies)</div>
+        <div class="mgmt-rule">
+          <strong>Conditions de sortie anticipée :</strong><br>
+          LONG : prix progresse à la hausse ET CVD plafonne ou diverge baissièrement<br>
+          SHORT : prix progresse à la baisse ET CVD diverge haussièrement<br><br>
+          <strong style="color:var(--warn)">Règle de confirmation :</strong> la divergence CVD doit être visible sur ≥ 2 bougies 1min consécutives avant de déclencher la sortie.<br><br>
+          <span class="action">Action : sortie au marché immédiate (protection de profit)</span><br>
+          Ce filtre prévaut sur la cible technique finale. Journaliser sous « sortie précoce CVD » avec le R effectivement obtenu.<br><br>
+          <span style="color:var(--ink-faint);font-size:11.5px;">Note Choppiness : si le CHOP(14) remonte vers 61.8 pendant le trade, c'est un signal d'alerte précoce de perte de momentum directionnel — confirmation croisée avec le CVD avant sortie.</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- §8 SIZING -->
+    <section class="section" id="sizing">
+      <div class="section-head"><span class="section-tag">§8</span><h2>Dynamic position sizing — multi-niveaux VIX</h2></div>
+      <p class="section-intro">Le sizing s'applique sur la base de la taille de calibration (50% du nominal). Le VIX est lu à l'ouverture ET surveillé en continu. Recalibration intraday si franchissement.</p>
+      <div class="card" style="padding:0;overflow:hidden;">
+        <table class="clean"><tr><th>VIX Spot</th><th>Taille autorisée</th><th>Règle stop</th></tr></table>
+        <div class="sizing-row"><div><span class="sizing-vix" style="color:var(--go)">&lt; 15</span></div><div style="color:var(--go);font-weight:700;">100% de la calibration</div><div>Stop standard (-1 tick VA)</div></div>
+        <div class="sizing-row"><div><span class="sizing-vix" style="color:var(--warn)">15 ≤ VIX ≤ 20</span></div><div style="color:var(--warn);font-weight:700;">75% de la calibration</div><div>Stop standard (-1 tick VA)</div></div>
+        <div class="sizing-row"><div><span class="sizing-vix" style="color:var(--warn)">20 &lt; VIX ≤ 30</span></div><div style="color:var(--warn);font-weight:700;">50% de la calibration</div><div>Stop élargi autorisé (bruit + 2 ticks)</div></div>
+        <div class="sizing-row stop"><div><span class="sizing-vix" style="color:var(--stop)">&gt; 30</span></div><div style="color:var(--stop);font-weight:700;">Session suspendue ⛔</div><div style="color:var(--stop);">Aucun trade — journée off</div></div>
+      </div>
+      <div class="note-box warn" style="margin-top:14px;">
+        <span class="note-title">Recalibration intraday</span>
+        Si le VIX franchit un seuil pendant la session : taille ajustée au nouveau palier pour les prochains trades uniquement, le trade en cours n'est pas modifié. Alerte émise : « ALERTE VIX — Seuil XX franchi. Sizing réduit à XX%. »
+      </div>
+      <div class="note-box" style="margin-top:10px;">
+        <span class="note-title">Interaction VIX × Choppiness</span>
+        VIX élevé (20–30) + CHOP élevé (50–61.8) = double signal de prudence. Réduire la taille au palier VIX en vigueur ET journaliser l'avertissement CHOP. Ne pas prendre de setup en zone grise CHOP si VIX &gt; 20.
+      </div>
+
+      <p class="section-intro" style="margin-top:24px;">Modificateur de session — s'applique en plus du palier VIX, jamais à la place. Mêmes paliers de pourcentage que le modificateur VIX existant, réutilisés plutôt qu'un nouveau barème inventé.</p>
+      <div class="card" style="padding:0;overflow:hidden;">
+        <table class="clean"><tr><th>Tranche horaire</th><th>Modificateur</th><th>Cumul avec VIX</th></tr></table>
+        <div class="sizing-row"><div><span class="sizing-vix" style="color:var(--go)">09h30–11h00</span></div><div style="color:var(--go);font-weight:700;">×1.00 (aucun)</div><div>Taille = palier VIX seul</div></div>
+        <div class="sizing-row"><div><span class="sizing-vix" style="color:var(--warn)">Zone tampon (≤30 min)</span></div><div style="color:var(--warn);font-weight:700;">×0.75</div><div>Taille = palier VIX × 0.75</div></div>
+        <div class="sizing-row stop"><div><span class="sizing-vix" style="color:var(--stop)">Zone morte (&gt;30 min)</span></div><div style="color:var(--stop);font-weight:700;">×0.50</div><div>Taille = palier VIX × 0.50</div></div>
+      </div>
+      <div class="note-box" style="margin-top:10px;">
+        <span class="note-title">Formule combinée</span>
+        Taille finale = Taille calibration × Modificateur VIX (§8) × Modificateur session. Exemple : VIX à 18 (palier 75%) en zone morte (×0.50) → taille finale = calibration × 0.75 × 0.50 = 37.5% de la calibration, arrondi à la tranche de 5% la plus proche vers le bas → 35%.
+      </div>
+    </section>
+
+    <!-- §9 CHECKLIST -->
+    <section class="section" id="checklist">
+      <div class="section-head"><span class="section-tag">§9</span><h2>Checklist psychologique pré-trade</h2></div>
+      <p class="section-intro">Validation obligatoire avant le lancement du compte à rebours de 90 secondes. Les 4 questions sont posées dans l'ordre, aucune n'est optionnelle.</p>
+      <div class="check-item">
+        <div class="check-q">Q1</div>
+        <div>
+          <div class="check-text">« Suis-je en train de cliquer parce que je m'ennuie ? »</div>
+          <div class="check-action stop">OUI → Lockout 30 min. Le terminal est bloqué.</div>
+        </div>
+      </div>
+      <div class="check-item">
+        <div class="check-q">Q2</div>
+        <div>
+          <div class="check-text">« Est-ce que je veux me refaire après une perte ? »</div>
+          <div class="check-action stop">OUI → Lockout 30 min. Le terminal est bloqué.</div>
+          <div class="check-note">Si OUI à Q1 ou Q2 : stop. Les questions Q3 et Q4 ne sont pas posées.</div>
+        </div>
+      </div>
+      <div class="check-item">
+        <div class="check-q">Q3</div>
+        <div>
+          <div class="check-text">« Mon niveau d'invalidation est : [XXXX.XX]. Je le connais avant de cliquer. »</div>
+          <div class="check-action stop">Non renseigné → autorisation refusée, le niveau est demandé avant de continuer.</div>
+          <div class="check-note">Déclaration obligatoire, pas une question.</div>
+        </div>
+      </div>
+      <div class="check-item">
+        <div class="check-q">Q4</div>
+        <div>
+          <div class="check-text">« Est-ce que ce setup ressemble à un trade déjà pris et perdu cette semaine, sur la même configuration ? »</div>
+          <div class="check-action warn">OUI → pause obligatoire 10 min (pas de lockout, temps de réflexion). Après 10 min, relancer la checklist depuis Q1.</div>
+          <div class="check-action go">NON → autorisation d'entamer les 90 secondes de rédaction de thèse.</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- §10 FORMAT -->
+    <section class="section" id="format">
+      <div class="section-head"><span class="section-tag">§10</span><h2>Format de sortie obligatoire</h2></div>
+      <div class="output-card">
+        <div class="output-head">Template — format de signal standardisé</div>
+        <div class="output-body">
+<span class="sep">══════════════════════════════════════════════════</span>
+<span class="d">SIGNAL      : </span><span class="g">[LONG / SHORT / NEUTRE]</span><br>
+<span class="d">SETUP       : </span>SVS — Structural Vacuum Squeeze<br>
+<span class="d">SCORE       : </span><span class="a">XX/100 brut → XX/100 ajusté</span> [FENÊTRE / TAMPON / ZONE MORTE]<br>
+<span class="d">CALIBRATION : </span>Trade #XX/60 — Phase : calibration dynamique
+<span class="sep">══════════════════════════════════════════════════</span>
+
+<div class="output-sub">Phase 0 — Filtres absolus</div>
+<span class="d">  Obstacle &lt; 8 ticks   : </span><span class="g">[CLEAR</span> / <span class="r">⛔ BLOQUANT]</span><br>
+<span class="d">  CHOP ≥ 61.8 (choppy) : </span><span class="g">[CLEAR (CHOP=XX.X)</span> / <span class="r">⛔ BLOQUANT]</span><br>
+<span class="d">  Divergence flux      : </span><span class="g">[CLEAR</span> / <span class="r">⛔ BLOQUANT — absorption]</span><br>
+<span class="d">  News Tier 1 ±30min   : </span><span class="g">[CLEAR</span> / <span class="r">⛔ BLOQUANT — [événement]]</span><br>
+<span class="d">  Purge NQ/ES          : </span><span class="g">[CLEAR</span> / <span class="r">⛔ BLOQUANT — corr = XX.XX]</span><br>
+<span class="d">  Régime VIX           : </span><span class="g">[CLEAR</span> / <span class="r">⛔ SESSION SUSPENDUE — VIX &gt; 30]</span>
+
+<div class="output-sub">Scoring pondéré (si Phase 0 intégralement CLEAR)</div>
+<span class="d">  C1 — Structure   : </span><span class="g">XX/35</span>  <span class="d">[Seuil min 26 : </span><span class="g">OK</span> / <span class="r">⛔ SOUS SEUIL]</span><br>
+<span class="d">    extraction_zone    : </span>[OUI +15 / NON 0]<br>
+<span class="d">    autoroute_lvn      : </span>[OUI +9 / NON 0]<br>
+<span class="d">    chop_directional   : </span>[FORT +4 / MODÉRÉ +2 / GRISE 0] <span class="a">CHOP=XX.X</span><br>
+<span class="d">    vpoc_migration     : </span>[OUI +5 / NON 0]<br>
+<span class="d">    poc_coherence      : </span>[OUI +2 / NON 0]<br><br>
+<span class="d">  C2 — Order Flow  : </span><span class="g">XX/25</span>  <span class="d">[Seuil min 19 : </span><span class="g">OK</span> / <span class="r">⛔ SOUS SEUIL]</span><br>
+<span class="d">    stacked_imbalances : </span>[OUI +10 / NON 0]<br>
+<span class="d">    alignement_cvd     : </span>[OUI +7 / NON 0]<br>
+<span class="d">    delta_cassure_60%  : </span>[OUI +5 / NON 0]<br>
+<span class="d">    dom_sweeping       : </span>[OUI +3 / NON 0]<br><br>
+<span class="d">  C3 — Macro       : </span><span class="g">XX/20</span>  <span class="d">[Seuil min 13 : </span><span class="g">OK</span> / <span class="r">⛔ SOUS SEUIL]</span><br>
+<span class="d">    heure_du_crime     : </span>[OUI +10 / NON 0] <span class="r">[malus -3 si ≥10h45]</span><br>
+<span class="d">    vix_term_structure : </span>[OUI +6 / NON 0]<br>
+<span class="d">    vix_basis_bonus    : </span>[OUI +4 / NON 0]<br><br>
+<span class="d">  C4 — Sentiment   : </span><span class="g">XX/15</span>  <span class="d">[Seuil min 10 : </span><span class="g">OK</span> / <span class="r">⛔ SOUS SEUIL]</span><br>
+<span class="d">    capitulation_retail: </span>[OUI +9 / NON 0] <span class="d">[P/C : XX.XX]</span><br>
+<span class="d">    oi_accumulation    : </span>[OUI +6 / NON 0] <span class="d">[vol cassure : XXX%]</span><br><br>
+<span class="d">  C5 — Qualité     : </span><span class="g">XX/5</span>  <span class="d">[Seuil min 3 : </span><span class="g">OK</span> / <span class="r">⛔ SOUS SEUIL]</span><br>
+<span class="d">    corr_nq_es         : </span>[CONFIRMÉ +5 / NEUTRE 0]<br>
+<span class="d">    late_session_malus : </span>[OUI -2 / NON 0]
+<span class="sep">══════════════════════════════════════════════════</span>
+<span class="d">COMPENSATION INTERDITE : </span>[<span class="g">TOUS PILIERS ≥ SEUIL ✓</span> / <span class="r">⛔ PILIER [Cx] SOUS SEUIL — REJET</span>]
+<span class="sep">══════════════════════════════════════════════════</span>
+<span class="d">CORRÉLATION NQ/ES 3min : </span><span class="a">XX.XX</span> → [CONFIRMÉ / WARNING 50% / PURGE ⛔]<br>
+<span class="d">VIX SPOT actuel        : </span><span class="a">XX.XX</span> → Palier : [&lt;15 / 15-20 / 20-30 / &gt;30 ⛔]<br>
+<span class="d">CHOPPINESS INDEX (15m) : </span><span class="a">XX.X</span> → [FORT / MODÉRÉ / GRISE / CHOPPY ⛔]<br>
+<span class="d">TRANCHE SESSION        : </span>[FENÊTRE 0 / TAMPON -3 / ZONE MORTE -7] · trades zone morte cette semaine : <span class="a">X/1</span>
+
+<div class="output-sub">Checklist pré-trade</div>
+<span class="d">  Q1 (Ennui)         : </span>[NON ✓ / <span class="r">OUI ⛔ lockout 30min</span>]<br>
+<span class="d">  Q2 (Revenge)       : </span>[NON ✓ / <span class="r">OUI ⛔ lockout 30min</span>]<br>
+<span class="d">  Q3 (Invalidation)  : </span>Niveau = <span class="a">XXXX.XX</span> [RENSEIGNÉ ✓ / <span class="r">MANQUANT ⛔</span>]<br>
+<span class="d">  Q4 (Pattern passé) : </span>[NON ✓ / <span class="a">OUI → pause 10min</span>]<br><br>
+<span class="d">CHECKLIST GLOBALE : </span>[<span class="g">VALIDE ✓</span> / <span class="r">LOCKOUT 30MIN ⛔</span> / <span class="a">PAUSE 10MIN</span>]
+<span class="sep">══════════════════════════════════════════════════</span>
+<span class="d">DÉCISION : </span><span class="g">[STOP-LIMIT PLACÉ</span> / <span class="r">REJET PHASE 0</span> / <span class="r">SCORE INSUFFISANT</span> / <span class="r">PILIER SOUS SEUIL</span> / <span class="r">PLAFOND HORS-FENÊTRE</span> / <span class="r">LOCKOUT]</span>
+
+<div class="output-sub">Spécifications de l'ordre</div>
+<span class="d">  Type         : </span>Stop-Limit <span class="r">(GTC interdit — expiration 90s)</span><br>
+<span class="d">  Trigger      : </span><span class="a">XXXX.XX</span><br>
+<span class="d">  Limit max    : </span><span class="a">XXXX.XX</span><br>
+<span class="d">  Invalidation : </span><span class="r">XXXX.XX</span> (= niveau déclaré Q3)<br>
+<span class="d">  Distance     : </span>[<span class="g">OK &lt; 5 ticks</span> / <span class="r">⛔ DISTANTE — invalide</span>]
+
+<div class="output-sub">Thèse opérateur — chrono 90s</div>
+<span class="d">  Pourquoi ce setup est valide      : </span>___________________________<br>
+<span class="d">  Ce que j'attends structurellement : </span>___________________________<br>
+<span class="d">  Mon invalidation est XXXX.XX car  : </span>___________________________
+
+<div class="output-sub">Exposition</div>
+<span class="d">VIX XX.XX → </span><span class="a">XX%</span><span class="d"> de la calibration autorisée</span><br>
+<span class="d">Taille effective = </span><span class="a">XX%</span><span class="d"> × 50% × taille nominale</span>
+
+<div class="output-sub">Post-trade — à compléter immédiatement à la clôture</div>
+<span class="d">  Résultat             : </span>[WIN / LOSS / BE / SORTIE PRÉCOCE CVD]<br>
+<span class="d">  R obtenu             : </span>+/- <span class="a">XX.XX R</span><br>
+<span class="d">  Prix d'entrée        : </span><span class="a">XXXX.XX</span><br>
+<span class="d">  Prix de sortie       : </span><span class="a">XXXX.XX</span><br>
+<span class="d">  Respect du protocole : </span>[OUI TOTAL / NON → écart : _______]<br>
+<span class="d">  CHOP entrée → sortie : </span>XX.X → XX.X<br>
+<span class="d">  Filtre qui a failli  : </span>[Aucun / ________________________]<br>
+<span class="d">  État émotionnel (1–5): </span>[1=calme total · 3=neutre · 5=stress élevé]<br>
+<span class="d">  Note journalisation  : </span>________________________________________
+<span class="sep">══════════════════════════════════════════════════</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- §11 REJETS -->
+    <section class="section" id="rejets">
+      <div class="section-head"><span class="section-tag">§11</span><h2>Catalogue des rejets standardisés</h2></div>
+      <div class="rej-item"><span class="rcode">REJET</span> Filtre 1A actif. Obstacle structurel à moins de 8 ticks du trigger. Attendre absorption ou reconfiguration de la zone.</div>
+      <div class="rej-item"><span class="rcode">REJET</span> Filtre 1B actif. CHOP(14) 15min = XX.X ≥ 61.8. Marché non-directionnel. Attendre retour CHOP &lt; 61.8.</div>
+      <div class="rej-item"><span class="rcode">REJET</span> Filtre 2 actif. Absorption détectée sur le Footprint 1min. Delta invalide.</div>
+      <div class="rej-item"><span class="rcode">REJET</span> Filtre 3 actif. [Événement Tier 1] prévu dans XX minutes. Prochain scan admissible : [heure publication + 30min].</div>
+      <div class="rej-item"><span class="rcode">REJET</span> Filtre 4 actif. Corrélation NQ/ES = XX.XX. Purge de liquidité détectée.</div>
+      <div class="rej-item"><span class="rcode">REJET</span> Filtre 5 actif. VIX &gt; 30. Session SVS suspendue pour la journée.</div>
+      <div class="rej-item"><span class="rcode">REJET</span> Score insuffisant : XX/100. Seuil requis : XX/100. Delta : -XX pts. Critères manquants : [liste].</div>
+      <div class="rej-item"><span class="rcode">REJET</span> Pilier [Cx] sous le seuil minimum (XX/YY pts, seuil ZZ pts). Compensation interdite — rejet même si le score total ≥ seuil de session.</div>
+      <div class="rej-item"><span class="rcode">REJET</span> Score ajusté insuffisant : XX/100 brut − XX (malus session [tampon/zone morte]) = XX/100 ajusté. Seuil requis : 88. Score brut nécessaire hors fenêtre : 91 (tampon) ou 95 (zone morte).</div>
+      <div class="rej-item"><span class="rcode">REJET</span> Plafond de fréquence hors-fenêtre atteint. 1 trade en zone morte déjà journalisé cette semaine glissante. Veto dur — score ignoré même à 100/100. Prochain trade zone morte admissible : [date +7j du dernier].</div>
+      <div class="rej-item"><span class="rcode">REJET</span> Cassure distante. Prix actuel = XXXX.XX · cassure initiale = XXXX.XX. Distance = XX ticks &gt; 5 ticks max.</div>
+      <div class="rej-item"><span class="rcode">REJET</span> FOMO détecté. Input soumis &gt; 3 min après la cassure initiale.</div>
+      <div class="rej-item"><span class="rcode">REJET</span> Revenge trading détecté. Input soumis dans les 20 min suivant une perte.</div>
+      <div class="rej-item" style="border-left-color:var(--stop);background:var(--stop-bg);"><span class="rcode">REJET CONFIRMÉ</span> Tentative de contournement détectée. Lockout 20 minutes.</div>
+      <div class="rej-item" style="border-left-color:var(--stop);background:var(--stop-bg);"><span class="rcode">REJET</span> Trade déjà rejeté il y a &lt; 20 min sur ce setup. Anti-contournement actif — aucun nouvel argument n'est recevable avant l'expiration du lockout. Temps restant : XX min.</div>
+      <div class="rej-item warning"><span class="rcode">ALERTE VIX</span> Seuil XX franchi en intraday. Sizing réduit à XX% dès le prochain trade.</div>
+      <div class="rej-item warning"><span class="rcode">ALERTE CHOP</span> Index remonte vers 61.8 pendant le trade en cours. Surveiller CVD — sortie anticipée si divergence confirmée 2 bougies.</div>
+      <div class="rej-item warning"><span class="rcode">WARNING CORRÉLATION</span> NQ/ES = XX.XX (zone 0.40–0.80). Trade autorisé si score ≥ seuil. Taille réduite à 50% calibration.</div>
+      <div class="rej-item warning"><span class="rcode">WARNING CHOP ZONE GRISE</span> CHOP(14) entre 50 et 61.8. 0 pts Structure pour ce critère. Interdit si VIX &gt; 20 (double signal de prudence).</div>
+    </section>
+
+    <!-- §12 ANALYSE VISUELLE IA -->
+    <section class="section" id="vision">
+      <div class="section-head"><span class="section-tag">§12</span><h2>Analyse visuelle assistée par IA</h2></div>
+      <p class="section-intro">Système d'aide à la lecture de captures (chart prix, Bookmap, footprint). <strong>L'image propose, le code ou l'opérateur tranchent</strong> — aucune lecture visuelle n'entre jamais directement dans le score officiel. Conforme à la règle fondamentale du projet : tout score reste déterministe et backtestable.</p>
+
+      <div class="note-box" style="margin-bottom:18px;">
+        <span class="note-title">Principe directeur — l'IA ne note jamais, elle suggère</span>
+        La sortie de l'agent vision est un <strong>brouillon de suggestion</strong> assorti d'un niveau de confiance, jamais une note. Le score final est toujours saisi ou confirmé par l'opérateur, ou calculé par du code exact sur une donnée chiffrée. Deux captures identiques doivent pouvoir donner deux descriptions légèrement différentes sans que cela n'affecte jamais le score — parce que le score ne dépend pas de la description.
+      </div>
+
+      <!-- WIDGET IMPORT PHOTO -->
+      <div class="import-widget">
+        <div class="import-head">IMPORTATION DE CAPTURE — STAGING POUR ANALYSE</div>
+        <div class="import-body">
+          <input type="file" id="imgInput" accept="image/*" style="display:none">
+          <div class="dropzone" id="dropzone">
+            <div class="dz-icon">⬆</div>
+            <div class="dz-main">Glisser une capture ici, ou cliquer pour importer</div>
+            <div class="dz-sub">PNG / JPG — chart prix, Bookmap ou footprint · traité en mémoire, rien n'est stocké</div>
+          </div>
+
+          <div class="type-picker" id="typePicker">
+            <div class="type-btn" data-type="bookmap">Bookmap<span class="tb-sub">heatmap de liquidité</span></div>
+            <div class="type-btn" data-type="prix">Chart prix<span class="tb-sub">chandeliers / VA</span></div>
+            <div class="type-btn" data-type="footprint">Footprint<span class="tb-sub">grille chiffrée</span></div>
+          </div>
+
+          <div class="preview-wrap" id="previewWrap">
+            <img class="preview-img" id="previewImg" alt="capture importée">
+            <div class="preview-bar">
+              <span class="preview-meta" id="previewMeta"></span>
+              <button class="btn-reset" id="btnReset">Retirer la capture</button>
+            </div>
+            <div class="applicable" id="applicable">
+              <div class="applicable-title" id="applicableTitle">Critères lisibles sur ce type d'image</div>
+              <div id="critChips"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div style="font-size:11.5px;color:var(--ink-faint);margin:-8px 0 18px;">Le widget importe et affiche la capture, déclare son type, et liste les critères que ce type d'image permet de lire — c'est l'étape de <em>staging</em>. L'analyse IA elle-même s'exécute via l'API (système §12 ci-dessous) ; ce document de référence reste autonome et hors-ligne, sans appel réseau.</div>
+
+      <!-- DEUX BRIQUES -->
+      <div class="grid-2" style="margin-bottom:18px;">
+        <div class="card" style="border-top:3px solid var(--info);">
+          <div class="stat-label" style="color:var(--info);">Brique 1 — Claude API (vision native)</div>
+          <div style="font-size:13px;margin-top:6px;">Lecture <strong>structurelle</strong> — ce qu'un modèle de vision lit fiablement : forme globale, tendance, cassure VAH/VAL, présence d'un LVN, migration visible du VPOC, divergence CVD (forme des courbes), congestion Bookmap.</div>
+          <div style="font-size:12px;color:var(--ink-soft);margin-top:8px;">Sortie : description → critère SVS concerné → suggestion → niveau de confiance.</div>
+        </div>
+        <div class="card" style="border-top:3px solid var(--warn);">
+          <div class="stat-label" style="color:var(--warn);">Brique 2 — OCR dédié (hybride)</div>
+          <div style="font-size:13px;margin-top:6px;">Extraction des <strong>chiffres fins</strong> que la vision lit mal : ratios footprint cellule par cellule, niveaux au tick, delta chiffré. <strong>OCR primaire si confiance haute, bascule en saisie manuelle sinon.</strong></div>
+          <div style="font-size:12px;color:var(--ink-soft);margin-top:8px;">Le seuil exact (≥3:1, ≥60%…) est appliqué par le <strong>code</strong>, jamais par le modèle — calcul déterministe et backtestable.</div>
+        </div>
+      </div>
+
+      <!-- TABLE DE TAGS PAR CRITÈRE -->
+      <p class="section-intro">Chaque critère SVS est tagué selon son type de lecture. Constat structurant : seuls ~5 critères sur 17 sont réellement « lisibles à l'image » — tout le reste est chiffré et ne dépend jamais d'une estimation visuelle. La surface d'exposition à l'IA est petite et circonscrite.</p>
+      <div class="card" style="padding:0;overflow:hidden;">
+        <table class="clean">
+          <tr><th>Critère</th><th>Type de lecture</th><th>Brique</th><th>Confiance attendue</th></tr>
+          <tr><td class="mono">extraction_zone</td><td>Structure visuelle</td><td style="color:var(--info);">Vision</td><td style="color:var(--go);font-weight:700;">Haute</td></tr>
+          <tr><td class="mono">autoroute_lvn</td><td>Structure visuelle</td><td style="color:var(--info);">Vision</td><td style="color:var(--go);font-weight:700;">Haute</td></tr>
+          <tr><td class="mono">chop_directional</td><td>Chiffré (CHOP=XX.X)</td><td style="color:var(--warn);">OCR + code</td><td style="color:var(--ink-faint);">Déterministe</td></tr>
+          <tr><td class="mono">vpoc_migration</td><td>Structure visuelle</td><td style="color:var(--info);">Vision</td><td style="color:var(--warn);font-weight:700;">Moyenne</td></tr>
+          <tr><td class="mono">poc_coherence</td><td>Structure visuelle</td><td style="color:var(--info);">Vision</td><td style="color:var(--warn);font-weight:700;">Moyenne</td></tr>
+          <tr><td class="mono">stacked_imbalances</td><td>Chiffré (ratio 3:1)</td><td style="color:var(--warn);">OCR + code</td><td style="color:var(--ink-faint);">Déterministe</td></tr>
+          <tr><td class="mono">alignement_cvd</td><td>Structure visuelle</td><td style="color:var(--info);">Vision</td><td style="color:var(--warn);font-weight:700;">Moyenne</td></tr>
+          <tr><td class="mono">delta_cassure</td><td>Chiffré (≥60%)</td><td style="color:var(--warn);">OCR + code</td><td style="color:var(--ink-faint);">Déterministe</td></tr>
+          <tr><td class="mono">dom_sweeping</td><td>Chiffré (2× volume)</td><td style="color:var(--warn);">OCR + code</td><td style="color:var(--ink-faint);">Déterministe</td></tr>
+          <tr><td class="mono">heure_du_crime</td><td>Métadonnée (horodatage)</td><td style="color:var(--ink-faint);">Système</td><td style="color:var(--ink-faint);">N/A</td></tr>
+          <tr><td class="mono">vix_term_structure</td><td>Chiffré</td><td style="color:var(--ink-faint);">Saisie / API</td><td style="color:var(--ink-faint);">N/A</td></tr>
+          <tr><td class="mono">vix_basis_bonus</td><td>Chiffré</td><td style="color:var(--ink-faint);">Saisie / API</td><td style="color:var(--ink-faint);">N/A</td></tr>
+          <tr><td class="mono">capitulation_retail</td><td>Chiffré (P/C)</td><td style="color:var(--ink-faint);">Saisie / API</td><td style="color:var(--ink-faint);">N/A</td></tr>
+          <tr><td class="mono">oi_accumulation</td><td>Chiffré (150%)</td><td style="color:var(--warn);">OCR + code</td><td style="color:var(--ink-faint);">Déterministe</td></tr>
+          <tr><td class="mono">corr_confirm</td><td>Chiffré (corrélation)</td><td style="color:var(--ink-faint);">API</td><td style="color:var(--ink-faint);">N/A</td></tr>
+        </table>
+      </div>
+
+      <!-- MAPPING BOOKMAP C1/C2 -->
+      <div class="section-head" style="margin-top:32px;margin-bottom:16px;"><h2 style="font-size:16px;">📡 Lecture Bookmap — piliers Structure &amp; Order Flow</h2></div>
+      <p class="section-intro">Workflow heatmap-primaire. Bookmap excelle sur la <strong>liquidité au repos</strong> (heatmap) et les <strong>exécutions</strong> (trade dots) — ce qui en fait une source haute confiance pour une partie précise de C1 et C2, et une source inadaptée pour le reste. Le tableau ci-dessous distingue les deux sans ambiguïté.</p>
+      <div class="card" style="padding:0;overflow:hidden;">
+        <div style="display:grid;grid-template-columns:170px 1fr 130px;background:var(--bg);border:1px solid var(--border);">
+          <div class="sizing-header">Critère</div><div class="sizing-header">Ce que montre Bookmap</div><div class="sizing-header">Confiance Bookmap</div>
+        </div>
+        <div class="bmap-row high"><div class="mono" style="color:var(--navy-soft);">autoroute_lvn</div><div>Zone sombre / fine de la heatmap = vide de liquidité au repos. Lecture native, directe.</div><div class="bmap-conf" style="color:var(--go);">HAUTE — vision</div></div>
+        <div class="bmap-row high"><div class="mono" style="color:var(--navy-soft);">dom_sweeping</div><div>Bloc limite consommé en étant tradé (disparaît sous les trade dots) vs retiré (pulled, disparaît sans exécution). Distinction visuelle nette.</div><div class="bmap-conf" style="color:var(--go);">HAUTE — vision</div></div>
+        <div class="bmap-row high"><div class="mono" style="color:var(--navy-soft);">obstacle 1A (filtre)</div><div>Mur de liquidité dense en travers du chemin = obstacle structurel proche. Lecture native.</div><div class="bmap-conf" style="color:var(--go);">HAUTE — vision</div></div>
+        <div class="bmap-row high"><div class="mono" style="color:var(--navy-soft);">absorption 2 (filtre)</div><div>Gros bloc limite frappé en continu sans que le prix avance = absorption. Signature visuelle Bookmap typique.</div><div class="bmap-conf" style="color:var(--go);">HAUTE — vision</div></div>
+        <div class="bmap-row mid"><div class="mono" style="color:var(--navy-soft);">alignement_cvd</div><div>Via l'add-on CVD de Bookmap — forme de la courbe lisible, mais c'est un module ajouté, pas la heatmap.</div><div class="bmap-conf" style="color:var(--info);">MOYENNE — vision</div></div>
+        <div class="bmap-row num"><div class="mono" style="color:var(--navy-soft);">stacked_imbalances</div><div>⚠ Footprint natif (ratios Ask/Bid chiffrés). Proxy Bookmap = sweep agressif à travers la liquidité empilée, mais ce n'est pas le ratio exact.</div><div class="bmap-conf" style="color:var(--warn);">CHIFFRÉ — confirmer</div></div>
+        <div class="bmap-row num"><div class="mono" style="color:var(--navy-soft);">delta_cassure</div><div>⚠ Chiffré (delta ≥60%). Estimable depuis les labels de taille Bookmap mais pas une lecture déterministe.</div><div class="bmap-conf" style="color:var(--warn);">CHIFFRÉ — confirmer</div></div>
+        <div class="bmap-row"><div class="mono" style="color:var(--ink-faint);">extraction_zone · vpoc_migration · poc_coherence</div><div>Nécessitent un overlay Volume Profile — Bookmap seul ne les montre pas.</div><div class="bmap-conf" style="color:var(--ink-faint);">HORS BOOKMAP</div></div>
+      </div>
+      <div class="note-box warn" style="margin-top:14px;">
+        <span class="note-title">⚠ Avocat du diable — la limite du tout-Bookmap</span>
+        Se fier à Bookmap renforce la lecture de la liquidité au repos (autoroute_lvn, obstacle, dom_sweeping, absorption) — c'est un vrai gain de confiance sur 4 points clés. Mais <strong>stacked_imbalances et delta_cassure restent chiffrés</strong> : les lire « à l'œil » depuis la heatmap réintroduit exactement la non-déterminisme que §12 cherche à éviter, et casse la backtestabilité de C2. Garde un chiffre de confirmation pour ces deux-là (footprint, ou estimation depuis les labels de taille), même approximatif — sinon C2 devient partiellement non-reproductible. Et 3 critères de C1 (extraction_zone, vpoc_migration, poc_coherence) ne sont tout simplement pas sur Bookmap : un overlay Volume Profile reste indispensable, le tout-Bookmap ne couvre pas le pilier Structure en entier.
+      </div>
+
+      <!-- 4 MOMENTS DU FLUX -->
+      <div class="section-head" style="margin-top:32px;margin-bottom:16px;"><h2 style="font-size:16px;">Adaptation aux 4 moments du flux</h2></div>
+      <div class="grid-2">
+        <div class="mgmt-card">
+          <div class="mgmt-title">Pré-trade</div>
+          <div class="mgmt-rule">Pré-remplit les ~5 critères structurels (suggestion + confiance), laisse les chiffrés en attente de saisie ou d'OCR. <span class="action">L'opérateur valide / corrige.</span></div>
+        </div>
+        <div class="mgmt-card amber">
+          <div class="mgmt-title">Live</div>
+          <div class="mgmt-rule">Mode allégé — l'agent <strong>ne score pas</strong>. Il signale une alerte structurelle : <span class="trigger">« la cassure semble se faire absorber, vérifie le footprint »</span>.</div>
+        </div>
+        <div class="mgmt-card">
+          <div class="mgmt-title">Post-trade</div>
+          <div class="mgmt-rule">Compare la capture de sortie à la thèse, alimente le champ <span class="action">« filtre qui a failli »</span> du journal.</div>
+        </div>
+        <div class="mgmt-card amber">
+          <div class="mgmt-title">Apprentissage</div>
+          <div class="mgmt-rule">L'opérateur donne son score d'abord. L'agent décrit <strong>indépendamment</strong>, puis confronte — avocat du diable visuel. <span class="trigger">L'agent ne voit jamais le score avant d'avoir décrit.</span></div>
+        </div>
+      </div>
+
+      <!-- GARDE-FOUS -->
+      <div class="section-head" style="margin-top:28px;margin-bottom:16px;"><h2 style="font-size:16px;">Garde-fous</h2></div>
+      <div class="rule-list">
+        <div class="card"><span class="rule-badge">01</span><div><strong>Confiance basse = pas de suggestion.</strong> Le critère est marqué « à lire manuellement » plutôt que de proposer une lecture douteuse.</div></div>
+        <div class="card"><span class="rule-badge">02</span><div><strong>L'agent ne voit jamais le score avant d'avoir décrit</strong> (mode apprentissage) — sinon il rationalise pour confirmer la note attendue.</div></div>
+        <div class="card"><span class="rule-badge">03</span><div><strong>Chiffré ≠ visuel.</strong> Si l'agent tente d'estimer un ratio footprint à l'œil, c'est un bug. Le prompt lui interdit explicitement de produire un chiffre pour un critère tagué « chiffré » — il renvoie vers l'OCR ou la saisie.</div></div>
+        <div class="card"><span class="rule-badge">04</span><div><strong>Une image à la fois.</strong> L'agent déclare le type de graphique analysé (prix / Bookmap / footprint) et ne traite que les critères pertinents pour ce type — il ne devine pas le reste.</div></div>
+      </div>
+
+      <!-- FAIBLESSE ASSUMÉE -->
+      <div class="note-box warn" style="margin-top:18px;">
+        <span class="note-title">⚠ Faiblesse documentée — maillon OCR footprint</span>
+        Les grilles footprint denses (petites polices, fond sombre) sont difficiles même pour un OCR dédié. Si l'OCR se trompe sur un ratio, le code applique un seuil exact sur une donnée fausse — déterministe mais faux. Le mode <strong>hybride</strong> répond à ce risque : OCR primaire uniquement si la confiance de lecture est haute, sinon bascule automatique en saisie manuelle. L'OCR ne devient jamais une source silencieuse d'erreur, car sous le seuil de confiance il s'efface au profit de la saisie.
+      </div>
+
+      <!-- FORMAT DE SORTIE VISION -->
+      <div class="output-card" style="margin-top:18px;">
+        <div class="output-head">Format de sortie — agent vision (texte structuré)</div>
+        <div class="output-body">
+<span class="sep">══════════════════════════════════════════════════</span>
+<span class="d">TYPE D'IMAGE   : </span>[CHART PRIX / BOOKMAP / FOOTPRINT]<br>
+<span class="d">MOMENT         : </span>[PRÉ-TRADE / LIVE / POST-TRADE / APPRENTISSAGE]
+<span class="sep">══════════════════════════════════════════════════</span>
+
+<div class="output-sub">Lecture structurelle (suggestions — non contractuel)</div>
+<span class="d">  Ce que je vois : </span>_______________________________________<br>
+<span class="d">  → Critère SVS  : </span>[extraction_zone / autoroute_lvn / ...]<br>
+<span class="d">  → Suggestion   : </span>[plein score / partiel / 0]<br>
+<span class="d">  → Confiance    : </span>[<span class="g">HAUTE</span> / <span class="a">MOYENNE</span> / <span class="r">BASSE → lire manuellement</span>]<br>
+<span class="d">  (répété pour chaque critère structurel lisible sur cette image)</span>
+
+<div class="output-sub">Critères chiffrés détectés sur l'image</div>
+<span class="d">  Valeur OCR     : </span><span class="a">XX</span> <span class="d">[confiance OCR : </span>[<span class="g">HAUTE → retenue</span> / <span class="r">BASSE → saisie manuelle requise</span>]<span class="d">]</span><br>
+<span class="d">  Seuil appliqué : </span>par le code, pas par l'agent
+<span class="sep">══════════════════════════════════════════════════</span>
+<span class="d">RAPPEL : </span><span class="r">aucune de ces lignes n'est un score. Le score reste saisi/confirmé par l'opérateur ou calculé par code.</span>
+<span class="sep">══════════════════════════════════════════════════</span>
+        </div>
+      </div>
+    </section>
+
+    <div class="doc-footer">
+      <div>SVS — Structural Vacuum Squeeze · Document de référence</div>
+      <div>Scoring v2.0 · Choppiness Index intégré</div>
+    </div>
+
+  </main>
+</div>
+
+<div class="lightbox" id="lightbox">
+  <span class="lightbox-close" id="lbClose">&times;</span>
+  <div id="lbContent"></div>
+  <div class="lightbox-cap" id="lbCap"></div>
+</div>
+
+<script>
+  const sections = document.querySelectorAll('.section[id]');
+  const navLinks = document.querySelectorAll('#navlinks a');
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        navLinks.forEach(l => l.classList.remove('active'));
+        const active = document.querySelector(`#navlinks a[href="#${entry.target.id}"]`);
+        if (active) active.classList.add('active');
+      }
+    });
+  }, { threshold: 0.25, rootMargin: '-10% 0px -70% 0px' });
+  sections.forEach(s => observer.observe(s));
+
+  // Lightbox — agrandit les schémas SVG d'exemple au clic
+  const lb = document.getElementById('lightbox');
+  const lbContent = document.getElementById('lbContent');
+  const lbCap = document.getElementById('lbCap');
+  document.querySelectorAll('.ex-card').forEach(card => {
+    card.addEventListener('click', () => {
+      const svg = card.querySelector('svg');
+      const cap = card.getAttribute('data-cap') || '';
+      if (svg) {
+        lbContent.innerHTML = '';
+        const clone = svg.cloneNode(true);
+        clone.style.width = 'min(880px, 90vw)';
+        clone.style.height = 'auto';
+        clone.style.background = '#fff';
+        clone.style.borderRadius = '10px';
+        lbContent.appendChild(clone);
+      }
+      lbCap.textContent = cap;
+      lb.classList.add('open');
+    });
+  });
+  const closeLb = () => lb.classList.remove('open');
+  document.getElementById('lbClose').addEventListener('click', closeLb);
+  lb.addEventListener('click', (e) => { if (e.target === lb) closeLb(); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeLb(); });
+
+  // ── Widget d'importation de capture ──
+  const CRIT_BY_TYPE = {
+    bookmap: {
+      title: 'Critères lisibles sur Bookmap (heatmap-primaire)',
+      vision: ['autoroute_lvn', 'dom_sweeping', 'obstacle 1A', 'absorption F2', 'alignement_cvd (add-on)'],
+      num: ['stacked_imbalances → confirmer', 'delta_cassure → confirmer'],
+    },
+    prix: {
+      title: 'Critères lisibles sur un chart prix + Volume Profile',
+      vision: ['extraction_zone', 'autoroute_lvn', 'vpoc_migration', 'poc_coherence'],
+      num: ['chop_directional → CHOP chiffré'],
+    },
+    footprint: {
+      title: 'Critères lisibles sur un footprint',
+      vision: [],
+      num: ['stacked_imbalances (ratio 3:1)', 'delta_cassure (≥60%)', 'oi_accumulation (150%)'],
+    },
+  };
+
+  const dz = document.getElementById('dropzone');
+  const fileInput = document.getElementById('imgInput');
+  const previewWrap = document.getElementById('previewWrap');
+  const previewImg = document.getElementById('previewImg');
+  const previewMeta = document.getElementById('previewMeta');
+  const applicable = document.getElementById('applicable');
+  const applicableTitle = document.getElementById('applicableTitle');
+  const critChips = document.getElementById('critChips');
+  const typeBtns = document.querySelectorAll('#typePicker .type-btn');
+  let selectedType = null;
+
+  function renderChips() {
+    if (!selectedType) { applicable.classList.remove('show'); return; }
+    const def = CRIT_BY_TYPE[selectedType];
+    applicableTitle.textContent = def.title;
+    let html = '';
+    def.vision.forEach(c => html += `<span class="crit-chip vision"><span class="ck">👁</span>${c}</span>`);
+    def.num.forEach(c => html += `<span class="crit-chip num"><span class="ck">#</span>${c}</span>`);
+    if (!def.vision.length && !def.num.length) html = '<span style="font-size:12px;color:var(--ink-faint)">Aucun critère mappé.</span>';
+    critChips.innerHTML = html;
+    applicable.classList.add('show');
+  }
+
+  typeBtns.forEach(btn => btn.addEventListener('click', () => {
+    typeBtns.forEach(b => b.classList.remove('sel'));
+    btn.classList.add('sel');
+    selectedType = btn.getAttribute('data-type');
+    renderChips();
+  }));
+
+  function loadFile(file) {
+    if (!file || !file.type.startsWith('image/')) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      previewImg.src = e.target.result;
+      previewMeta.textContent = `${file.name} · ${(file.size/1024).toFixed(0)} Ko`;
+      previewWrap.classList.add('show');
+      renderChips();
+    };
+    reader.readAsDataURL(file);
+  }
+
+  dz.addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', (e) => loadFile(e.target.files[0]));
+  ['dragenter','dragover'].forEach(ev => dz.addEventListener(ev, (e) => { e.preventDefault(); dz.classList.add('drag'); }));
+  ['dragleave','drop'].forEach(ev => dz.addEventListener(ev, (e) => { e.preventDefault(); dz.classList.remove('drag'); }));
+  dz.addEventListener('drop', (e) => { if (e.dataTransfer.files.length) loadFile(e.dataTransfer.files[0]); });
+
+  document.getElementById('btnReset').addEventListener('click', () => {
+    previewImg.src = '';
+    fileInput.value = '';
+    previewWrap.classList.remove('show');
+    applicable.classList.remove('show');
+  });
+</script>
+
+</body>
+</html>

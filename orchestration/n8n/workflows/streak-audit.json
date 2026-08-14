@@ -1,0 +1,47 @@
+{
+  "name": "Cholismo — streak audit (C2)",
+  "nodes": [
+    {
+      "parameters": { "rule": { "interval": [{ "field": "minutes", "minutesInterval": 1 }] } },
+      "name": "Every minute",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 0]
+    },
+    {
+      "parameters": { "url": "http://backend:8000/decisions", "options": {} },
+      "name": "Get decisions",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [220, 0]
+    },
+    {
+      "parameters": {
+        "conditions": { "number": [{ "value1": "={{ $json.streak }}", "operation": "largerEqual", "value2": 8 }] }
+      },
+      "name": "Streak >= 8 ?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [440, 0]
+    },
+    {
+      "parameters": {
+        "url": "http://backend:8000/orchestrator",
+        "options": {}
+      },
+      "name": "Fetch risk payload (notify operators)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [660, -80]
+    }
+  ],
+  "connections": {
+    "Every minute": { "main": [[{ "node": "Get decisions", "type": "main", "index": 0 }]] },
+    "Get decisions": { "main": [[{ "node": "Streak >= 8 ?", "type": "main", "index": 0 }]] },
+    "Streak >= 8 ?": { "main": [[{ "node": "Fetch risk payload (notify operators)", "type": "main", "index": 0 }], []] }
+  },
+  "settings": {},
+  "meta": {
+    "note": "L'audit lui-même reste un acquittement HUMAIN (POST /streak/audit-ack) — ce workflow ne fait que router l'alerte. Aucune action de trading."
+  }
+}

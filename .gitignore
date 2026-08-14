@@ -15,9 +15,24 @@ backend/data/*.db
 backend/data/*.db-journal
 backend/data/*.sqlite*
 *.log
+# `.env` seul ne couvrait PAS `.env.production` — or le manuel demande justement de le créer
+# par copie du modèle (D-091). Le modèle, lui, reste versionné : il ne contient aucun secret.
 .env
+.env.*
+!.env.*.example
 
 # OS / editors
 .DS_Store
 .idea/
 .vscode/
+backend/dump.rdb
+dump.rdb
+*.tsbuildinfo
+backend/data/snapshots/
+backend/app/replay/sample_orderbook.csv
+# vérité terrain des scènes — régénérée avec le tape, jamais versionnée (D-061)
+backend/app/replay/*.truth.json
+
+# Moteur LSR v1.2 — paquet npm autonome (D-066)
+lsr-engine/node_modules/
+lsr-engine/package-lock.json

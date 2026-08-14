@@ -1,0 +1,33 @@
+# Test & lint figés par docs/adr/0001-stack.md (Loop 0).
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+extend-exclude = [".venv", "data"]
+
+[tool.ruff.lint]
+# Défauts (E4/E7/E9 + F) : erreurs réelles et imports morts — le style reste léger,
+# maintenable par une personne (ADR 0001).
+select = ["E4", "E7", "E9", "F"]
+
+[tool.mypy]
+# Typage STRICT sur les modules où il a été introduit. Le reste du dépôt n'y est pas encore :
+# l'activer partout d'un coup produirait un bruit qu'on apprendrait à ignorer, ce qui est pire
+# que pas de vérificateur du tout. On étend module par module.
+python_version = "3.11"
+files = ["app/replay", "app/datasource/replay.py", "app/external"]
+strict = true
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# Dépendances non typées TRAVERSÉES par les imports — hors périmètre de cette extension.
+# `app.orderflow.*` et `app.volume_profile` sont entrés dans le graphe avec `app/replay/portes.py`
+# (D-061) : l'outil de diagnostic appelle `compute_snapshot`. Les annoter au passage mêlerait un
+# refactor à une feature (§13, Loop 3) sur le module de calcul le plus chargé du dépôt. Ils
+# restent donc exemptés ICI, et leur propre suite les couvre (70 tests).
+module = ["app.config", "app.redis_state", "app.orderflow.*", "app.volume_profile",
+          "app.macro_risk", "app.strategies.*", "app.providers.*", "app.schema"]
+ignore_errors = true

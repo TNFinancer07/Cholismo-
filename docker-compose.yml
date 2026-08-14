@@ -1,5 +1,3 @@
-version: "3.9"
-
 # Cholismo Terminal — stack complet (TASKS 0.4)
 # `docker compose up` démarre FastAPI + Redis + n8n ensemble ; SQLite est un volume du backend.
 

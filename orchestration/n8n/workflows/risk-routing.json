@@ -1,0 +1,40 @@
+{
+  "name": "Cholismo — routing risque (console orchestrateur)",
+  "nodes": [
+    {
+      "parameters": { "rule": { "interval": [{ "field": "minutes", "minutesInterval": 1 }] } },
+      "name": "Every minute",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 0]
+    },
+    {
+      "parameters": { "url": "http://backend:8000/orchestrator", "options": {} },
+      "name": "Get arbitration payload",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [220, 0]
+    },
+    {
+      "parameters": {
+        "conditions": { "string": [{ "value1": "={{ $json.action }}", "operation": "notEqual", "value2": "NONE" }] }
+      },
+      "name": "Action requise ?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [440, 0]
+    },
+    {
+      "parameters": { "content": "REQUEST_ACK / BLOCK_ENTRY → notifier l'opérateur (Slack/mail à brancher). L'arbitrage est DÉTERMINISTE côté backend ; n8n ne décide rien, il route.", "height": 120, "width": 320 },
+      "name": "Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [660, -140]
+    }
+  ],
+  "connections": {
+    "Every minute": { "main": [[{ "node": "Get arbitration payload", "type": "main", "index": 0 }]] },
+    "Get arbitration payload": { "main": [[{ "node": "Action requise ?", "type": "main", "index": 0 }]] }
+  },
+  "settings": {}
+}

@@ -1,0 +1,46 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Terminal Cholismo — densité des terminaux financiers, dark, monospace (CLAUDE §3) */
+
+:root {
+  color-scheme: dark;
+}
+
+html, body, #root {
+  height: 100%;
+}
+
+body {
+  @apply bg-term-bg text-term-text font-mono text-xs antialiased;
+  overflow: hidden;
+}
+
+/* Teinte de fond par marqueur de session (PRD §Zone 0) */
+.session-LONDRES_OBS { background: linear-gradient(180deg, #0a0d14 0%, #06080b 30%); }
+.session-OVERLAP_NY  { background: linear-gradient(180deg, #0d0b06 0%, #06080b 30%); }
+.session-HORS_SESSION{ background: linear-gradient(180deg, #0b0608 0%, #06080b 30%); }
+
+/* Indicateur de focus clavier (TASKS 3.3) */
+.zone-focus {
+  outline: 1px solid #f0b429;
+  outline-offset: -1px;
+  box-shadow: 0 0 0 1px rgba(240, 180, 41, 0.25), inset 0 0 24px rgba(240, 180, 41, 0.04);
+}
+
+/* Scrollbars denses */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #1c2633; border-radius: 3px; }
+
+/* Clignotement discret pour ABSENT */
+@keyframes absent-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+.absent-pulse { animation: absent-pulse 1.6s ease-in-out infinite; }
+
+/* Tuiles d'espace de travail : les panneaux remplissent la colonne (lignée des terminaux financiers) */
+.panel-slot > section { flex: 1 1 auto; }
+
+/* Countdown C3 en alerte */
+@keyframes countdown-critical { 0%, 100% { background-color: rgba(248,113,113,0.12); } 50% { background-color: rgba(248,113,113,0.28); } }
+.countdown-critical { animation: countdown-critical 0.8s ease-in-out infinite; }

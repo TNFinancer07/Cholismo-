@@ -1,0 +1,311 @@
+"""Couche Compte & RiskSizer — frontières de risque prop-firm EOD (D-047).
+
+Port Python de la couche compte du moteur LSR v1.2 (`frontiers.ts`/`risksizer.ts`, externe au
+dépôt). Trois idées, toutes FAIL-CLOSED :
+
+1. **Le capital tradable n'est PAS l'équité — c'est la DISTANCE VERS LA MORT.** La plus proche
+   des deux frontières (plancher de campagne / limite de perte du jour) est la seule qui compte.
+   Sur un Apex 50K EOD à l'ouverture : `min(2500, 1000) = 1000` → le DLL contraint (conséquence
+   de sizing du doc LSR : mécaniquement plus serré qu'une firme sans DLL).
+   Depuis **D-071**, le calcul qui fait foi est `lsr_frontiers.derive_account_frontiers`, port de
+   `frontiers.ts`. `compute_buffer` survit pour l'AFFICHAGE seul : il est SIGNÉ, donc il sait
+   dire « tu es passé SOUS la ligne » (−500) là où la frontière bornée dit 0. Il ne dimensionne
+   plus rien — il ajoutait le profit du jour à l'allocation quotidienne, donc allouait **50 % de
+   risque en plus après une matinée gagnante**.
+
+2. **Règle stricte du 1/5e**, plafonnée au capital : risque du prochain trade =
+   `min(1 % × capital_initial, frontière_du_jour_restante / 5)` (D-068 + D-071). Contrats =
+   `floor(risque / (ticks_de_stop × valeur_tick))`, puis `floor(× multiplicateur VIX)` (D-070) —
+   floor aux deux étapes, jamais d'arrondi vers le haut : on ne s'endette pas d'un demi-contrat
+   d'optimisme.
+
+3. **F8 coupe-circuit — trois raisons de rejet, ZÉRO exception** (la fonction rend toujours un
+   `SizerResult`, jamais elle ne lève — le chemin d'échec est une donnée, pas un crash) :
+   - `INSUFFICIENT_BUFFER` : taille < 1 OU buffer ≤ 0 — jamais un « ordre de 0 contrat » ;
+   - `INVALID_INPUT` : entrée corrompue — non-finie, ticks ≤ 0, valeur de tick ≤ 0, grandeurs de
+     compte nulles/négatives (un floor NÉGATIF élargirait le buffer : la corruption deviendrait
+     du levier, trouvé au /devil) ;
+   - `F2_DAILY_CIRCUIT_BREAKER` (D-071) : 80 % de la frontière du jour consommée — la séance
+     est FINIE. Motif distinct d'`INSUFFICIENT_BUFFER` à dessein : « il ne reste pas de quoi
+     faire un lot » et « arrête-toi pour aujourd'hui » n'appellent pas le même geste ;
+   - `VIX_SUSPENDED` (D-070) : régime de volatilité au-delà du blocage dur ;
+   - `SIZE_SANITY_CAP` : taille > `RISK_MAX_CONTRACTS` (plafond de plausibilité v1 provisional —
+     une équité corrompue mais finie produit un `floor()` astronomique parfaitement cohérent
+     pour la garde D-045, qui vérifie l'ordre des niveaux, pas la vraisemblance d'une taille).
+   `contracts` n'existe QUE sur APPROVED (invariant balayé en test : APPROVED ⟺ contrats ≥ 1).
+
+**F1 STRUCTUREL** : le modèle Apex « Intraday Trail » (seuil qui suit le pic d'équité en temps
+réel, non-réalisé inclus) est INCOMPATIBLE avec LSR — ici il est non-représentable par
+construction : `account_type` n'admet que les modèles EOD. Le `drawdown_floor` est STATIQUE en
+intraday (EOD Trail : le seuil ne se recalcule qu'à la clôture — ce recalcul est le travail du
+driver de fin de session, hors de cette couche).
+
+**Couture avec le pipeline LSR (T2)** : `size_plan(plan, account)` dérive le stop en ticks de la
+GÉOMÉTRIE du plan D-046 (`|entrée − stop| / tick_size`, une seule source de vérité) et rend un
+NOUVEAU plan aux contrats remplacés — l'engine ne l'appelle qu'avec un compte FRAIS fourni par
+`account_provider.py` (sans compte : aucune émission).
+
+Fonctions PURES et déterministes : compte + géométrie en entrée, résultat en sortie — aucune
+horloge lue, aucun état retenu, aucun ordre passé (§2.1). Les montants du preset `APEX_EOD_50K`
+sont des ordres de grandeur publics **À VÉRIFIER le jour de l'achat** (doc LSR ; depuis mars 2026
+Apex ne propose plus de reset — un breach impose le rachat d'une évaluation : F8 a une valeur
+monétaire directe).
+"""
+from __future__ import annotations
+
+import math
+from typing import Any, Literal, Optional
+
+from pydantic import BaseModel
+
+from . import config
+# Spécifications contractuelles CME — une SEULE table dans le dépôt (D-069), partagée avec le
+# moteur LSR. Les avoir en double, c'est se donner rendez-vous avec une valeur de tick MNQ
+# corrigée d'un seul côté : le sizer et la géométrie dimensionneraient alors deux trades
+# différents pour le même plan.
+from . import lsr_tuning
+from .lsr_frontiers import (derive_account_frontiers,
+                            f2_daily_circuit_breaker)
+from .lsr_tuning import INSTRUMENT_SPECS  # noqa: F401  (ré-export : API historique du module)
+
+
+def _finite(x: Any) -> bool:
+    return isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x)
+
+
+class AccountState(BaseModel):
+    """État STATELESS du compte au moment de l'évaluation — fourni par le driver, jamais lu ici.
+    Seuls les modèles EOD sont représentables (F1 structurel) : `drawdown_floor` est donc
+    STATIQUE en intraday, et `daily_loss_limit` pause la journée sans tuer le compte."""
+    account_type: Literal["EOD_TRAILING", "EOD_STATIC"] = "EOD_TRAILING"
+    # REQUIS, sans défaut (D-068) : le plafond « 1 % du capital » du moteur de référence ne peut
+    # pas se calculer sans lui. Le rendre optionnel laisserait construire un compte dont le
+    # sizer retomberait EN SILENCE sur `buffer / 5` — exactement la divergence qu'on corrige.
+    initial_capital: float
+    current_equity: float
+    day_start_equity: float
+    drawdown_floor: float
+    daily_loss_limit: float
+
+
+class SizerResult(BaseModel):
+    """Sortie du RiskSizer — toujours rendue, jamais levée. `contracts` n'existe QUE sur
+    APPROVED (jamais un 0 déguisé en taille, §3)."""
+    status: Literal["APPROVED", "REJECTED"]
+    reason: str = ""
+    contracts: Optional[int] = None
+    buffer: Optional[float] = None
+    risk_allowed: Optional[float] = None
+    # Modificateur de régime VIX effectivement appliqué (D-070). Exposé plutôt que fondu dans
+    # `contracts` : sans lui, une taille divisée par deux ressemble à un buffer qui a fondu, et
+    # l'opérateur cherche le problème au mauvais endroit.
+    vix_multiplier: Optional[float] = None
+
+
+class ApexEodPreset(BaseModel):
+    """Montants publics, sujets à changement — À VÉRIFIER sur le site Apex le jour de l'achat."""
+    label: str
+    initial_capital: float
+    max_drawdown: float
+    daily_loss_limit: float
+    profit_target: float
+
+
+APEX_EOD_50K = ApexEodPreset(label="Apex EOD Trail 50K (À VÉRIFIER)", initial_capital=50_000.0,
+                             max_drawdown=2_500.0, daily_loss_limit=1_000.0,
+                             profit_target=3_000.0)
+
+
+def apex_eod_account(preset: ApexEodPreset, current_equity: Optional[float] = None,
+                     day_start_equity: Optional[float] = None) -> AccountState:
+    """Construit l'état d'un compte Apex EOD depuis un preset. Défauts : compte neuf."""
+    equity = current_equity if current_equity is not None else preset.initial_capital
+    day_start = day_start_equity if day_start_equity is not None else equity
+    return AccountState(account_type="EOD_TRAILING", initial_capital=preset.initial_capital,
+                        current_equity=equity, day_start_equity=day_start,
+                        drawdown_floor=preset.initial_capital - preset.max_drawdown,
+                        daily_loss_limit=preset.daily_loss_limit)
+
+
+def compute_buffer(account: AccountState) -> float:
+    """La distance vers la mort : la plus PROCHE des deux frontières (plancher de campagne,
+    limite de perte du jour). Peut être négative (breach) — l'appelant tranche via F8."""
+    to_floor = account.current_equity - account.drawdown_floor
+    to_dll = account.current_equity - (account.day_start_equity - account.daily_loss_limit)
+    return min(to_floor, to_dll)
+
+
+def account_view(account: Optional[AccountState], vix: Any,
+                 reference_stop_ticks: int = None,          # type: ignore[assignment]
+                 instrument: str = None) -> dict:           # type: ignore[assignment]
+    """Projection d'AFFICHAGE de l'état de compte (Zone C HUD, D-051) — PURE, aucune horloge.
+
+    Porte de quoi rendre la « distance vers la mort » lisible d'un coup d'œil :
+    - `buffer` courant ET **`buffer_initial`** = le buffer À L'OUVERTURE du jour
+      (`min(day_start − floor, DLL)`) — dénominateur HONNÊTE et SANS ÉTAT de la jauge : ni une
+      constante (fausse dès le 2e jour), ni le buffer courant (qui donnerait toujours 100 %) ;
+    - `day_pnl` = equity − day_start ;
+    - `next_ticket` : la taille que porterait le PROCHAIN ticket sur un stop de RÉFÉRENCE
+      (3 ticks MES par défaut) — affichage préventif, l'opérateur voit sa capacité avant l'alerte ;
+    - `status` : celui du RiskSizer (APPROVED / INSUFFICIENT_BUFFER / INVALID_INPUT /
+      SIZE_SANITY_CAP) ou **DISCONNECTED** si aucun compte.
+
+    FAIL-CLOSED (§3) : `account is None` → tout à `None`, `status=DISCONNECTED`, `is_stale=True`.
+    Le port D-047 rend `None` pour PÉRIMÉ **et** pour DÉCONNECTÉ : on n'invente pas une
+    distinction que le contrat ne porte pas — un seul état honnête, « pas de vue exploitable ».
+    Une grandeur non finie n'est JAMAIS affichée (None), même si le reste de l'état est lisible."""
+    ticks = (reference_stop_ticks if reference_stop_ticks is not None
+             else config.RISK_REFERENCE_STOP_TICKS)
+    inst = instrument if instrument is not None else config.LSR_INSTRUMENT
+    spec = INSTRUMENT_SPECS.get(inst)
+    empty = {k: None for k in ("current_equity", "day_start_equity", "drawdown_floor",
+                               "daily_loss_limit", "buffer", "buffer_initial", "day_pnl")}
+    # Un VIX non observable ne suspend PAS l'affichage du buffer (il reste vrai) : il suspend le
+    # TICKET, parce qu'aucun ticket ne serait accepté dans cet état. Motif DISTINCT de
+    # `VIX_SUSPENDED` : « je ne vois pas la volatilité » et « la volatilité est trop haute »
+    # appellent deux gestes différents (rebrancher un flux / attendre), le HUD doit les séparer.
+    aveugle = "VIX_BLIND" if not _finite(vix) else None
+    if account is None or spec is None:
+        return {**empty, "status": "DISCONNECTED", "is_stale": True,
+                "next_ticket": {"instrument": inst, "stop_ticks": ticks, "contracts": None,
+                                "risk_allowed": None, "status": "DISCONNECTED"}}
+
+    result = size_position(account, stop_distance_ticks=ticks, tick_value=spec.tick_value,
+                           vix=vix if aveugle is None else None)
+    ticket_status = aveugle or (result.status if result.status == "APPROVED" else result.reason)
+    fields = {k: (float(v) if _finite(v) else None) for k, v in (
+        ("current_equity", account.current_equity),
+        ("day_start_equity", account.day_start_equity),
+        ("drawdown_floor", account.drawdown_floor),
+        ("daily_loss_limit", account.daily_loss_limit))}
+    buffer_now = compute_buffer(account) if all(v is not None for v in fields.values()) else None
+    # buffer à l'OUVERTURE : le même calcul, l'équité prise au day_start (jour à sa naissance)
+    buffer_open = (min(account.day_start_equity - account.drawdown_floor,
+                       account.daily_loss_limit)
+                   if all(v is not None for v in fields.values()) else None)
+    day_pnl = (account.current_equity - account.day_start_equity
+               if fields["current_equity"] is not None and fields["day_start_equity"] is not None
+               else None)
+    return {
+        **fields,
+        "buffer": buffer_now if _finite(buffer_now) else None,
+        "buffer_initial": buffer_open if _finite(buffer_open) else None,
+        "day_pnl": day_pnl if _finite(day_pnl) else None,
+        "is_stale": False,
+        "status": ticket_status,
+        "next_ticket": {"instrument": inst, "stop_ticks": ticks,
+                        # Aveugle : la CAPACITÉ n'est pas connue, donc aucun nombre affiché (§3).
+                        "contracts": None if aveugle else result.contracts,
+                        "risk_allowed": result.risk_allowed,
+                        "status": ticket_status},
+    }
+
+
+def size_plan(plan: Any, account: AccountState, vix: Any) -> Optional[dict]:
+    """Dimensionne un plan LSR APPROVED (contrat D-045/046) via la règle du 1/5e — le stop en
+    ticks est dérivé de la GÉOMÉTRIE du plan (`|entrée − stop| / tick_size`), jamais fourni à
+    part (une seule source de vérité). Rend un NOUVEAU plan aux contrats remplacés (l'entrée
+    n'est jamais mutée), ou None : sizer en rejet (F8/corruption), instrument hors
+    `INSTRUMENT_SPECS`, plan malformé — silence, jamais un ticket dégradé (§3)."""
+    if not isinstance(plan, dict):
+        return None
+    spec = INSTRUMENT_SPECS.get(plan.get("instrument"))  # type: ignore[arg-type]
+    ex = plan.get("executionPlan")
+    if spec is None or not isinstance(ex, dict):
+        return None
+    # VIX AVEUGLE = pas de ticket (D-070). C'est le chemin d'ÉMISSION : y laisser passer un
+    # `vix=None` reviendrait à dimensionner à taille pleine précisément quand on ne mesure plus
+    # la volatilité — le fail-open exact que le modificateur est censé fermer.
+    if not _finite(vix):
+        return None
+    entry, stop = ex.get("entryPrice"), ex.get("stopLoss")
+    if not (_finite(entry) and _finite(stop)):
+        return None
+    stop_ticks = abs(entry - stop) / spec.tick_size
+    result = size_position(account, stop_distance_ticks=stop_ticks,
+                           tick_value=spec.tick_value, vix=vix)
+    if result.status != "APPROVED":
+        return None
+    return {**plan, "executionPlan": {**ex, "contracts": result.contracts}}
+
+
+def size_position(account: AccountState, stop_distance_ticks: Any, tick_value: Any,
+                  buffer_divisor: int = config.RISK_BUFFER_DIVISOR,
+                  vix: Any = None) -> SizerResult:
+    """Dimensionne le prochain trade — règle du 1/5e sur le buffer, floor strict, F8 fail-closed.
+    Rend TOUJOURS un `SizerResult` (zéro exception) : entrée corrompue → `INVALID_INPUT` ;
+    buffer ≤ 0 ou taille < 1 → `INSUFFICIENT_BUFFER` ; VIX au-delà du blocage dur →
+    `VIX_SUSPENDED`.
+
+    **Modificateur de régime VIX (D-070)** : `contrats = floor(bruts × mult_VIX)`, exactement
+    comme `risksizer.ts`. `vix=None` signifie « ce calcul n'applique PAS le modificateur de
+    régime » — c'est la règle du 1/5e prise isolément, utile pour la tester seule. Le chemin de
+    production n'y accède jamais en direct : il passe par `size_plan` / `account_view`, qui
+    EXIGENT un VIX et échouent en silence sans lui. Un test AST interdit à `app/` d'appeler
+    `size_position` sans `vix=` — sinon ce défaut redeviendrait une porte de sortie."""
+    if not all(_finite(v) for v in (account.initial_capital, account.current_equity,
+                                    account.day_start_equity, account.drawdown_floor,
+                                    account.daily_loss_limit)):
+        return SizerResult(status="REJECTED", reason="INVALID_INPUT")
+    # Grandeurs de compte NULLES/NÉGATIVES = corruption de flux, pas une frontière de risque :
+    # aucun compte prop réel ne porte ça. Piège précis : un floor NÉGATIF (corrompu) ÉLARGIRAIT
+    # le buffer (to_floor = equity − (−500) = 50 500…) — la corruption deviendrait du levier.
+    if account.current_equity <= 0 or account.day_start_equity <= 0:
+        return SizerResult(status="REJECTED", reason="INVALID_INPUT")
+    if account.daily_loss_limit <= 0 or account.drawdown_floor < 0:
+        return SizerResult(status="REJECTED", reason="INVALID_INPUT")
+    # Un capital nul ou négatif ferait un plafond nul ou NÉGATIF : le `min()` traverserait alors
+    # le floor et la corruption deviendrait un refus systématique — ou du levier à l'envers.
+    if account.initial_capital <= 0:
+        return SizerResult(status="REJECTED", reason="INVALID_INPUT")
+    if not _finite(stop_distance_ticks) or stop_distance_ticks <= 0:
+        return SizerResult(status="REJECTED", reason="INVALID_INPUT")
+    if not _finite(tick_value) or tick_value <= 0:
+        return SizerResult(status="REJECTED", reason="INVALID_INPUT")
+    if not isinstance(buffer_divisor, int) or isinstance(buffer_divisor, bool) or buffer_divisor <= 0:
+        return SizerResult(status="REJECTED", reason="INVALID_INPUT")
+
+    # La frontière du jour BORNÉE (D-071) fait foi pour le sizing : `compute_buffer` ajoutait le
+    # profit du jour à l'allocation quotidienne et donnait donc PLUS de risque après une bonne
+    # matinée. `buffer` reste rendu tel quel dans le résultat — signé, pour l'affichage.
+    frontiers = derive_account_frontiers(account)
+    buffer = compute_buffer(account)
+    if frontiers.frontiere_jour_restante <= 0:
+        return SizerResult(status="REJECTED", reason="INSUFFICIENT_BUFFER",
+                           buffer=buffer, risk_allowed=None)
+    # F2 — coupe-circuit du jour (D-071). Placé AVANT le calcul de taille : au-delà de 80 % de la
+    # frontière consommée, il n'y a pas de « petite taille prudente », il y a une séance finie.
+    f2 = f2_daily_circuit_breaker(frontiers)
+    if f2 is not None:
+        return SizerResult(status="REJECTED", reason=f2, buffer=buffer, risk_allowed=None)
+    # Formule EXACTE du moteur de référence (`risksizer.ts`) : `min(0.01 × capital, buffer / 5)`.
+    # Les deux termes sont des frontières distinctes — le buffer protège du breach, le plafond
+    # protège d'un sizing qui grossit avec le compte. Le plus SERRÉ des deux gagne (D-068).
+    risk_allowed = min(config.RISK_FRACTION_OF_CAPITAL * account.initial_capital,
+                       frontiers.frontiere_jour_restante / buffer_divisor)
+    risk_per_contract = float(stop_distance_ticks) * float(tick_value)
+    contracts = math.floor(risk_allowed / risk_per_contract)
+    # Modificateur de régime VIX (D-070) — APRÈS le floor du sizing brut, comme la référence :
+    # `floor(floor(risque / risque_par_contrat) × mult)`. Deux floors, jamais d'arrondi vers le
+    # haut à aucune des deux étapes.
+    mult: Optional[float] = None
+    if vix is not None:
+        mult = lsr_tuning.vix_multiplier(vix)
+        if mult <= 0:
+            # Nommer la VOLATILITÉ : une taille coupée sans motif enverrait l'opérateur chercher
+            # un problème de buffer qui n'existe pas.
+            return SizerResult(status="REJECTED", reason="VIX_SUSPENDED", buffer=buffer,
+                               risk_allowed=risk_allowed, vix_multiplier=mult)
+        contracts = math.floor(contracts * mult)
+    if contracts < 1:
+        return SizerResult(status="REJECTED", reason="INSUFFICIENT_BUFFER",
+                           buffer=buffer, risk_allowed=risk_allowed, vix_multiplier=mult)
+    # Plafond de PLAUSIBILITÉ (v1 provisional) : une équité corrompue (1e308…) produit un buffer
+    # fini, un risque fini, et un floor() astronomique — un ticket à 10^306 contrats serait
+    # parfaitement COHÉRENT pour la garde D-045 (elle vérifie l'ordre des niveaux, pas la
+    # vraisemblance d'une taille). Au-delà du plafond, la taille n'est pas un signal (§3).
+    if contracts > config.RISK_MAX_CONTRACTS:
+        return SizerResult(status="REJECTED", reason="SIZE_SANITY_CAP",
+                           buffer=buffer, risk_allowed=risk_allowed, vix_multiplier=mult)
+    return SizerResult(status="APPROVED", contracts=contracts, buffer=buffer,
+                       risk_allowed=risk_allowed, vix_multiplier=mult)

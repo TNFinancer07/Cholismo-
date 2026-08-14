@@ -1,0 +1,374 @@
+"""Central configuration. Every named threshold below marked AUTORITÉ comes verbatim from
+PRD.md / TASKS.md / CLAUDE.md; the rest are PLACEHOLDER assumptions logged in DECISIONS.md."""
+import os
+
+# --- Cadences (CLAUDE §6 — fast/slow SSE channels; demo values, D-016) ---
+FAST_TICK_SECONDS = 0.25
+SLOW_TICK_SECONDS = float(os.getenv("SLOW_TICK_SECONDS", "15"))
+
+# --- Freshness thresholds (per channel; GEX threshold is AUTORITÉ PRD §B2) ---
+FAST_STALE_SECONDS = 3.0
+FAST_ABSENT_SECONDS = 15.0
+SLOW_STALE_SECONDS = SLOW_TICK_SECONDS * 3
+SLOW_ABSENT_SECONDS = SLOW_TICK_SECONDS * 10
+GEX_STALE_SECONDS = float(os.getenv("GEX_STALE_SECONDS", "180"))  # AUTORITÉ — single config
+
+# --- Phase 0 / risk thresholds (AUTORITÉ TASKS §2.3 unless noted) ---
+CHOP_CRIT = 61.8          # AUTORITÉ — CHOP >= 61.8 crit
+VIX_CRIT = 30.0           # AUTORITÉ — VIX > 30 crit
+# ARBITRAGE TRANCHÉ (D-062, par le propriétaire de la spec) : ce seuil est un VETO D'EXÉCUTION
+# et reste DÉLIBÉRÉMENT distinct de l'hystérésis D4 (`strategies/youssef.HYSTERESIS`, entrées
+# 18/26/37), qui module le SIZING. Les deux ne répondent pas à la même question, et un VIX à 32
+# est donc un veto Phase 0 tout en n'étant qu'ORANGE au sens D4 — ce n'est pas une incohérence
+# à corriger. Ne PAS aligner ces nombres « pour la cohérence » : le faire relèverait un veto de
+# sécurité au niveau d'un multiplicateur, ou l'inverse. Verrouillé par
+# `tests/test_external_sources.py::test_les_DEUX_systemes_de_seuils_VIX_restent_INDEPENDANTS`.
+RMS_WARN = 3.0            # AUTORITÉ — RMS >= 3 warn
+RMS_CRIT = 5.0            # PLACEHOLDER — crit level, D-005
+STREAK_AUDIT_THRESHOLD = 8  # AUTORITÉ — forced audit at 8 (PRD §C2)
+
+# --- Decision window (PRD §C3) ---
+ANTIPARALYSIS_SECONDS = float(os.getenv("ANTIPARALYSIS_SECONDS", "90"))  # AUTORITÉ (to revalidate vs S1 horizon)
+DECISION_ARM_THRESHOLD = 60.0  # PLACEHOLDER — D-008
+
+# --- Unified signal weights (AUTORITÉ PRD §0) ---
+WEIGHT_STRUCTURE = 0.35
+WEIGHT_ORDER_FLOW = 0.25
+WEIGHT_MACRO = 0.20
+WEIGHT_SENTIMENT = 0.15
+WEIGHT_QUALITY = 0.05
+DEGRADED_DENOMINATOR = 80.0  # AUTORITÉ — renormalize /80 when macro not calibrated
+
+# --- Calibration / proof (AUTORITÉ CLAUDE §1/§2.7, PRD §C4) ---
+CALIBRATION_WINDOW = 60          # N/60 gauge
+CALIBRATION_TARGET_TRADES = 50   # 50+ disciplined trades
+RESULT_SCORE_MIN_TRADES = 20     # result score displayed only after 20+
+SIZING_LOCK_PCT = 50             # sizing locked at 50 %
+
+# --- Reconciliation (PRD §Réconciliation; window/r-unit PLACEHOLDER D-018) ---
+RECON_MATCH_WINDOW_SECONDS = float(os.getenv("RECON_MATCH_WINDOW_SECONDS", "120"))
+R_UNIT_USD = float(os.getenv("R_UNIT_USD", "100"))
+
+# --- Cognitive self-check (PRD §C5; TTL PLACEHOLDER) ---
+SELF_CHECK_TTL_SECONDS = 3600
+
+# --- Macro score (CLAUDE §8.1 — never calibrated by default) ---
+MACRO_CALIBRATED = os.getenv("MACRO_CALIBRATED", "false").lower() == "true"
+
+# --- Infra ---
+REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+EVENT_DB_PATH = os.getenv("EVENT_DB_PATH", os.path.join(os.path.dirname(__file__), "..", "data", "events.db"))
+SNAPSHOT_DIR = os.getenv("SNAPSHOT_DIR", os.path.join(os.path.dirname(__file__), "..", "data", "snapshots"))  # D-030
+ENGINE_HEARTBEAT_MAX_AGE = 5.0  # engine itself stale -> fail-closed (D-005)
+
+# --- AI (all async, out of hot path — CLAUDE §2.8/§7) ---
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+GROQ_TIMEOUT_SECONDS = 0.1       # AUTORITÉ — < 100 ms, fail-closed
+CLAUDE_SCORING_PERIOD_SECONDS = 300
+GEMINI_AUDIT_EVERY_N_TRADES = 20  # AUTORITÉ
+
+# --- Liquidity Sweep detector (LangGraph, DÉTERMINISTE, advisory async — D-028) ---
+SWEEP_TICK_SECONDS = float(os.getenv("SWEEP_TICK_SECONDS", "1.0"))  # hors hot path (§2.8)
+SWEEP_RECENT_MAX = 8             # longueur du feed d'alertes récentes
+
+# --- Trade Reconciliator (analytics FIFO sur snapshots — D-033) ---
+# $/point par contrat. ES/MES = AUTORITÉ (spec) ; NQ/MNQ ajoutés (valeurs CME standard).
+# Instrument inconnu → P&L USD non calculé (fail-closed §3, jamais inventé). Le risque de
+# référence R réutilise R_UNIT_USD (défaut 100 $) — source unique, pas de double définition.
+CONTRACT_POINT_VALUE = {"ES": 50.0, "MES": 5.0, "NQ": 20.0, "MNQ": 2.0}
+
+# --- Footprint + imbalances (D-037) ---
+# Ratio d'imbalance diagonal = AUTORITÉ (spec : > 300 %). Tick ES = 0.25. Le reste PLACEHOLDER
+# (v1 provisional — durée de bougie, plancher de volume, fenêtres, à calibrer par l'humain).
+PRICE_TICK = float(os.getenv("PRICE_TICK", "0.25"))                    # grille de prix ES
+FOOTPRINT_CANDLE_SECONDS = float(os.getenv("FOOTPRINT_CANDLE_SECONDS", "60"))  # v1 provisional
+FOOTPRINT_CANDLES = int(os.getenv("FOOTPRINT_CANDLES", "12"))         # bougies affichées
+FOOTPRINT_IMBALANCE_RATIO = float(os.getenv("FOOTPRINT_IMBALANCE_RATIO", "3.0"))   # AUTORITÉ (300 %)
+FOOTPRINT_MIN_IMBALANCE_VOL = float(os.getenv("FOOTPRINT_MIN_IMBALANCE_VOL", "1"))  # plancher, v1
+FOOTPRINT_MAX_PRINTS = int(os.getenv("FOOTPRINT_MAX_PRINTS", "800"))  # tampon de prints accumulés
+# D-042 — bougies TICK-BASED : N prints par bougie au lieu du bucket temporel. 0 = temporel
+# (défaut, comportement D-037 inchangé). PLACEHOLDER v1 provisional, à calibrer par l'humain.
+FOOTPRINT_TICKS_PER_CANDLE = int(os.getenv("FOOTPRINT_TICKS_PER_CANDLE", "0"))
+
+# --- CVD granulaire stratifié par taille d'ordre (D-038) ---
+# Seuil retail/institutionnel = v1 provisional (PLACEHOLDER — pas d'AUTORITÉ dans /reference ;
+# calibration owner: Sony). Bucket temporel, fenêtre de série, deadbands de divergence = v1.
+CVD_SIZE_THRESHOLD = float(os.getenv("CVD_SIZE_THRESHOLD", "10"))         # ≥ seuil → institutionnel
+CVD_STRAT_BUCKET_SECONDS = float(os.getenv("CVD_STRAT_BUCKET_SECONDS", "5"))   # échantillon série
+CVD_STRAT_MAX_POINTS = int(os.getenv("CVD_STRAT_MAX_POINTS", "120"))     # points de série affichés
+CVD_STRAT_MAX_PRINTS = int(os.getenv("CVD_STRAT_MAX_PRINTS", "4000"))    # tampon de prints accumulés
+CVD_STRAT_DIV_LOOKBACK = int(os.getenv("CVD_STRAT_DIV_LOOKBACK", "12"))  # fenêtre de divergence
+CVD_STRAT_DIV_MIN_PRICE = float(os.getenv("CVD_STRAT_DIV_MIN_PRICE", "0.5"))   # deadband prix (pts)
+CVD_STRAT_DIV_MIN_DELTA = float(os.getenv("CVD_STRAT_DIV_MIN_DELTA", "25"))    # deadband delta (vol)
+
+# --- Chaîne d'options (OMON) + Term Structure de volatilité (D-039) ---
+# Bande ATM + eps FLAT = v1 provisional (PLACEHOLDER §11 — pas d'AUTORITÉ ; à calibrer). Bornes
+# d'affichage. Ténors VIX = jours standards de la structure (CBOE).
+OPTIONS_ATM_BAND = float(os.getenv("OPTIONS_ATM_BAND", "6"))          # |strike−U| ≤ bande → ATM
+OPTIONS_MAX_EXPIRATIONS = int(os.getenv("OPTIONS_MAX_EXPIRATIONS", "4"))
+OPTIONS_MAX_STRIKES = int(os.getenv("OPTIONS_MAX_STRIKES", "13"))    # strikes affichés par échéance
+VOL_TERM_FLAT_EPS = float(os.getenv("VOL_TERM_FLAT_EPS", "0.3"))     # |Δ| ≤ eps → FLAT (points VIX)
+VOL_TENORS = (("VIX9D", 9), ("VIX", 30), ("VIX3M", 93), ("VIX6M", 186))  # ténor → jours (CBOE)
+
+# --- Volume Profile dynamique (D-041) ---
+# VA 70 % = convention Market Profile (AUTORITÉ de facto). Ratio LVN + niveaux max = v1 provisional.
+VP_VA_PCT = float(os.getenv("VP_VA_PCT", "0.70"))            # Value Area = 70 % du volume
+VP_LVN_RATIO = float(os.getenv("VP_LVN_RATIO", "0.25"))     # creux ≤ 25 % du volume POC = LVN
+VP_MAX_LEVELS = int(os.getenv("VP_MAX_LEVELS", "400"))      # niveaux de prix bornés (grille)
+
+# --- Moteur Macro & Risk Guard (D-040) ---
+# Fenêtres = v1 provisional (PLACEHOLDER §11 — à calibrer). La fenêtre blackout ±15 min autour
+# d'un HIGH câble la règle Phase 0 MACRO_BLACKOUT (verrou unique §2.2).
+MACRO_PAUSE_WINDOW_S = float(os.getenv("MACRO_PAUSE_WINDOW_S", "900"))   # ±15 min → EXECUTION_PAUSED
+MACRO_WARN_WINDOW_S = float(os.getenv("MACRO_WARN_WINDOW_S", "1800"))    # 30 min avant → WARNING
+MACRO_PAST_GRACE_S = float(os.getenv("MACRO_PAST_GRACE_S", "1800"))      # grâce d'affichage du passé
+MACRO_MAX_EVENTS = int(os.getenv("MACRO_MAX_EVENTS", "20"))              # publications affichées
+
+# --- Heatmap de liquidité (LOB, canal rapide 4 Hz — D-036) ---
+# Fenêtre glissante de colonnes temporelles (une par tick rapide de 0,25 s). 60 colonnes ≈ 15 s
+# d'historique. Niveaux par côté = profondeur affichée du carnet (BOOK_DEPTH).
+HEATMAP_COLS = int(os.getenv("HEATMAP_COLS", "60"))       # colonnes temporelles conservées
+HEATMAP_LEVELS = int(os.getenv("HEATMAP_LEVELS", "10"))   # niveaux par côté (= BOOK_DEPTH)
+
+# --- Cortex Cognitif — bias_detector (analytique post-hoc, DÉTERMINISTE — D-035) ---
+# Seuils de détection de biais. FOMO/EXEC = PLACEHOLDER (v1 provisional, à calibrer par l'humain
+# sur les 50+ trades) ; la fenêtre revenge est AUTORITÉ (spec : < 3 min après une perte).
+FOMO_MAX_DURATION_S = float(os.getenv("FOMO_MAX_DURATION_S", "30"))       # v1 provisional
+EXEC_MAX_DURATION_S = float(os.getenv("EXEC_MAX_DURATION_S", "1800"))     # v1 provisional (30 min)
+REVENGE_WINDOW_S = float(os.getenv("REVENGE_WINDOW_S", "180"))            # AUTORITÉ — < 3 min
+
+# --- log_scraper : tailer NT8 → auto-snapshot (OBSERVATION seule §2.1 — D-031) ---
+# Désactivé par défaut : aucun log NT8 en démo. Activer avec un vrai dossier NT8
+# (Documents/NinjaTrader 8/log). Fail-closed si le dossier/log du jour est absent.
+LOG_SCRAPER_ENABLED = os.getenv("LOG_SCRAPER_ENABLED", "false").lower() == "true"
+NT8_LOG_DIR = os.getenv("NT8_LOG_DIR", "")
+LOG_SCRAPER_POLL_SECONDS = float(os.getenv("LOG_SCRAPER_POLL_SECONDS", "1.0"))  # hors hot path
+
+# --- Pricing d'options (D-044) — taux sans risque servant Black-Scholes ---
+# PLACEHOLDER v1 provisional : à brancher sur une vraie courbe (OIS) le jour où elle est câblée.
+# Sert l'inversion d'IV et les Grecques ; ne modifie aucun verrou (advisory, §2.1).
+RISK_FREE_RATE = float(os.getenv("RISK_FREE_RATE", "0.045"))
+
+# --- Session windows CET (PLACEHOLDER D-006) ---
+LONDON_OBS_CET = (8, 12)      # 08:00–12:00 CET
+OVERLAP_NY_CET = (14.5, 17.5)  # 14:30–17:30 CET
+
+# --- Walk-Forward robustness engine (analyse OFFLINE sur trades réconciliés — D-043) ---
+# Convention Walk-Forward Analysis (Pardo) : 70/30 IS/OOS = AUTORITÉ de facto ; seuil WFE < 0.5 =
+# overfit (spec D-043). window/step/min = PLACEHOLDER (v1 provisional, à calibrer sur 50+ trades).
+WF_IS_FRAC = float(os.getenv("WF_IS_FRAC", "0.70"))          # part In-Sample de chaque fenêtre
+WF_WINDOW = int(os.getenv("WF_WINDOW", "0"))                 # trades/fenêtre (0 → toute la série)
+WF_STEP = int(os.getenv("WF_STEP", "0"))                     # décalage (0 → = window, non chevauchant)
+WF_OVERFIT_THRESHOLD = float(os.getenv("WF_OVERFIT_THRESHOLD", "0.50"))  # WFE < seuil ⇒ OVERFIT
+WF_MIN_TRADES = int(os.getenv("WF_MIN_TRADES", "4"))        # plancher → INSUFFICIENT_DATA sinon
+
+# --- Monte Carlo robustness (analyse OFFLINE, bootstrap avec remise — D-043 tranche 2) ---
+# n_sims 5000–10000 (spec D-043) ; min/seed = PLACEHOLDER v1 provisional. Le seuil testé vient du
+# réglage `risk.max_drawdown_r_day` (projection), pas d'un doublon ici.
+MC_N_SIMS = int(os.getenv("MC_N_SIMS", "10000"))            # rééchantillonnages bootstrap
+MC_MIN_TRADES = int(os.getenv("MC_MIN_TRADES", "4"))        # plancher → INSUFFICIENT_DATA sinon
+MC_SEED = int(os.getenv("MC_SEED")) if os.getenv("MC_SEED") else None  # None → entropie (non répétable)
+# Borne CPU n_sims×n_trades → jamais de hang de worker sur entrée énorme (n_sims réduit, reporté via
+# `capped`). 2e6 ≈ < ~3 s Python pur ; garde 10000 sims tant que ≤ 200 trades (cas réel réconcilié).
+MC_MAX_WORK = int(os.getenv("MC_MAX_WORK", "2000000"))
+
+# --- LSR v1.2 — couche microstructure (D-046) ---
+# ISOLATION : cette couche ne lit QUE la microstructure — les frontières compte (F1/F2/F8),
+# volatilité (F3) et news (F5) vivent dans d'autres couches/services, jamais ici.
+#
+# ⚠ Les seuils PAR INSTRUMENT (spread F4, profondeur, géométrie A1/A2/A3 en ticks, gates B1-B4)
+# ne sont PLUS ici : ils vivent dans `app/lsr_tuning.py`, qui mirroite `lsr-engine/src/config.ts`
+# et est verrouillé par `tests/test_parite_lsr_config.py`. Ne pas les réintroduire ici — une
+# valeur écrite à deux endroits finit toujours par n'être corrigée qu'à un seul (D-069).
+# Ne restent ci-dessous que les grandeurs GLOBALES, indépendantes de l'instrument.
+LSR_INSTRUMENT = os.getenv("LSR_INSTRUMENT", "MES")         # Micro E-mini S&P 500
+LSR_SWEEP_MAX_AGE_S = float(os.getenv("LSR_SWEEP_MAX_AGE_S", "90"))    # fraîcheur du déclencheur
+LSR_EXTREME_WINDOW_S = float(os.getenv("LSR_EXTREME_WINDOW_S", "120"))  # fenêtre de l'extrême (A3)
+# RiskSizer /5 + modif VIX = couche COMPTE (AccountState), hors D-046 → taille fixe v1.
+LSR_CONTRACTS = int(os.getenv("LSR_CONTRACTS", "1"))
+# F7-like — fenêtre anti-FOMO : après une émission, aucun nouveau manifeste pendant ce délai,
+# quelles que soient les alertes (borne structurelle de fréquence ; doc LSR f7FomoWindowMs).
+LSR_REARM_COOLDOWN_S = float(os.getenv("LSR_REARM_COOLDOWN_S", "90"))
+
+# --- Couche Compte & RiskSizer (D-047) ---
+# Règle stricte du 1/5e (doc LSR v1.1, `bufferDivisor`) : risque du prochain trade = buffer/5.
+RISK_BUFFER_DIVISOR = int(os.getenv("RISK_BUFFER_DIVISOR", "5"))
+# Plafond du risque par trade, en fraction du CAPITAL INITIAL (D-068). Aligné sur
+# `lsr-engine/src/config.ts::riskFractionOfCapital`. Le moteur de référence calcule
+# `min(0.01 × capital, buffer / 5)` ; le Python n'appliquait que le second terme et allouait donc
+# PLUS de risque dès que la frontière du jour dépassait 5 % du capital. Verrouillé par test.
+RISK_FRACTION_OF_CAPITAL = float(os.getenv("RISK_FRACTION_OF_CAPITAL", "0.01"))
+# Plafond de plausibilité de taille (v1 provisional — compte cible : Apex 50K en micros ; une
+# équité corrompue produirait sinon un floor() astronomique parfaitement « cohérent »).
+RISK_MAX_CONTRACTS = int(os.getenv("RISK_MAX_CONTRACTS", "100"))
+# Fraîcheur maximale d'une photo de compte (v1 provisional) : au-delà, l'équité est FOSSILE et
+# le provider répond None — on ne dimensionne jamais sur un compte qu'on ne voit plus (§3).
+ACCOUNT_MAX_AGE_S = float(os.getenv("ACCOUNT_MAX_AGE_S", "15"))
+# --- NT8FileAccountProvider (D-048) : export de compte NinjaTrader ---
+# Désactivé par défaut ("" = stack démo → MockAccountProvider). Activer avec le chemin du
+# fichier exporté en continu par NT8 (lignes `epoch;equity[;day_start]`, un fichier/jour).
+NT8_ACCOUNT_FILE = os.getenv("NT8_ACCOUNT_FILE", "")
+NT8_ACCOUNT_POLL_SECONDS = float(os.getenv("NT8_ACCOUNT_POLL_SECONDS", "1.0"))
+
+# --- MacroNewsProvider & Porte F0 (D-050) ---
+# Fenêtres autour d'une publication USD à fort impact (minutes) : WARNING = [T−15, T−2),
+# HARD_LOCK = [T−2, T+2] bornes incluses. Le flux ("" = désactivé, stack démo → la porte F0
+# n'existe pas ; la protection de facto reste le couplage news D-028 + le blackout humain).
+# --- Sources externes Niveau 3 (D-062) : calendrier éco F5 + VIX F3 ---
+# Le paquet `app/external` ne DÉCIDE rien : il alimente `macro_releases` et `vix`, que les
+# couches déterministes existantes (compute_macro_risk, update_regime, VIX_CRIT) exploitent
+# déjà. Opt-in : sans `EXTERNAL_DATA=1`, rien n'est démarré et le mock reste seul maître.
+EXTERNAL_DATA = os.getenv("EXTERNAL_DATA", "") not in ("", "0", "false", "False")
+FINNHUB_API_KEY = os.getenv("FINNHUB_API_KEY", "")
+EXTERNAL_CALENDAR_FILE = os.getenv("EXTERNAL_CALENDAR_FILE", "")
+# VIX simulé pour le hors-ligne. Ce qui en sort porte EXTERNAL_FALLBACK jusque dans le panneau.
+_vix_static = os.getenv("EXTERNAL_VIX_STATIC", "")
+EXTERNAL_VIX_STATIC = float(_vix_static) if _vix_static else None
+EXTERNAL_REFRESH_SECONDS = float(os.getenv("EXTERNAL_REFRESH_SECONDS", "900"))
+# Au-delà, le cache n'est plus une donnée mais un souvenir : les accesseurs rendent « aveugle »
+# et rien n'est publié — le champ vieillit visiblement plutôt que d'être blanchi (§3).
+EXTERNAL_MAX_AGE_S = float(os.getenv("EXTERNAL_MAX_AGE_S", "7200"))
+
+MACRO_NEWS_FEED_URL = os.getenv("MACRO_NEWS_FEED_URL", "")
+MACRO_NEWS_REFRESH_SECONDS = float(os.getenv("MACRO_NEWS_REFRESH_SECONDS", "3600"))
+# Calendrier plus vieux que ça = FOSSILE → SAFETY_UNKNOWN (on ne trade pas à l'aveugle).
+MACRO_NEWS_MAX_AGE_S = float(os.getenv("MACRO_NEWS_MAX_AGE_S", "21600"))
+NEWS_LOCK_BEFORE_MIN = float(os.getenv("NEWS_LOCK_BEFORE_MIN", "2"))
+NEWS_LOCK_AFTER_MIN = float(os.getenv("NEWS_LOCK_AFTER_MIN", "2"))
+NEWS_WARNING_BEFORE_MIN = float(os.getenv("NEWS_WARNING_BEFORE_MIN", "15"))
+# Stop de RÉFÉRENCE pour le ticket pré-calculé affiché en Zone C (D-051) : l'opérateur voit sa
+# capacité AVANT l'alerte. 3 ticks = géométrie LSR typique sur MES (entrée+1t, stop−2t).
+RISK_REFERENCE_STOP_TICKS = int(os.getenv("RISK_REFERENCE_STOP_TICKS", "3"))
+
+# --- LsrLiveDriver (D-052) : harnais push-driven du moteur LSR ---
+# Cadence d'évaluation (le détecteur de sweep tourne à la seconde — 250 ms suffit largement).
+LSR_DRIVER_POLL_SECONDS = float(os.getenv("LSR_DRIVER_POLL_SECONDS", "0.25"))
+# Fraîcheur maximale d'un snapshot marché / order flow poussé : au-delà, la donnée est FOSSILE et
+# aucune évaluation n'a lieu (la boucle périodique doit être fail-CLOSED, pas fail-open).
+# Le compte garde sa propre doctrine (ACCOUNT_MAX_AGE_S, D-047).
+LSR_DRIVER_MAX_AGE_S = float(os.getenv("LSR_DRIVER_MAX_AGE_S", "2.0"))
+# Plafond d'un callback consommateur (persistance, émission). Un `await` qui ne rend JAMAIS la
+# main (socket Redis suspendue, pas de timeout côté client) pendait la boucle pour toujours, en
+# silence : sans plafond, un driver mort ressemble à un driver calme (/devil D-052). 2 s sur une
+# cadence de 250 ms est déjà pathologique — au-delà, on traite en ÉCHEC (donc l'état n'avance pas).
+LSR_DRIVER_CALLBACK_TIMEOUT_S = float(os.getenv("LSR_DRIVER_CALLBACK_TIMEOUT_S", "2.0"))
+
+# --- Positionnement Long/Short — bloc `long_short_ratio` (D-053) ---
+# Seuil de DÉSÉQUILIBRE affiché : fait observable (« ≥ X % d'un côté »), pas une lecture
+# contrarienne — le terminal montre, l'opérateur décide (§2.1).
+SENTIMENT_EXTREME_PCT = float(os.getenv("SENTIMENT_EXTREME_PCT", "75"))
+# Un flux obèse est un flux empoisonné (doctrine D-050) : au-delà, le lot ENTIER est refusé —
+# tronquer masquerait des instruments sans le dire.
+SENTIMENT_MAX_ROWS = int(os.getenv("SENTIMENT_MAX_ROWS", "24"))
+
+# --- Order Flow in-house — Niveau 2 CALCUL (D-055) ---
+# Fenêtre d'analyse des portes B1-B4. v1 provisional (PLACEHOLDER §11 : le doc LSR nomme les
+# portes, il n'en donne PAS les formules — celles-ci sont documentées dans le module et isolées).
+ORDERFLOW_WINDOW_S = float(os.getenv("ORDERFLOW_WINDOW_S", "30"))
+# Part MINIMALE du volume dont le côté agresseur est connu : sous ce seuil, B2 n'est pas calculé.
+# Un tape dont on ignore le côté de la moitié du volume ne produit pas un ratio, il produit un
+# mensonge (§3).
+ORDERFLOW_MIN_SIDE_COVERAGE = float(os.getenv("ORDERFLOW_MIN_SIDE_COVERAGE", "0.8"))
+ORDERFLOW_ATR_FAST = int(os.getenv("ORDERFLOW_ATR_FAST", "5"))
+ORDERFLOW_ATR_SLOW = int(os.getenv("ORDERFLOW_ATR_SLOW", "14"))
+# Bornes d'entrée (doctrine D-050 : un flux obèse est un flux empoisonné).
+ORDERFLOW_MAX_PRINTS = int(os.getenv("ORDERFLOW_MAX_PRINTS", "20000"))
+ORDERFLOW_MAX_BOOKS = int(os.getenv("ORDERFLOW_MAX_BOOKS", "2000"))
+# Volume MINIMAL dans la fenêtre sous lequel B2/B3 ne sont pas des mesures : « 100 % acheteur »
+# sur un lot n'est pas un flux acheteur, c'est du bruit présenté comme une mesure (/devil D-055).
+# v1 provisional — à calibrer avec l'instrument (MES ≠ ES).
+ORDERFLOW_MIN_VOLUME = float(os.getenv("ORDERFLOW_MIN_VOLUME", "20"))
+# Durée MINIMALE de part et d'autre du sweep pour que B4 soit un débit : un taux mesuré sur
+# quelques millisecondes est du bruit multiplié par mille (/devil D-055, 2e passe). v1 provisional.
+ORDERFLOW_MIN_SPAN_S = float(os.getenv("ORDERFLOW_MIN_SPAN_S", "1.0"))
+
+# --- Câblage du calculateur order flow dans le moteur LSR (D-056) ---
+# "source"  : les portes B1/B2 lisent les PROXYS du fournisseur (absorption booléenne,
+#             aggressor_ratio pré-agrégé) — comportement historique, DÉFAUT.
+# "inhouse" : elles lisent les mesures calculées chez nous (D-055). Bascule explicite, jamais
+#             implicite : changer la source de vérité du chemin d'émission est une décision.
+LSR_ORDERFLOW_SOURCE = os.getenv("LSR_ORDERFLOW_SOURCE", "source")
+# Le seuil B1 in-house (part du mur consommé qui doit être RECHARGÉE) est PAR INSTRUMENT depuis
+# D-069 : `lsr_tuning.PER_INSTRUMENT[...].b1_min_wall_refill_ratio` (0.40, valeur du moteur de
+# référence — le Python exigeait 0.50 et refusait donc des murs que la référence valide).
+# Historique de carnet L2 gardé par l'Engine pour B1 (le schéma ne porte que le carnet COURANT ;
+# la heatmap, elle, accumule côté frontend). 120 snapshots ≈ 30 s à 4 Hz.
+BOOK_HISTORY_MAX = int(os.getenv("BOOK_HISTORY_MAX", "120"))
+# Écart MAXIMAL toléré entre deux observations de carnet pour mesurer un rechargement de mur.
+# Au-delà, la déplétion n'a pas été observée : elle est INFÉRÉE à travers un trou de cécité
+# (coupure de flux). Un trou n'est pas une observation (/devil D-056). 8 échantillons à 4 Hz.
+ORDERFLOW_MAX_BOOK_GAP_S = float(os.getenv("ORDERFLOW_MAX_BOOK_GAP_S", "2.0"))
+# B4 (D-067) — durée de la RAFALE qui constitue le sweep, dénominateur de l'essoufflement.
+# Valeur reprise du détecteur (`graph/liquidity_sweep.BURST_WINDOW_S`) : l'alerte est horodatée
+# à l'instant de détection, donc la rafale occupe `(ts − fenêtre, ts]`. En prendre une autre
+# reviendrait à mesurer un sweep que personne n'a détecté. Verrouillé par test.
+ORDERFLOW_SWEEP_WINDOW_S = float(os.getenv("ORDERFLOW_SWEEP_WINDOW_S", "2.0"))
+
+# --- Sources macro de Youssef — registre + connecteurs (D-057) ---
+# FRED est le socle (~30 lignes sur 5 dimensions) : un endpoint, un format, une clé GRATUITE.
+# Vide par défaut = aucune requête FRED n'est construite (fail-closed : on ne part pas chercher
+# une série qui reviendra en erreur d'authentification et se lirait comme une panne de source).
+FRED_API_KEY = os.getenv("FRED_API_KEY", "")
+
+# --- Mode Replay local (Étape 2) ---
+# Chemin d'un tape CSV. Vide = source mock. Renseigné, le terminal rejoue l'enregistrement à la
+# place du marché — et le dit : source `replay`, drapeau `REPLAY` sur chaque écriture.
+REPLAY_FILE = os.getenv("REPLAY_FILE", "")
+REPLAY_SPEED = float(os.getenv("REPLAY_SPEED", "1.0"))
+REPLAY_AUTOPLAY = os.getenv("REPLAY_AUTOPLAY", "1") not in ("0", "false", "False")
+
+# --- Fournisseur de microstructure (D-059) ---
+# Nom de la source qui possède le carnet, le tape et les niveaux de volume. Il était codé en dur
+# à vingt endroits ; changer de plateforme demandait un renommage global, et une occurrence
+# oubliée aurait fait vieillir un champ vers ABSENT sans que rien ne l'explique.
+# Bookmap par défaut ; `MICROSTRUCTURE_SOURCE=sierra_chart` (ou `rithmic`, …) suffit à changer.
+MICROSTRUCTURE_SOURCE = os.getenv("MICROSTRUCTURE_SOURCE", "bookmap")
+
+# --- LSR : règles de protection F6 / F7 / A5b (D-094) ---
+# MIROIRS de `lsr-engine/src/config.ts`, qui fait AUTORITÉ. Un test de parité (D-072) LIT le TS
+# et échoue si l'un de ces quatre nombres diverge : les recopier sans verrou, c'est se garantir
+# une divergence silencieuse le jour où le moteur de référence bouge.
+# Unités en MILLISECONDES, comme le TS — le convertisseur vit dans la projection, pas ici.
+LSR_F6_COOLDOWN_MS = 15 * 60_000            # verrou après N pertes consécutives
+LSR_F6_CONSECUTIVE_LOSS_TRIGGER = 2         # N
+LSR_F7_FOMO_WINDOW_MS = 90_000              # âge max d'un sweep avant que l'entrée soit du FOMO
+LSR_F7_RESUBMIT_LOCKOUT_MS = 15 * 60_000    # re-soumission d'un setup déjà refusé
+
+# --- Boucles d'exécution : contrat commun (D-073) ---
+# Cadences et budgets des cinq boucles du terminal. Les valeurs qui EXISTENT DÉJÀ ailleurs sont
+# réutilisées telles quelles (FAST_TICK_SECONDS, ENGINE_HEARTBEAT_MAX_AGE) plutôt que réécrites :
+# un seuil écrit deux fois finit par diverger (leçon D-069).
+HOT_PATH_BUDGET_SECONDS = 0.2      # AUTORITÉ — CLAUDE §7, hot path déterministe < ~200 ms
+# L2 — miroirs des constantes d'`options_worker.py` (POLL_INTERVAL_SECONDS, VENDOR_TIMEOUT_SECONDS,
+# CONTEXT_TTL_SECONDS) et d'`optionsContext.ts` (STALE_THRESHOLD_MS). Le worker est un service
+# AUTONOME (redémarrage du terminal ≠ redémarrage du worker) : ces valeurs le DÉCRIVENT, elles ne
+# le pilotent pas. Toutes PLACEHOLDER côté worker — donc PLACEHOLDER ici aussi.
+OPTIONS_SYNC_PERIOD_SECONDS = float(os.getenv("OPTIONS_SYNC_PERIOD_SECONDS", "5.0"))    # PLACEHOLDER
+OPTIONS_VENDOR_TIMEOUT_SECONDS = float(os.getenv("OPTIONS_VENDOR_TIMEOUT_SECONDS", "3.0"))  # PLACEHOLDER
+OPTIONS_CONTEXT_TTL_SECONDS = float(os.getenv("OPTIONS_CONTEXT_TTL_SECONDS", "90.0"))   # PLACEHOLDER
+# L3 — barres ES nominales 1 min ; `maxBarGapMs = 90_000` côté o5TailRisk tolère une barre
+# manquée, pas deux. Le watchdog se déclenche donc APRÈS ce que le gate sait déjà gérer seul.
+O5_BAR_PERIOD_SECONDS = float(os.getenv("O5_BAR_PERIOD_SECONDS", "60.0"))               # PLACEHOLDER
+# Cadence d'ÉCHANTILLONNAGE de L3 — volontairement plus fine que la largeur de barre : une
+# boucle cadencée à 60 s verrait chaque bucket une seule fois, et la moindre gigue sauterait
+# une minute en fabriquant un faux O5_DATA_GAP. On échantillonne vite, on ne calcule qu'à la
+# clôture d'une barre (le kurtosis est déporté hors du fil principal — D-077).
+O5_SAMPLE_PERIOD_SECONDS = float(os.getenv("O5_SAMPLE_PERIOD_SECONDS", "5.0"))          # PLACEHOLDER
+# Tampon de barres : la fenêtre O5 en lit 121 ; une marge suffit. Borné pour ne pas laisser
+# une séance de 8 h accumuler 480 barres (fuite lente, RUNTIME_LOOPS Loop D).
+O5_BAR_BUFFER_SIZE = int(os.getenv("O5_BAR_BUFFER_SIZE", "180"))
+O5_TICK_BUDGET_SECONDS = float(os.getenv("O5_TICK_BUDGET_SECONDS", "5.0"))              # PLACEHOLDER
+O5_HEARTBEAT_STALE_SECONDS = float(os.getenv("O5_HEARTBEAT_STALE_SECONDS", "180.0"))    # PLACEHOLDER
+# L4 — `evaluateOptionsGates` ne fait que des lectures mémoire pures (aucune I/O par
+# construction) : un budget large masquerait une régression qui y glisserait un aller-retour.
+GATES_TICK_BUDGET_SECONDS = float(os.getenv("GATES_TICK_BUDGET_SECONDS", "0.05"))       # PLACEHOLDER
+UI_BROADCAST_BUDGET_SECONDS = float(os.getenv("UI_BROADCAST_BUDGET_SECONDS", "1.0"))    # PLACEHOLDER
+
+# --- Rejeu LSR : durée de vie d'un balayage EN ATTENTE (D-087) ---
+# B4 mesure l'agression APRÈS le balayage : à l'instant du sweep, la mesure est impossible
+# (0 s écoulées). Le moteur live y remédie par sa cadence de tick ; en rejeu on garde le
+# balayage en attente et on réévalue sur les événements suivants. Au-delà de ce délai il
+# EXPIRE — un setup armé sur un balayage d'il y a une minute n'est plus celui qu'on a détecté.
+LSR_SWEEP_MAX_PENDING_S = float(os.getenv("LSR_SWEEP_MAX_PENDING_S", "30.0"))  # PLACEHOLDER
