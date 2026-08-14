@@ -3752,6 +3752,60 @@ Log (§2.5), pas un champ mutable. Les deux derniers sont purs et courts.
 21 tests neufs, 4 tests existants mis à jour (F2 les fait changer de verdict) → **1353 passed**,
 ruff clean.
 
+## D-102 · Carte de sensibilité à la ruine — et la « falaise » de la maquette ne se reproduit pas
+
+Tranche 2. Arbitrage validé : **carte de sensibilité**, pas prédiction. Le taux de réussite réel
+du LSR est inconnu ; une matrice annonçant « votre risque de ruine est de 12 % » présenterait une
+hypothèse comme une mesure. Chaque cellule porte `status: HYPOTHESIS`, la structure porte
+`kind: sensitivity_map`, et aucun champ ne s'appelle « risque de ruine du compte ».
+
+### Réel vs posé, écrit dans la sortie
+
+RÉEL — capital, drawdown maximal, limite journalière (`ApexEodPreset`), unité R (`R_UNIT_USD`).
+POSÉ — les deux axes, qui sont l'objet même de l'exploration.
+
+Le modèle de trade est volontairement pauvre (+1R / −1R, slippage des deux côtés) et **écrit dans
+la sortie**. Un modèle riche donnerait des nombres plus précis sur des hypothèses tout aussi
+inconnues : de la fausse précision.
+
+### Un bug trouvé en regardant les nombres, pas en relisant le code
+
+Première version : `day_loss = min(0, day_loss + (gain if equity > 0 else loss))` — le P&L
+journalier **redérivait** le résultat du signe de l'équité au lieu d'utiliser le trade tiré. La
+limite journalière ne pouvait donc jamais mordre. Corrigé : un tirage, un résultat, appliqué aux
+deux compteurs.
+
+C'est la sortie chiffrée qui l'a révélé, pas la relecture — la carte était trop clémente pour
+être vraie.
+
+### La note de la maquette n'est pas reproduite, et c'est le résultat
+
+v17 affirme en note qu'« un tick de slippage coûte environ 5 points de taux de réussite » et que
+« ce n'est pas un gradient, c'est une falaise ». Cette phrase n'est **calculée nulle part** dans
+la maquette — elle y est écrite en dur.
+
+Mesurée ici, à R = 100 $ sur un drawdown de 2 500 $ (25R) et 50 trades : **le coût d'un tick est
+inférieur au pas de la grille**. La ruine reste sous 1 % dès 45 % de réussite, quel que soit le
+slippage testé. Il n'y a pas de falaise à ce niveau de risque par trade.
+
+Je n'ai **pas** ajusté R, l'horizon ou les axes jusqu'à faire apparaître la falaise. Une carte
+réglée pour produire la conclusion attendue mesurerait le réglage — c'est le refus de D-087,
+appliqué ici.
+
+### `0.0` ne veut pas dire « gratuit »
+
+`slippage_cost_in_win_rate_points` rendait `0.0`, qui se lit « le slippage ne coûte rien ». Faux :
+il coûte moins que le pas de la grille (10 points). La fonction rend donc un statut —
+`MEASURED` / `BELOW_GRID_RESOLUTION` / `NOT_MEASURABLE` — avec `points: null` quand ce n'est pas
+résolu. Une absence de résolution n'est pas une absence de coût.
+
+### Vérif
+10 tests neufs → **1836 passed**, ruff clean, mypy 15 fichiers. Deux tests portent sur des
+PROPRIÉTÉS et non des valeurs : monotonie du taux de réussite, monotonie du slippage — une
+violation signalerait un calcul faux, pas un chiffre qui bouge. Et le garde symétrique de la
+reproductibilité : une graine différente DOIT donner des nombres différents, sinon le tirage
+serait factice.
+
 ## D-101 · Les seuils OF viennent du moteur — et B2 est directionnel
 
 Tranche 1 du chantier P3. La maquette v17 affichait « seuil ≥ 0.40 » en dur ; les porter tels
