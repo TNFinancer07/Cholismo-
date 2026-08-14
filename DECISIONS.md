@@ -3774,6 +3774,21 @@ leur raison dans le message, mais absentes du registre que `HANDOFF.md` désigne
 « pourquoi c'est comme ça ». Elles sont rédigées ici a posteriori, à partir des commits — leur
 contenu est d'époque, leur écriture ne l'est pas.
 
+### Et un compteur faux depuis le début, trouvé juste avant la fusion
+Le dépôt est cloné en **`shallow`**. `git rev-list --count` n'a donc jamais compté les commits de
+la branche : il comptait **la profondeur du clone**. « 72 commits » dans le corps de la PR, « 85 »
+dans `HANDOFF.md` à D-105, « 102 » dans les deux ce matin — **trois chiffres faux, une seule
+cause**, et deux d'entre eux déjà publiés.
+
+Le vrai compte est **225** (`git fetch --unshallow`, recoupé avec l'API GitHub qui l'annonçait
+depuis le début). Corrigé dans `HANDOFF.md` et dans le corps de la PR **avant** la fusion : un
+document de passation qui entre dans `main` avec un compteur faux le porte pour toujours.
+
+C'est exactement D-092 : une commande de constat lancée sans vérifier qu'elle *pouvait* répondre à
+la question posée, et sa sortie lue comme un fait. La leçon n'est pas « compter autrement », c'est
+**recouper tout chiffre publié avec une source indépendante** — ici l'API le donnait, il suffisait
+de regarder.
+
 ## D-119 · Pont Stream Deck — il montre et confirme, il ne décide pas
 
 Optimisation #12. Daemon local autonome (`workers/streamdeck_bridge.py`) + projection pure

@@ -7,7 +7,7 @@
 > réussite du LSR est **inconnu**. Tout ce qui a été construit sert à le *mesurer*, jamais à le
 > confirmer.
 
-Dernier commit de code : `4f79c45` (D-120) · 102 commits sur la branche · **111 entrées** dans `DECISIONS.md`
+Dernier commit de code : `4f79c45` (D-120) · **225 commits** sur la branche · **111 entrées** dans `DECISIONS.md`
 (numérotées jusqu'à `D-120`). **CI verte** sur chaque push (`.github/workflows/ci.yml`, D-092) —
 le vert n'est plus une parole.
 
@@ -388,6 +388,13 @@ réelle n'a pas traversé la chaîne. Le terminal sert la preuve — il ne la re
    neuf, sans qu'une ligne ait changé — l'image exportait `NODE_ENV=production`, que Vitest ne
    remplace que s'il est absent. Ce qui rend un run reproductible appartient au dépôt, pas à
    l'environnement.
+8. **Un compteur lu d'une source qui ne pouvait pas répondre.** Le dépôt est cloné en
+   **`shallow`** ici : `git rev-list --count` n'a jamais compté les commits de la branche, il a
+   compté **la profondeur du clone**. « 72 », puis « 85 », puis « 102 » — trois chiffres faux dans
+   trois documents, dont deux déjà publiés, pour une seule et même raison. Le vrai compte est
+   **225** (`git fetch --unshallow`, confirmé par l'API GitHub). Même famille que D-092 : une
+   commande de constat lancée sans vérifier qu'elle *pouvait* répondre, et sa réponse lue comme
+   un fait.
 
 ---
 
