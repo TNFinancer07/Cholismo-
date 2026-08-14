@@ -39,6 +39,10 @@ from .event_store import EventStore
 #: `live_mode.py`) ; en réintroduire une seconde ferait diverger deux définitions de « aujourd'hui ».
 MTL = ZoneInfo("America/Montreal")
 
+#: Event de refus — append-only comme le reste (§2.5). C'est LUI qui donne à F7-resubmit la
+#: source qui lui manquait (D-094) : le garde journalise ce qu'il refuse, et la projection le relit.
+SETUP_REJECTED_EVENT = "SetupRejectedEvent"
+
 #: Motifs de refus — mêmes chaînes que `RejectReason` du TS, verrouillées par le test de parité.
 F6_COOLDOWN_ACTIVE = "F6_COOLDOWN_ACTIVE"
 F7_FOMO_TIMEOUT = "F7_FOMO_TIMEOUT"
@@ -81,8 +85,8 @@ class LsrRuntimeState:
     consecutive_losses: int
     trades_today: int
     lockout_until_ms: Optional[float]
-    #: Vide et documenté : voir `rejected_setup_ids` plus bas. Ce n'est pas « aucun refus », c'est
-    #: « aucun refus n'est ENREGISTRÉ ». Le drapeau dit lequel des deux.
+    #: Setups refusés encore dans leur fenêtre de verrou. Le drapeau distingue « aucun refus » de
+    #: « refus non suivis » — il est vrai depuis D-095, faux dans tout état construit à la main.
     rejected_setup_ids: tuple[str, ...] = ()
     resubmit_tracking_available: bool = False
 
@@ -131,17 +135,25 @@ def project_runtime_state(store: EventStore, *, now_ms: float) -> LsrRuntimeStat
     if streak >= config.LSR_F6_CONSECUTIVE_LOSS_TRIGGER and last_loss_ms is not None:
         lockout_until_ms = last_loss_ms + config.LSR_F6_COOLDOWN_MS
 
+    # F7-resubmit : la source d'events existe depuis D-095 — c'est le garde lui-même qui la
+    # produit en journalisant ses refus. Un refus n'est retenu que pendant la fenêtre de verrou :
+    # au-delà, le setup redevient proposable, ce qui est le sens de « lockout » et non « bannissement ».
+    rejected: list[str] = []
+    for ev in store.events(SETUP_REJECTED_EVENT):
+        ms = _ts_ms(ev)
+        setup_id = ev.get("setup_id")
+        if ms is None or not setup_id:
+            continue
+        if now_ms - ms <= config.LSR_F7_RESUBMIT_LOCKOUT_MS:
+            rejected.append(str(setup_id))
+
     return LsrRuntimeState(
         session_date=today,
         consecutive_losses=streak,
         trades_today=trades_today,
         lockout_until_ms=lockout_until_ms,
-        # F7-resubmit : AUCUN event du journal n'enregistre le refus d'un setup identifié.
-        # `DecisionEvent` porte un `window_id`, pas un `setup_id`, et le journal des setups ne
-        # connaît que `setup_armed` / `setup_outcome`. Rendre un tuple vide en le présentant comme
-        # « rien n'a été refusé » serait un faux — d'où le drapeau explicite.
-        rejected_setup_ids=(),
-        resubmit_tracking_available=False,
+        rejected_setup_ids=tuple(dict.fromkeys(rejected)),
+        resubmit_tracking_available=True,
     )
 
 
@@ -200,3 +212,91 @@ def a5b_first_trade_confluence(state: LsrRuntimeState, *, coincides_with_vpoc: A
     if state.trades_today == 0 and not has_confluence(coincides_with_vpoc, secondary_reference):
         return A5B_FIRST_TRADE_CONFLUENCE
     return None
+
+
+# --------------------------------------------------------------------------------------------
+# Le garde : brancher les règles SANS toucher au driver (D-095).
+# --------------------------------------------------------------------------------------------
+#
+# `LsrLiveDriver` a été durci par une revue Loop 4 (cycle sérialisé, callbacks plafonnés, état
+# persisté avant avancement, horloge qui recule). Y injecter des règles reviendrait à rouvrir ce
+# code au moment le plus sensible du système. Le garde est donc un DÉCORATEUR d'évaluateur : le
+# driver ne change pas d'une ligne.
+#
+# **Pourquoi APRÈS l'évaluateur et non avant.** F7 a besoin de l'horodatage du sweep, qui n'existe
+# que sur le plan produit. F6, lui, ne dépend d'aucun setup et court-circuite en amont — inutile
+# d'évaluer quand le compte est verrouillé.
+#
+# **Un refus ne fait rien émettre, et ne touche pas l'état.** On rend `(None, payload.state)` :
+# `_dispatch_plan(None)` reste silencieux, `_advance_state(state inchangé)` rend `True` sans
+# persister. Le driver ne sait même pas qu'un refus a eu lieu — c'est le journal qui le sait.
+
+
+def _protection_facts(plan: Any) -> tuple[Optional[str], Optional[float]]:
+    """`(setup_id, sweep_ts_ms)` portés par le plan. Absents → `(None, None)`, et F7 refusera."""
+    if not isinstance(plan, dict):
+        return None, None
+    prot = plan.get("protection")
+    if not isinstance(prot, dict):
+        return None, None
+    ts = prot.get("sweep_ts")
+    try:
+        ts_ms = float(ts) * 1000.0 if ts is not None else None
+    except (TypeError, ValueError):
+        ts_ms = None
+    setup_id = prot.get("setup_id")
+    return (str(setup_id) if setup_id else None), ts_ms
+
+
+def guard_evaluator(inner: Any, *, store: EventStore,
+                    now_to_ms: float = 1000.0) -> Any:
+    """Enveloppe un évaluateur LSR des règles de protection F6 / F7.
+
+    `now_to_ms` convertit l'horloge du driver (secondes) vers l'unité des règles (millisecondes,
+    comme le TS). Explicite plutôt que codé en dur : un driver cadencé en millisecondes ne doit
+    pas exiger de rouvrir cette fonction.
+
+    **A5b n'est PAS branché ici** — et ce n'est pas un oubli. Sa seconde condition
+    (`secondary_reference ∈ VAH|VAL|LVN`) n'a **aucun producteur**, ni côté Python ni dans
+    `lsr-engine/src` où le champ est une *entrée* jamais calculée. La brancher demanderait
+    d'inventer une tolérance de coïncidence de niveau, que rien ne définit (`CLAUDE §11`). La
+    brancher en fail-closed serait pire : elle refuserait TOUS les premiers trades de séance,
+    définitivement — un refus qui ne protège de rien puisqu'il refuse tout (leçon de la gate ATR).
+    """
+    def evaluate(payload: Any) -> tuple[Any, Any]:
+        now_ms = float(payload.now) * now_to_ms
+        state = project_runtime_state(store, now_ms=now_ms)
+
+        # F6 en amont : verrouillé = on n'évalue même pas.
+        if (reason := f6_cooldown(state, now_ms)) is not None:
+            _journal_rejection(store, setup_id=None, reason=reason, now_ms=now_ms)
+            return None, payload.state
+
+        plan, next_state = inner(payload)
+        if not isinstance(plan, dict) or plan.get("status") != "APPROVED":
+            return plan, next_state          # ALERT et silence ne sont pas des entrées à garder
+
+        setup_id, sweep_ts_ms = _protection_facts(plan)
+        reason = f7_fomo(sweep_ts_ms, now_ms) or f7_resubmit(setup_id, state)
+        if reason is not None:
+            _journal_rejection(store, setup_id=setup_id, reason=reason, now_ms=now_ms)
+            return None, payload.state
+
+        return plan, next_state
+
+    return evaluate
+
+
+def _journal_rejection(store: EventStore, *, setup_id: Optional[str], reason: str,
+                       now_ms: float) -> None:
+    """Journalise un refus. Ne lève jamais : un journal en panne ne doit pas transformer un refus
+    en autorisation — le refus a déjà eu lieu, l'event n'en est que la trace.
+
+    Un refus F6 n'a pas de `setup_id` (le verrou porte sur le compte, pas sur un setup) : il est
+    tracé sans identifiant, ce qui l'exclut naturellement du verrou de re-soumission.
+    """
+    try:
+        store.append(SETUP_REJECTED_EVENT,
+                     {"setup_id": setup_id, "reason": reason}, ts=now_ms / 1000.0)
+    except Exception:  # noqa: BLE001 — voir docstring
+        pass

@@ -136,6 +136,22 @@ def noise_buffer_ticks(spread_ticks: Any, atr_fast: Any, atr_slow: Any,
     return min(t.sl_noise_buffer_max_ticks, base + extra)
 
 
+def _setup_id(instrument: Any, sweep_direction: Any, sweep_ts: Any) -> Optional[str]:
+    """Identité d'un setup, dérivée du sweep qui lui donne naissance (D-095).
+
+    `None` si le sweep n'est pas identifiable — un identifiant fabriqué ferait passer deux setups
+    distincts pour le même, ou l'inverse, et le verrou de re-soumission (F7) porterait à faux.
+    La seconde est la granularité : deux évaluations du même sweep à 40 ms d'écart doivent rendre
+    le MÊME identifiant, sinon le verrou ne reconnaîtrait jamais une re-soumission.
+    """
+    if sweep_ts is None or sweep_direction is None or instrument is None:
+        return None
+    try:
+        return f"{instrument}:{sweep_direction}:{int(float(sweep_ts))}"
+    except (TypeError, ValueError):
+        return None
+
+
 def _grid(x: float, tick: float) -> float:
     """Aligne un prix sur la grille de ticks (un niveau hors grille n'est pas exécutable)."""
     return round(round(x / tick) * tick, 10)
@@ -312,4 +328,15 @@ def evaluate_lsr(i: LsrInputs) -> Optional[dict]:
                    f"flip {flip:.2f} [{source}] · VPOC {vpoc}"),
         "executionPlan": {"entryType": "LIMIT", "entryPrice": entry, "stopLoss": _grid(stop, tick),
                           "takeProfit": _grid(tp, tick), "contracts": config.LSR_CONTRACTS},
+        # Provenance du setup, pour les règles de protection F6/F7 (D-095). Additif : le plan
+        # portait déjà de quoi EXÉCUTER, pas de quoi se faire REFUSER. Sans ces deux champs, un
+        # garde devrait relire `reason` — piloter une gate en analysant une phrase française
+        # serait fragile et absurde.
+        "protection": {
+            # Identité STABLE d'un setup = le sweep dont il naît. Deux évaluations du même sweep
+            # rendent le même identifiant : c'est exactement ce que le verrou de re-soumission
+            # (F7) doit reconnaître. Convention d'identité, pas une formule.
+            "setup_id": _setup_id(instrument, i.sweep_direction, i.sweep_ts),
+            "sweep_ts": i.sweep_ts,
+        },
     }

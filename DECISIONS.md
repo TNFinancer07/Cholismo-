@@ -3752,6 +3752,86 @@ Log (§2.5), pas un champ mutable. Les deux derniers sont purs et courts.
 21 tests neufs, 4 tests existants mis à jour (F2 les fait changer de verdict) → **1353 passed**,
 ruff clean.
 
+## D-095 · Brancher les règles sans toucher au driver — et A5b bute sur une donnée qui n'existe pas
+
+Suite de D-094 : les règles étaient portées mais appelées par personne.
+
+### Un décorateur, pas une modification du driver
+
+`LsrLiveDriver` a été durci par une revue Loop 4 (cycle sérialisé, callbacks plafonnés, état
+persisté avant avancement, horloge qui recule). Y injecter des règles rouvrirait ce code au point
+le plus sensible du système. `guard_evaluator()` **enveloppe l'évaluateur injecté** : le driver ne
+change pas d'une ligne.
+
+Le contrat de refus tombe juste sans rien ajouter au driver : rendre `(None, payload.state)` fait
+que `_dispatch_plan(None)` reste silencieux et que `_advance_state(état inchangé)` rend `True`
+sans persister. Trois tests vérifient cette conséquence plutôt que l'implémentation.
+
+**F6 court-circuite en amont** (aucun setup requis : verrouillé = on n'évalue même pas),
+**F7 s'applique en aval** (il lui faut l'horodatage du sweep, qui n'existe que sur le plan produit).
+
+### La boucle F7-resubmit se referme sur elle-même
+
+D-094 constatait que F7-resubmit n'avait aucune source d'events. La source, c'est **le garde
+lui-même** : il journalise ce qu'il refuse (`SetupRejectedEvent`), et la projection le relit.
+`resubmit_tracking_available` passe donc à vrai, et le test qui verrouillait l'inertie a été
+**remplacé** plutôt que laissé mentir.
+
+Un refus n'est retenu que pendant `LSR_F7_RESUBMIT_LOCKOUT_MS` : « lockout », pas
+« bannissement ». Un refus F6 est tracé **sans** `setup_id` — le verrou porte sur le compte, pas
+sur un setup, et il s'exclut ainsi naturellement du verrou de re-soumission.
+
+### Le plan porte enfin sa provenance
+
+`evaluate_lsr` ajoute un bloc `protection` (`setup_id`, `sweep_ts`). Additif : le plan portait de
+quoi EXÉCUTER, pas de quoi se faire REFUSER. Sans lui, un garde devrait relire `reason` — piloter
+une gate en analysant une phrase française serait absurde.
+
+`setup_id` est dérivé du sweep (`instrument:direction:seconde`), et `None` si le sweep n'est pas
+identifiable : un identifiant fabriqué ferait passer deux setups distincts pour le même. La
+seconde est la granularité — deux évaluations du même sweep à 40 ms d'écart doivent rendre le
+même identifiant, sinon le verrou ne reconnaîtrait jamais une re-soumission.
+
+### Migration du journal — la seule opération qui recrée la table des events
+
+`SetupRejectedEvent` est un event à part entière (une projection le relit), donc soumis à la
+contrainte CHECK d'`events`. SQLite ne sait pas modifier un CHECK : `_migrate_event_types()`
+reconstruit la table, sur le patron de `_migrate_journal_kinds`.
+
+C'est l'endroit le plus risqué de ce commit. Un test dédié le couvre : events copiés **verbatim**
+(seq/id/ts/type/payload), triggers anti UPDATE/DELETE **recréés** (vérifié en tentant les deux),
+migration idempotente. L'append-only du §2.5 porte sur les événements, pas sur le DDL — la nuance
+est étroite et elle est écrite dans le code.
+
+### A5b n'est PAS branché — et cette fois la cause est en amont
+
+`hasConfluence` du TS exige `coincidesWithVpoc && secondaryReference !== 'NONE'`, avec
+`SecondaryReference = 'VAH' | 'VAL' | 'LVN' | 'NONE'`.
+
+Vérifié dans tout `lsr-engine/src` : **`secondaryReference` est lu, jamais calculé**. C'est une
+*entrée* du moteur de référence, et rien — ni en TS ni en Python — ne la produit. La calculer
+demanderait une tolérance de coïncidence de niveau que rien ne définit : l'inventer serait une
+formule fabriquée (`CLAUDE §11`).
+
+La brancher en fail-closed serait pire : elle refuserait **tous** les premiers trades de séance,
+définitivement — un refus qui ne protège de rien puisqu'il refuse tout (même leçon que la gate
+ATR en D-091). Un test verrouille l'absence *et sa raison* : il échouera le jour où un fichier du
+moteur calculera `secondaryReference`, rappelant alors de brancher A5b.
+
+**Question ouverte pour Sony** : qu'est-ce qui définit `secondary_reference` ? Une distance en
+ticks à VAH/VAL/LVN ? Une appartenance à la value area ? Tant que la réponse n'est pas écrite,
+A5b reste une règle sans donnée.
+
+### Ce qui reste vrai après ce commit
+
+`LsrLiveDriver` **n'est instancié nulle part en production**. La chaîne de protection est
+complète et prouvée contre le contrat du driver, mais aucune boucle live ne l'exécute — parce
+qu'il n'y a pas encore de source live (Priorité 2). Les règles protégeront un compte le jour où
+cette boucle existera, pas avant.
+
+### Vérif
+8 tests neufs sur le garde + 1 sur la migration → **1779 passed**, ruff clean, mypy 15 fichiers.
+
 ## D-094 · F6 / F7 / A5b — et l'état d'exécution en PROJECTION, pas en champ
 
 Priorité 1 de la feuille de route. Les règles qui empêchent de *mal* trader : verrou après deux

@@ -17,14 +17,17 @@ from typing import Any, Optional
 
 from . import config
 
-EVENT_TYPES = ("DecisionEvent", "OutcomeEvent", "ReconEvent")
+# `SetupRejectedEvent` (D-095) : trace d'un setup refusé par une règle de protection. C'est un
+# event à part entière et non une entrée de journal annexe, parce qu'une PROJECTION le relit
+# (le verrou de re-soumission F7) — l'append-only du §2.5 s'applique donc aussi à lui.
+EVENT_TYPES = ("DecisionEvent", "OutcomeEvent", "ReconEvent", "SetupRejectedEvent")
 
 _DDL = """
 CREATE TABLE IF NOT EXISTS events (
   seq     INTEGER PRIMARY KEY AUTOINCREMENT,
   id      TEXT NOT NULL UNIQUE,
   ts      REAL NOT NULL,
-  type    TEXT NOT NULL CHECK (type IN ('DecisionEvent','OutcomeEvent','ReconEvent')),
+  type    TEXT NOT NULL CHECK (type IN ('DecisionEvent','OutcomeEvent','ReconEvent','SetupRejectedEvent')),
   payload TEXT NOT NULL
 );
 CREATE TRIGGER IF NOT EXISTS events_no_update BEFORE UPDATE ON events
@@ -104,8 +107,40 @@ class EventStore:
         self._lock = threading.Lock()
         self._conn = sqlite3.connect(self.path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
+        self._migrate_event_types()
         self._migrate_journal_kinds()
         self._conn.executescript(_DDL)
+        self._conn.commit()
+
+    def _migrate_event_types(self) -> None:
+        """Élargit la contrainte CHECK d'`events` (type `SetupRejectedEvent`, D-095) sur une base
+        EXISTANTE. Même patron que `_migrate_journal_kinds`, et la même précaution : les events
+        sont copiés VERBATIM (seq/id/ts/type/payload), aucun n'est réécrit ni renuméroté.
+
+        L'append-only (§2.5) porte sur les ÉVÉNEMENTS, pas sur le DDL — mais la nuance est
+        étroite : c'est la seule opération du dépôt qui recrée la table du journal. Les triggers
+        anti UPDATE/DELETE sont retirés puis **immédiatement** recréés par `_DDL`, qui s'exécute
+        juste après. No-op sur base neuve ou déjà migrée.
+        """
+        row = self._conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='events'").fetchone()
+        if row is None or "SetupRejectedEvent" in (row["sql"] or ""):
+            return
+        self._conn.executescript("""
+        DROP TRIGGER IF EXISTS events_no_update;
+        DROP TRIGGER IF EXISTS events_no_delete;
+        ALTER TABLE events RENAME TO events_old;
+        CREATE TABLE events (
+          seq     INTEGER PRIMARY KEY AUTOINCREMENT,
+          id      TEXT NOT NULL UNIQUE,
+          ts      REAL NOT NULL,
+          type    TEXT NOT NULL CHECK (type IN ('DecisionEvent','OutcomeEvent','ReconEvent','SetupRejectedEvent')),
+          payload TEXT NOT NULL
+        );
+        INSERT INTO events (seq, id, ts, type, payload)
+          SELECT seq, id, ts, type, payload FROM events_old;
+        DROP TABLE events_old;
+        """)
         self._conn.commit()
 
     def _migrate_journal_kinds(self) -> None:

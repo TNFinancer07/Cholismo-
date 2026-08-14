@@ -124,3 +124,57 @@ def test_live_answer_fail_closed_without_data():
     a = live_mode.answer("Le contexte est-il favorable ?",
                          ContextSchema(), EXTRAS_EMPTY, "PRE_SESSION")
     assert "absentes" in a["answer"]
+
+
+def test_la_migration_des_types_d_events_ne_PERD_aucun_event(tmp_path):
+    """D-095 élargit la contrainte CHECK d'`events` sur une base EXISTANTE — la seule opération
+    du dépôt qui recrée la table du journal. Une migration qui perd un event perdrait la
+    calibration : elle se teste, elle ne se suppose pas."""
+    import json
+    import sqlite3
+
+    from app.event_store import EventStore
+
+    chemin = str(tmp_path / "ancien.db")
+    # Base à l'ANCIEN schéma (trois types), avec ses triggers append-only.
+    conn = sqlite3.connect(chemin)
+    conn.executescript("""
+    CREATE TABLE events (
+      seq     INTEGER PRIMARY KEY AUTOINCREMENT,
+      id      TEXT NOT NULL UNIQUE,
+      ts      REAL NOT NULL,
+      type    TEXT NOT NULL CHECK (type IN ('DecisionEvent','OutcomeEvent','ReconEvent')),
+      payload TEXT NOT NULL
+    );
+    CREATE TRIGGER events_no_update BEFORE UPDATE ON events
+    BEGIN SELECT RAISE(ABORT, 'events is append-only'); END;
+    CREATE TRIGGER events_no_delete BEFORE DELETE ON events
+    BEGIN SELECT RAISE(ABORT, 'events is append-only'); END;
+    """)
+    attendus = [(1, "id-1", 100.5, "DecisionEvent", json.dumps({"decision": "GO"})),
+                (2, "id-2", 200.5, "OutcomeEvent", json.dumps({"outcome": "LOSS"}))]
+    conn.executemany("INSERT INTO events (seq, id, ts, type, payload) VALUES (?,?,?,?,?)", attendus)
+    conn.commit()
+    conn.close()
+
+    store = EventStore(chemin)          # ouvre → migre
+
+    # 1. Rien n'a été perdu ni renuméroté.
+    survivants = store.events()
+    assert [e["id"] for e in survivants] == ["id-1", "id-2"]
+    assert [e["ts"] for e in survivants] == [100.5, 200.5]
+    assert survivants[0]["decision"] == "GO" and survivants[1]["outcome"] == "LOSS"
+
+    # 2. Le nouveau type passe.
+    store.append("SetupRejectedEvent", {"setup_id": "s1", "reason": "F6_COOLDOWN_ACTIVE"})
+    assert len(store.events("SetupRejectedEvent")) == 1
+
+    # 3. Les triggers append-only ont bien été RECRÉÉS — c'est le vrai risque de la manœuvre.
+    for sql in ("UPDATE events SET ts = 0 WHERE id = 'id-1'",
+                "DELETE FROM events WHERE id = 'id-1'"):
+        with pytest.raises(sqlite3.IntegrityError, match="append-only"):
+            store._conn.execute(sql)
+
+    # 4. Idempotent : rouvrir ne remigre pas et ne casse rien.
+    again = EventStore(chemin)
+    assert len(again.events()) == 3

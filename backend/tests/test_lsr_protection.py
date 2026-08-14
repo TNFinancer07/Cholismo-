@@ -176,22 +176,27 @@ def test_F7_sans_horodatage_de_sweep_REFUSE():
     assert f7_fomo(None, 1_000_000.0) == F7_FOMO_TIMEOUT
 
 
-def test_F7_resubmit_reste_INERTE_et_le_DIT(store):
-    """La moitié non portée. Elle ne refuse rien parce qu'aucun event n'enregistre le refus d'un
-    setup identifié — et l'état porte un drapeau qui distingue « aucun refus » de « refus non
-    suivis ». Ce test tombera le jour où la source d'events existera : c'est le rappel."""
+def test_F7_resubmit_a_desormais_sa_SOURCE(store):
+    """Ce test disait l'inverse en D-094 : la règle était inerte faute d'events. D-095 a fermé la
+    boucle — le garde journalise ses refus, la projection les relit. On vérifie donc les deux
+    états du drapeau, parce que « aucun refus » et « refus non suivis » ne doivent jamais se
+    confondre."""
     etat = project_runtime_state(store, now_ms=time.time() * 1000.0)
-
-    assert etat.resubmit_tracking_available is False
-    assert etat.rejected_setup_ids == ()
+    assert etat.resubmit_tracking_available is True, "la source d'events existe (D-095)"
+    assert etat.rejected_setup_ids == (), "journal vide = aucun refus, pas « non suivi »"
     assert f7_resubmit("setup-42", etat) is None
 
-    # Dès que la source existera, la règle mord — la logique est là, seule la donnée manque.
     arme = LsrRuntimeState(session_date=etat.session_date, consecutive_losses=0, trades_today=0,
                            lockout_until_ms=None, rejected_setup_ids=("setup-42",),
                            resubmit_tracking_available=True)
     assert f7_resubmit("setup-42", arme) == "F7_RESUBMIT_LOCKOUT"
     assert f7_resubmit("setup-7", arme) is None
+
+    # Le drapeau à faux neutralise la règle : un état construit sans source ne doit pas refuser
+    # sur une liste dont il ne garantit pas la complétude.
+    aveugle = LsrRuntimeState(session_date=etat.session_date, consecutive_losses=0, trades_today=0,
+                              lockout_until_ms=None, rejected_setup_ids=("setup-42",))
+    assert f7_resubmit("setup-42", aveugle) is None
 
 
 # ---------------------------------------------------------------- A5b
@@ -259,3 +264,141 @@ def test_aucune_regle_ne_rend_un_BOOLEEN():
     for r in rendus:
         assert r is None or isinstance(r, str), f"règle rendant un {type(r).__name__}"
         assert not isinstance(r, bool)
+
+
+# ---------------------------------------------------------------- le garde (D-095)
+
+class _Payload:
+    """Minimal — le garde ne lit que `now` et `state`."""
+
+    def __init__(self, now: float, state: object = "ETAT") -> None:
+        self.now = now
+        self.state = state
+
+
+def _plan(setup_id: str = "MES:BID_SWEEP:1000", sweep_ts: float | None = None) -> dict:
+    return {"status": "APPROVED", "instrument": "MES", "direction": "LONG",
+            "protection": {"setup_id": setup_id, "sweep_ts": sweep_ts}}
+
+
+def test_le_garde_LAISSE_PASSER_un_plan_sain(store):
+    from app.lsr_protection import guard_evaluator
+    now = time.time()
+    plan = _plan(sweep_ts=now - 5)                      # sweep frais
+    garde = guard_evaluator(lambda p: (plan, "ETAT_SUIVANT"), store=store)
+
+    rendu, etat = garde(_Payload(now))
+    assert rendu is plan and etat == "ETAT_SUIVANT"
+    assert store.events("SetupRejectedEvent") == []
+
+
+def test_un_refus_F6_N_EVALUE_MEME_PAS_et_laisse_l_etat_INTACT(store):
+    """Le contrat avec le driver : rendre `(None, payload.state)` fait que `_dispatch_plan`
+    reste silencieux et que `_advance_state` ne persiste rien."""
+    from app.lsr_protection import guard_evaluator
+    now = time.time()
+    d1 = _decision(store, decision="GO", ts=now - 600)
+    d2 = _decision(store, decision="GO", ts=now - 400)
+    _outcome(store, d1, "LOSS", ts=now - 500)
+    _outcome(store, d2, "LOSS", ts=now - 300)
+
+    appels = []
+    garde = guard_evaluator(lambda p: (appels.append(p) or _plan(), "AUTRE"), store=store)
+
+    plan, etat = garde(_Payload(now, state="ETAT_COURANT"))
+    assert plan is None, "un refus n'émet rien"
+    assert etat == "ETAT_COURANT", "un refus ne fait pas avancer l'état"
+    assert appels == [], "F6 court-circuite : verrouillé, on n'évalue même pas"
+
+    refus = store.events("SetupRejectedEvent")
+    assert len(refus) == 1 and refus[0]["reason"] == F6_COOLDOWN_ACTIVE
+    assert refus[0]["setup_id"] is None, "le verrou F6 porte sur le compte, pas sur un setup"
+
+
+def test_le_garde_REFUSE_un_sweep_perime(store):
+    from app.lsr_protection import guard_evaluator
+    now = time.time()
+    vieux = now - (config.LSR_F7_FOMO_WINDOW_MS / 1000.0) - 10
+    garde = guard_evaluator(lambda p: (_plan(sweep_ts=vieux), "AUTRE"), store=store)
+
+    plan, etat = garde(_Payload(now, state="ETAT_COURANT"))
+    assert plan is None and etat == "ETAT_COURANT"
+    assert store.events("SetupRejectedEvent")[0]["reason"] == F7_FOMO_TIMEOUT
+
+
+def test_un_plan_SANS_provenance_est_refuse(store):
+    """Fail-closed : un plan qui ne dit pas de quel sweep il vient ne peut pas être daté, donc
+    pas être jugé frais."""
+    from app.lsr_protection import guard_evaluator
+    now = time.time()
+    garde = guard_evaluator(lambda p: ({"status": "APPROVED"}, "AUTRE"), store=store)
+
+    plan, _ = garde(_Payload(now))
+    assert plan is None
+    assert store.events("SetupRejectedEvent")[0]["reason"] == F7_FOMO_TIMEOUT
+
+
+def test_la_BOUCLE_de_F7_resubmit_est_fermee(store):
+    """Le refus journalisé alimente la projection, qui verrouille la re-soumission du MÊME setup.
+    C'est la moitié qui manquait en D-094."""
+    from app.lsr_protection import guard_evaluator
+    now = time.time()
+    vieux = now - (config.LSR_F7_FOMO_WINDOW_MS / 1000.0) - 10
+
+    # 1er passage : refusé pour FOMO, et journalisé.
+    garde = guard_evaluator(lambda p: (_plan("MES:BID_SWEEP:42", sweep_ts=vieux), "X"), store=store)
+    garde(_Payload(now))
+
+    etat = project_runtime_state(store, now_ms=now * 1000.0)
+    assert etat.resubmit_tracking_available is True
+    assert "MES:BID_SWEEP:42" in etat.rejected_setup_ids
+
+    # 2e passage : le MÊME setup, cette fois avec un sweep frais → c'est le verrou qui mord.
+    garde2 = guard_evaluator(lambda p: (_plan("MES:BID_SWEEP:42", sweep_ts=now - 1), "X"),
+                             store=store)
+    plan, _ = garde2(_Payload(now))
+    assert plan is None
+    assert store.events("SetupRejectedEvent")[-1]["reason"] == "F7_RESUBMIT_LOCKOUT"
+
+
+def test_un_verrou_de_resubmit_EXPIRE(store):
+    """« Lockout », pas « bannissement » : passé la fenêtre, le setup redevient proposable."""
+    from app.lsr_protection import guard_evaluator
+    now = time.time()
+    store.append("SetupRejectedEvent", {"setup_id": "MES:BID_SWEEP:7", "reason": "F7_FOMO_TIMEOUT"},
+                 ts=now - (config.LSR_F7_RESUBMIT_LOCKOUT_MS / 1000.0) - 60)
+
+    etat = project_runtime_state(store, now_ms=now * 1000.0)
+    assert etat.rejected_setup_ids == ()
+
+    garde = guard_evaluator(lambda p: (_plan("MES:BID_SWEEP:7", sweep_ts=now - 1), "X"), store=store)
+    plan, _ = garde(_Payload(now))
+    assert plan is not None, "le verrou doit expirer"
+
+
+def test_le_garde_ne_touche_PAS_aux_ALERT(store):
+    """Une ALERT n'est pas une entrée : la garder serait étendre le périmètre des règles."""
+    from app.lsr_protection import guard_evaluator
+    alerte = {"status": "ALERT", "reason": "niveau approché"}
+    garde = guard_evaluator(lambda p: (alerte, "AUTRE"), store=store)
+
+    plan, etat = garde(_Payload(time.time()))
+    assert plan is alerte and etat == "AUTRE"
+    assert store.events("SetupRejectedEvent") == []
+
+
+def test_A5b_n_est_PAS_branche_et_la_raison_est_verrouillee():
+    """Ce test tombera le jour où `secondary_reference` aura un producteur — il rappellera alors
+    de brancher A5b. Un refus qui s'auto-annule quand sa cause disparaît (même patron que la
+    gate ATR)."""
+    from app.lsr_protection import guard_evaluator
+    import inspect
+    source = inspect.getsource(guard_evaluator)
+    assert "a5b_first_trade_confluence" not in source, "A5b branché — vérifier sa source de donnée"
+
+    ts = ts_engine_source("scanner.ts")
+    assert "secondaryReference" in ts
+    # La preuve du blocage : le champ est LU, jamais CALCULÉ, dans tout le moteur de référence.
+    for fichier in ("scanner.ts", "planner.ts", "geometry.ts", "orderflow.ts"):
+        assert "secondaryReference =" not in ts_engine_source(fichier), (
+            f"{fichier} calcule secondaryReference — A5b devient branchable")
