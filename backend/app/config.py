@@ -326,6 +326,16 @@ REPLAY_AUTOPLAY = os.getenv("REPLAY_AUTOPLAY", "1") not in ("0", "false", "False
 # Bookmap par défaut ; `MICROSTRUCTURE_SOURCE=sierra_chart` (ou `rithmic`, …) suffit à changer.
 MICROSTRUCTURE_SOURCE = os.getenv("MICROSTRUCTURE_SOURCE", "bookmap")
 
+# --- LSR : règles de protection F6 / F7 / A5b (D-094) ---
+# MIROIRS de `lsr-engine/src/config.ts`, qui fait AUTORITÉ. Un test de parité (D-072) LIT le TS
+# et échoue si l'un de ces quatre nombres diverge : les recopier sans verrou, c'est se garantir
+# une divergence silencieuse le jour où le moteur de référence bouge.
+# Unités en MILLISECONDES, comme le TS — le convertisseur vit dans la projection, pas ici.
+LSR_F6_COOLDOWN_MS = 15 * 60_000            # verrou après N pertes consécutives
+LSR_F6_CONSECUTIVE_LOSS_TRIGGER = 2         # N
+LSR_F7_FOMO_WINDOW_MS = 90_000              # âge max d'un sweep avant que l'entrée soit du FOMO
+LSR_F7_RESUBMIT_LOCKOUT_MS = 15 * 60_000    # re-soumission d'un setup déjà refusé
+
 # --- Boucles d'exécution : contrat commun (D-073) ---
 # Cadences et budgets des cinq boucles du terminal. Les valeurs qui EXISTENT DÉJÀ ailleurs sont
 # réutilisées telles quelles (FAST_TICK_SECONDS, ENGINE_HEARTBEAT_MAX_AGE) plutôt que réécrites :

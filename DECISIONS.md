@@ -3752,6 +3752,76 @@ Log (§2.5), pas un champ mutable. Les deux derniers sont purs et courts.
 21 tests neufs, 4 tests existants mis à jour (F2 les fait changer de verdict) → **1353 passed**,
 ruff clean.
 
+## D-094 · F6 / F7 / A5b — et l'état d'exécution en PROJECTION, pas en champ
+
+Priorité 1 de la feuille de route. Les règles qui empêchent de *mal* trader : verrou après deux
+pertes (F6), fenêtre anti-FOMO (F7), confluence renforcée au premier trade (A5b).
+
+### La décision structurante : projection, jamais un champ
+
+`lsr-engine/src/types.ts` définit `LsrRuntimeState` et le fait **circuler** — chaque évaluation
+rend un `nextState` que l'appelant reporte. Légitime en TS, où le moteur est une fonction pure
+appelée en boucle.
+
+Ici c'eût été une faute. `CLAUDE §2.5` : l'état courant est une **projection**. Un
+`consecutive_losses` stocké serait une seconde vérité, qui dérive de la première au premier
+redémarrage, au premier import de réconciliation, au premier event rejoué. `project_runtime_state()`
+le **recalcule** depuis le journal à chaque appel. Coût assumé : ces règles s'évaluent à
+l'armement, pas dans le hot path sous-seconde.
+
+Deux tests verrouillent la propriété plutôt que le résultat : deux projections du même journal
+sont égales, et **le nombre d'events ne bouge pas** — une projection qui écrit n'en est pas une.
+
+### Quatre arbitrages, chacun contre une lecture fausse
+
+1. **Série de pertes scopée à la SÉANCE.** Les pertes d'hier ne verrouillent pas ce matin. F6
+   protège d'un enchaînement à chaud ; l'horizon long est F8, qui n'est pas porté. Les confondre
+   donnerait un verrou qu'on ne saurait plus lever.
+2. **Issue orpheline ignorée, pas comptée.** Une issue dont la décision est inconnue (import
+   partiel, réconciliation bancale) ne doit ni verrouiller ni déverrouiller.
+3. **`campaign_stop_until` ABSENT de la structure.** F8 dépend des `AccountFrontiers`, hors du
+   journal. Un champ toujours à `None` se lirait « campagne saine » alors qu'il signifie « non
+   mesuré » — la confusion exacte que §3 interdit. Il apparaîtra avec F8.
+4. **F7 sans horodatage de sweep → REFUS.** Ne pas savoir depuis quand le setup existe n'est pas
+   savoir qu'il est frais. Un `None` traité comme « âge zéro » ouvrirait la porte la plus large.
+
+### F7-resubmit est porté à MOITIÉ, et le dit
+
+La moitié FOMO est sans état : portée. La moitié *resubmit* a besoin de la liste des setups déjà
+refusés — et **aucun event ne l'enregistre** : `DecisionEvent` porte un `window_id`, pas un
+`setup_id`, et le journal des setups ne connaît que `setup_armed` / `setup_outcome`.
+
+Rendre un tuple vide en le présentant comme « rien n'a été refusé » aurait donné une gate qui
+passe toujours, indiscernable d'une règle qui marche. L'état porte donc
+`resubmit_tracking_available: False` — le drapeau distingue « aucun refus » de « refus non
+suivis » — et un test verrouille l'inertie *et* prouve que la logique mord dès que la donnée
+existera.
+
+### Verrou de parité (D-072) étendu au moteur LSR
+
+`ts_engine_source()` lit `lsr-engine/src/` — **distinct** de `options_gates.ts_reference_source()`,
+qui lit le Fast Engine v1.7 dans `/reference/v2/fast-engine/`. Deux paquets, deux autorités ; les
+confondre ferait vérifier la parité contre le mauvais fichier, soit un verrou qui ne mord pas.
+
+Vérifié que le verrou mord : `LSR_F6_COOLDOWN_MS = 999` → le test échoue. Les quatre seuils sont
+lus dans le TS (900000 / 2 / 90000 / 900000), et les chaînes de `RejectReason` comparées à
+`types.ts` — deux journaux qui nomment différemment le même refus ne se recoupent plus.
+
+### Ce qui n'est PAS fait, et doit être dit
+
+**Les trois règles ne sont appelées par aucun chemin d'armement.** Elles sont portées, testées,
+verrouillées — pas branchées. Les poser dans `gates_journal.evaluate_at_arming()` aurait été une
+erreur de catégorie : cette fonction est le chemin **consultatif** (G2, n'a aucun pouvoir de
+blocage), alors que F6/F7/A5b sont des règles **bloquantes** du scanner déterministe.
+
+Le point de couture est `LsrDriver`, qui reçoit un `evaluator` injecté et threade un `next_state`
+— précisément la forme que §2.5 refuse. Réconcilier ce threading avec une projection est la
+tranche suivante, et elle touche le chemin de décision : elle mérite son propre travail, pas une
+fin de commit.
+
+### Vérif
+17 tests neufs → **1770 passed**, ruff clean, mypy 15 fichiers.
+
 ## D-093 · Le mock ne peut plus se faire passer pour un fournisseur réel
 
 Défaut que j'avais introduit en D-091 : `.env.production.example` portait `MICROSTRUCTURE_SOURCE=rithmic`,

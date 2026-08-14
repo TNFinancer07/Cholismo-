@@ -1,0 +1,261 @@
+"""F6 / F7 / A5b et l'état d'exécution en projection (D-094).
+
+Deux choses sont vérifiées ici, et la seconde compte autant que la première :
+1. les règles refusent ce qu'elles doivent refuser ;
+2. l'état n'est **stocké nulle part** — il se recalcule depuis le journal append-only (§2.5).
+"""
+from __future__ import annotations
+
+import re
+import time
+
+import pytest
+
+from app import config
+from app.event_store import EventStore
+from app.lsr_protection import (
+    A5B_FIRST_TRADE_CONFLUENCE,
+    F6_COOLDOWN_ACTIVE,
+    F7_FOMO_TIMEOUT,
+    LsrRuntimeState,
+    a5b_first_trade_confluence,
+    f6_cooldown,
+    f7_fomo,
+    f7_resubmit,
+    project_runtime_state,
+    session_date,
+    ts_engine_source,
+)
+
+MINUTE_MS = 60_000.0
+
+
+@pytest.fixture()
+def store(tmp_path):
+    return EventStore(str(tmp_path / "events.db"))
+
+
+def _decision(store: EventStore, *, decision: str, ts: float) -> str:
+    ev = store.append("DecisionEvent", {"operator": "SONY", "decision": decision}, ts=ts)
+    return ev["id"]
+
+
+def _outcome(store: EventStore, decision_id: str, outcome: str, ts: float) -> None:
+    store.append("OutcomeEvent", {"decision_id": decision_id, "outcome": outcome}, ts=ts)
+
+
+# ---------------------------------------------------------------- projection
+
+def test_l_etat_se_RECALCULE_et_n_est_stocke_nulle_part(store):
+    """Le cœur de §2.5. Deux projections successives sur le MÊME journal donnent le même état,
+    et aucune écriture n'a lieu — la projection lit, elle ne persiste rien."""
+    now = time.time()
+    d = _decision(store, decision="GO", ts=now - 600)
+    _outcome(store, d, "LOSS", ts=now - 300)
+
+    avant = len(store.events())
+    a = project_runtime_state(store, now_ms=now * 1000.0)
+    b = project_runtime_state(store, now_ms=now * 1000.0)
+
+    assert a == b, "deux lectures du même journal doivent donner le même état"
+    assert len(store.events()) == avant, "une projection qui écrit n'est pas une projection"
+
+
+def test_une_issue_ULTERIEURE_change_l_etat_sans_toucher_la_decision(store):
+    """La grammaire event-sourced : la décision reste immuable, l'issue arrive après et
+    la projection bouge."""
+    now = time.time()
+    d1 = _decision(store, decision="GO", ts=now - 900)
+    d2 = _decision(store, decision="GO", ts=now - 600)
+
+    etat = project_runtime_state(store, now_ms=now * 1000.0)
+    assert etat.consecutive_losses == 0 and etat.lockout_until_ms is None
+
+    _outcome(store, d1, "LOSS", ts=now - 800)
+    _outcome(store, d2, "LOSS", ts=now - 500)
+
+    etat = project_runtime_state(store, now_ms=now * 1000.0)
+    assert etat.consecutive_losses == 2
+    assert etat.lockout_until_ms is not None
+
+
+def test_une_serie_se_CASSE_sur_une_non_perte(store):
+    now = time.time()
+    d1 = _decision(store, decision="GO", ts=now - 900)
+    d2 = _decision(store, decision="GO", ts=now - 800)
+    d3 = _decision(store, decision="GO", ts=now - 700)
+    _outcome(store, d1, "LOSS", ts=now - 850)
+    _outcome(store, d2, "LOSS", ts=now - 750)
+    _outcome(store, d3, "WIN", ts=now - 650)
+
+    etat = project_runtime_state(store, now_ms=now * 1000.0)
+    assert etat.consecutive_losses == 0, "une victoire remet le compteur à zéro"
+    assert etat.lockout_until_ms is None
+
+
+def test_une_issue_ORPHELINE_ne_verrouille_rien(store):
+    """Une issue dont la décision est inconnue (import partiel, réconciliation bancale) ne doit
+    ni verrouiller ni déverrouiller — elle est ignorée, pas interprétée."""
+    now = time.time()
+    _outcome(store, "decision-inexistante", "LOSS", ts=now - 100)
+    _outcome(store, "autre-fantome", "LOSS", ts=now - 50)
+
+    etat = project_runtime_state(store, now_ms=now * 1000.0)
+    assert etat.consecutive_losses == 0
+    assert f6_cooldown(etat, now * 1000.0) is None
+
+
+def test_les_pertes_d_HIER_ne_verrouillent_pas_ce_matin(store):
+    """F6 protège d'un enchaînement à chaud, pas d'une mauvaise semaine. L'horizon long est F8,
+    qui n'est pas porté — le confondre donnerait un verrou qu'on ne saurait plus lever."""
+    now = time.time()
+    hier = now - 36 * 3600
+    d1 = _decision(store, decision="GO", ts=hier - 200)
+    d2 = _decision(store, decision="GO", ts=hier - 100)
+    _outcome(store, d1, "LOSS", ts=hier - 150)
+    _outcome(store, d2, "LOSS", ts=hier - 50)
+
+    etat = project_runtime_state(store, now_ms=now * 1000.0)
+    assert session_date(now * 1000.0) != session_date(hier * 1000.0), "fixture mal datée"
+    assert etat.consecutive_losses == 0
+    assert f6_cooldown(etat, now * 1000.0) is None
+
+
+def test_trades_today_ne_compte_que_les_GO(store):
+    now = time.time()
+    _decision(store, decision="GO", ts=now - 300)
+    _decision(store, decision="NO_GO", ts=now - 200)
+    _decision(store, decision="NO_GO", ts=now - 100)
+
+    etat = project_runtime_state(store, now_ms=now * 1000.0)
+    assert etat.trades_today == 1, "un NO_GO n'est pas un trade"
+
+
+# ---------------------------------------------------------------- F6
+
+def test_F6_verrouille_pendant_la_duree_puis_relache(store):
+    now = time.time()
+    d1 = _decision(store, decision="GO", ts=now - 600)
+    d2 = _decision(store, decision="GO", ts=now - 400)
+    _outcome(store, d1, "LOSS", ts=now - 500)
+    _outcome(store, d2, "LOSS", ts=now - 300)
+    now_ms = now * 1000.0
+
+    etat = project_runtime_state(store, now_ms=now_ms)
+    assert f6_cooldown(etat, now_ms) == F6_COOLDOWN_ACTIVE
+
+    # Le verrou court depuis la DERNIÈRE perte, pas depuis maintenant.
+    apres = etat.lockout_until_ms + 1.0
+    assert f6_cooldown(etat, apres) is None
+
+
+def test_F6_ne_mord_pas_a_UNE_seule_perte(store):
+    now = time.time()
+    d = _decision(store, decision="GO", ts=now - 300)
+    _outcome(store, d, "LOSS", ts=now - 200)
+
+    etat = project_runtime_state(store, now_ms=now * 1000.0)
+    assert etat.consecutive_losses == 1
+    assert f6_cooldown(etat, now * 1000.0) is None
+
+
+# ---------------------------------------------------------------- F7
+
+def test_F7_refuse_un_sweep_trop_vieux():
+    now_ms = 1_000_000.0
+    frais = now_ms - config.LSR_F7_FOMO_WINDOW_MS + 1_000
+    vieux = now_ms - config.LSR_F7_FOMO_WINDOW_MS - 1_000
+
+    assert f7_fomo(frais, now_ms) is None
+    assert f7_fomo(vieux, now_ms) == F7_FOMO_TIMEOUT
+
+
+def test_F7_sans_horodatage_de_sweep_REFUSE():
+    """Fail-closed §3 : ne pas savoir depuis quand le setup existe n'est pas savoir qu'il est
+    frais. Un `None` traité comme « âge zéro » ouvrirait la porte la plus large possible."""
+    assert f7_fomo(None, 1_000_000.0) == F7_FOMO_TIMEOUT
+
+
+def test_F7_resubmit_reste_INERTE_et_le_DIT(store):
+    """La moitié non portée. Elle ne refuse rien parce qu'aucun event n'enregistre le refus d'un
+    setup identifié — et l'état porte un drapeau qui distingue « aucun refus » de « refus non
+    suivis ». Ce test tombera le jour où la source d'events existera : c'est le rappel."""
+    etat = project_runtime_state(store, now_ms=time.time() * 1000.0)
+
+    assert etat.resubmit_tracking_available is False
+    assert etat.rejected_setup_ids == ()
+    assert f7_resubmit("setup-42", etat) is None
+
+    # Dès que la source existera, la règle mord — la logique est là, seule la donnée manque.
+    arme = LsrRuntimeState(session_date=etat.session_date, consecutive_losses=0, trades_today=0,
+                           lockout_until_ms=None, rejected_setup_ids=("setup-42",),
+                           resubmit_tracking_available=True)
+    assert f7_resubmit("setup-42", arme) == "F7_RESUBMIT_LOCKOUT"
+    assert f7_resubmit("setup-7", arme) is None
+
+
+# ---------------------------------------------------------------- A5b
+
+def _etat(trades_today: int) -> LsrRuntimeState:
+    return LsrRuntimeState(session_date="2026-08-14", consecutive_losses=0,
+                           trades_today=trades_today, lockout_until_ms=None)
+
+
+def test_A5b_exige_la_confluence_au_PREMIER_trade():
+    sans = a5b_first_trade_confluence(_etat(0), coincides_with_vpoc=True,
+                                      secondary_reference="NONE")
+    assert sans == A5B_FIRST_TRADE_CONFLUENCE
+
+    avec = a5b_first_trade_confluence(_etat(0), coincides_with_vpoc=True,
+                                      secondary_reference="VWAP")
+    assert avec is None
+
+
+def test_A5b_ne_mord_plus_apres_le_premier_trade():
+    assert a5b_first_trade_confluence(_etat(1), coincides_with_vpoc=False,
+                                      secondary_reference="NONE") is None
+
+
+def test_A5b_exige_les_DEUX_conditions():
+    """`coincidesWithVpoc && secondaryReference !== 'NONE'` — un ET, pas un OU."""
+    assert a5b_first_trade_confluence(_etat(0), coincides_with_vpoc=False,
+                                      secondary_reference="VWAP") == A5B_FIRST_TRADE_CONFLUENCE
+    assert a5b_first_trade_confluence(_etat(0), coincides_with_vpoc=True,
+                                      secondary_reference=None) == A5B_FIRST_TRADE_CONFLUENCE
+
+
+# ---------------------------------------------------------------- parité (D-072)
+
+def test_les_seuils_PYTHON_correspondent_au_TS_qui_fait_autorite():
+    """Le verrou qui MORD : il lit `lsr-engine/src/config.ts` et échoue si un nombre diverge.
+    Recopier quatre constantes sans verrou, c'est se garantir une divergence silencieuse."""
+    ts = ts_engine_source("config.ts")
+
+    def valeur(cle: str) -> float:
+        m = re.search(rf"{cle}:\s*([0-9_*\s]+),", ts)
+        assert m, f"{cle} introuvable dans config.ts — le moteur de référence a bougé"
+        return float(eval(m.group(1).replace("_", "").strip()))  # noqa: S307 — littéral numérique
+
+    assert config.LSR_F6_COOLDOWN_MS == valeur("f6CooldownMs")
+    assert config.LSR_F6_CONSECUTIVE_LOSS_TRIGGER == valeur("f6ConsecutiveLossTrigger")
+    assert config.LSR_F7_FOMO_WINDOW_MS == valeur("f7FomoWindowMs")
+    assert config.LSR_F7_RESUBMIT_LOCKOUT_MS == valeur("f7ResubmitLockoutMs")
+
+
+def test_les_motifs_de_refus_portent_les_MEMES_chaines_que_le_TS():
+    ts = ts_engine_source("types.ts")
+    for motif in (F6_COOLDOWN_ACTIVE, F7_FOMO_TIMEOUT, A5B_FIRST_TRADE_CONFLUENCE,
+                  "F7_RESUBMIT_LOCKOUT"):
+        assert f"'{motif}'" in ts, f"{motif} absent de RejectReason — les journaux divergeraient"
+
+
+def test_aucune_regle_ne_rend_un_BOOLEEN():
+    """Un refus sans motif n'est pas actionnable, et le journal en a besoin. Le garde
+    structurel : chaque règle rend `None` ou une chaîne."""
+    etat = _etat(0)
+    rendus = [f6_cooldown(etat, 0.0), f7_fomo(None, 0.0), f7_resubmit("x", etat),
+              a5b_first_trade_confluence(etat, coincides_with_vpoc=False,
+                                         secondary_reference="NONE")]
+    for r in rendus:
+        assert r is None or isinstance(r, str), f"règle rendant un {type(r).__name__}"
+        assert not isinstance(r, bool)
