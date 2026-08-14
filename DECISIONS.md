@@ -3752,6 +3752,59 @@ Log (§2.5), pas un champ mutable. Les deux derniers sont purs et courts.
 21 tests neufs, 4 tests existants mis à jour (F2 les fait changer de verdict) → **1353 passed**,
 ruff clean.
 
+## D-100 · Tradovate — le codec, et la frontière §2.1 rendue structurelle
+
+La plateforme du challenge devient **Tradovate**. Son API sert deux besoins : le flux de marché
+(quotes + DOM) et les **exécutions réelles**, ces dernières alimentant la réconciliation
+automatique du Decision Log (D-098) — c'est elle qui supprimera l'import CSV manuel.
+
+### La frontière d'abord, parce que cette API sait passer des ordres
+
+Rithmic, Bookmap et Sierra sont des fournisseurs de DONNÉES. Tradovate est un **courtier** :
+son API place des ordres. `CLAUDE §2.1` l'interdit — et « pas encore écrit » n'est pas une
+garantie. Un test de garde relit la source du module et échoue sur le vocabulaire d'exécution
+(`placeorder`, `modifyorder`, `cancelorder`, `liquidateposition`, `placeoso`, `placeoco`…).
+
+C'est le même patron que les gardes d'`execution_sim` et `replay_harness`, appliqué à l'endroit
+où la tentation devient réelle : le jour où quelqu'un voudra « juste ajouter » un envoi d'ordre,
+la suite refusera avant la revue.
+
+### Ce que le module contient, et ce qu'il ne contient pas
+
+Il contient le **codec** du protocole WebSocket et les **projections** vers les structures du
+terminal. C'est pur, déterministe, testable hors ligne — donc testé.
+
+Il ne contient PAS le transport (socket, heartbeat, renouvellement de jeton). Sans identifiants
+ni accès au service, l'écrire produirait du code d'apparence fonctionnelle que personne n'a vu
+tourner : le contraire d'un connecteur. `CLIENTS` reste vide (D-097).
+
+⚠️ Les libellés d'endpoints et la forme des trames viennent de la documentation publique et
+**n'ont été confrontés à aucun service réel**. Ce qui est garanti ici est la cohérence interne et
+le fail-closed, pas la conformité au protocole — l'avertissement est en tête du module.
+
+### Quatre refus, chacun contre une donnée fabriquée
+
+1. **Seul un TRADE devient un print.** Une mise à jour de bid/ask n'est pas une transaction ; la
+   compter gonflerait le tape et fausserait CVD, ratio d'agression et vitesse — toutes les
+   mesures qui en dérivent, donc les gates OF.
+2. **Un côté inconnu reste `None`.** Un côté deviné inverse le signe du CVD.
+3. **Un horodatage illisible écarte l'entrée**, au lieu de la dater de « maintenant » — dater de
+   maintenant fabriquerait de la fraîcheur et rendrait la panne invisible.
+4. **Un DOM vide rend `None`**, jamais un carnet à zéro niveau : zéro se lirait « plus aucune
+   liquidité », ce qui est une mesure, et elle serait fausse.
+
+Les deux formes d'enveloppe (`{d: {quotes: […]}}` et `{quotes: […]}`) sont acceptées : se tromper
+d'enveloppe rendrait un flux entier silencieux, et le silence est indiscernable d'un marché calme.
+
+### Une erreur de ma part, corrigée par le calcul
+
+J'avais écrit à la main la constante epoch d'un horodatage de test — fausse de 3,3 jours. Le test
+a mordu, et je l'ai recalculée au lieu de la réajuster à vue. Un test dont on corrige la valeur
+attendue jusqu'à ce qu'il passe ne teste plus rien.
+
+### Vérif
+17 tests neufs → **1821 passed**, ruff clean, mypy 15 fichiers.
+
 ## D-099 · Les gates d'order flow entrent dans React — sous le nom OF, pas B
 
 Priorité 3, première tranche. L'IHM cible est l'app React (`tsc strict` + Vitest en CI) ; v17
