@@ -3752,6 +3752,57 @@ Log (§2.5), pas un champ mutable. Les deux derniers sont purs et courts.
 21 tests neufs, 4 tests existants mis à jour (F2 les fait changer de verdict) → **1353 passed**,
 ruff clean.
 
+## D-107 · Canon d'exécution — une correction faite, trois divergences SIGNALÉES et non corrigées
+
+Rappel du canon : entrée **LIMITE + bracket OCO** (le marché est l'exception §04), **TP fixe à
++5 ticks**, sur lequel sont calibrés le breakeven 69,2 % et la cible 80 %.
+
+### Corrigé : le slippage ne frappait pas le bon côté
+
+`resilience.py` retranchait le slippage des **deux** côtés (`gain - cost`, `-(loss + cost)`). Sous
+le canon, c'est faux : l'entrée et le TP sont des ordres **limites** — remplis à leur prix ou pas
+du tout, ils ne glissent pas. Seule la sortie au stop part au marché.
+
+La première version surestimait donc le coût sur les gagnants, et sous-estimait la robustesse. Un
+test le verrouille par une propriété : à 100 % de réussite aucun stop n'est touché, donc le
+slippage ne doit **rien** changer — ce qui échouait avant.
+
+### NON corrigé, et à trancher : le TP du moteur n'est pas fixe à +5 ticks
+
+`lsr_engine.py` calcule aujourd'hui :
+
+```python
+tp = min(entry + t.tp_max_ticks * tick, vpoc - t.tp_vpoc_margin_ticks * tick)   # LONG
+if tp < entry + t.tp_min_ticks * tick:  return None
+```
+
+Trois écarts avec le canon énoncé :
+
+1. **Le TP est VARIABLE, pas fixe.** Il vaut `min(5 ticks, VPOC − 1)` et le setup est rejeté sous
+   3 ticks : il sort donc à **3, 4 ou 5 ticks** selon la position du VPOC.
+2. **Il est ANCRÉ AU VPOC** — précisément le « TP discrétionnaire au POC » que le rappel désigne
+   comme destructeur de la validité des tables.
+3. **MNQ n'est pas calibré à 5** : `tp_max_ticks=8`, `tp_min_ticks=4` (D-069, calibration par
+   instrument).
+
+Et une implication arithmétique : un breakeven à 69,2 % avec un TP de 5 ticks impose un stop de
+**≈ 11,2 ticks** (`5 × 0,692 / 0,308`). Or le stop du moteur est ancré à l'extrême du sweep plus
+un tampon de bruit de **1 à 2 ticks** (MES) — variable, et généralement bien plus serré. Un
+breakeven unique ne découle donc pas du code actuel.
+
+**Je n'ai pas modifié le moteur.** Aligner le TP sur +5 ticks fixe changerait le comportement de
+trading, supprimerait l'ancrage VPOC (introduit délibérément) et contredirait la calibration par
+instrument de D-069. C'est une décision de stratégie, pas une mise en conformité : soit le canon
+prime et le moteur doit changer, soit le moteur a raison et ce sont les tables qui décrivent autre
+chose. Les deux se défendent, aucune ne se tranche depuis le code.
+
+### Déjà conforme
+`execution_sim` traite l'entrée en limite avec file FIFO, le TP en limite, et ne passe au marché
+que pour le stop. Le plan du moteur porte déjà `entryType: LIMIT`.
+
+### Vérif
+1 test neuf → **1857 passed**, ruff clean, mypy 15 fichiers.
+
 ## D-106 · Icebergs et churn — « spoofing » est une intention, pas une mesure
 
 Optimisation #6. Affine `OF1`/`OF2` en distinguant, sur un niveau, la liquidité qui **se fait

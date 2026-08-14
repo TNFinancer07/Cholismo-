@@ -184,3 +184,26 @@ def test_l_endpoint_rend_les_DEUX_calculs_et_ne_les_confond_pas():
     assert corps["survivor_bias"]["kind"] == "survivor_bias"
     assert corps["survivor_bias"]["status"] in ("NOT_ENOUGH_DATA", "NO_RUIN_OBSERVED", "OK")
     assert len(corps["sensitivity"]["cells"]) == 4
+
+
+def test_le_slippage_ne_frappe_QUE_la_perte_canon_9():
+    """Entrée LIMITE + TP LIMITE : un ordre limite est rempli à son prix ou pas du tout. Seule la
+    sortie au stop part au marché. Le retrancher du gain surestimerait le coût des gagnants.
+
+    Contrôle : à 100 % de réussite, aucun stop n'est touché — le slippage ne doit donc RIEN
+    changer, quel que soit son niveau."""
+    from app.resilience import _ruin_probability
+    from app.risk_sizer import APEX_EOD_50K
+    import random
+
+    equities = []
+    for slip in (0.0, 2.0):
+        rng = random.Random(1)
+        # win_rate = 1.0 → que des TP limites, aucun stop au marché.
+        equities.append(_ruin_probability(win_rate=1.0, slippage_ticks=slip,
+                                          preset=APEX_EOD_50K, r_usd=100.0, tick_usd=1.25,
+                                          trades=50, sims=200, rng=rng))
+    assert equities[0] == equities[1] == 0.0
+
+    m = sensitivity_map(sims=100)["model"]
+    assert "LIMITE" in m["description"] and "sans slippage" in m["description"]

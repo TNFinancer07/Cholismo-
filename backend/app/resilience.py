@@ -22,10 +22,15 @@ perte journalière maximale (`ApexEodPreset`), et l'unité R (`R_UNIT_USD`).
 POSÉ — les deux axes de la carte, qui sont l'objet même de l'exploration : taux de réussite et
 slippage. Ils ne prétendent à rien.
 
-**Le modèle de trade est volontairement pauvre** : R fixe gagné, 1R perdu, slippage retranché des
-deux côtés. Un modèle riche (scale-out, stops variables, corrélation intra-journée) donnerait des
-nombres plus précis sur des hypothèses tout aussi inconnues — de la fausse précision. Le modèle
-est écrit dans la sortie (`model`), pour qu'on sache ce qu'on lit.
+**Le modèle de trade est volontairement pauvre** : +1R gagné au TP, −1R perdu au stop. Un modèle
+riche (scale-out, stops variables, corrélation intra-journée) donnerait des nombres plus précis
+sur des hypothèses tout aussi inconnues — de la fausse précision. Le modèle est écrit dans la
+sortie (`model`), pour qu'on sache ce qu'on lit.
+
+**Le slippage ne frappe QUE la perte** (canon §9, corrigé en D-107) : l'entrée est LIMITE et le TP
+est LIMITE — un ordre limite est rempli à son prix ou pas du tout, il ne glisse pas. Seule la
+sortie au stop part au marché. Le retrancher des deux côtés, comme le faisait la première version,
+surestimait le coût sur les gagnants.
 
 **Déterministe.** Graine fixée par défaut : deux lectures de la même carte doivent donner les
 mêmes nombres, sinon l'opérateur croirait voir une évolution là où il ne voit que du bruit.
@@ -59,8 +64,12 @@ def _ruin_probability(*, win_rate: float, slippage_ticks: float, preset: ApexEod
     « Ruine » = drawdown maximal atteint **ou** limite de perte journalière franchie — les deux
     tuent un compte prop firm, et n'en retenir qu'une flatterait le résultat.
     """
+    # CANON D'EXÉCUTION (D-107) : entrée LIMITE + bracket OCO, TP LIMITE fixe. Un ordre limite
+    # ne subit PAS de slippage — il est rempli à son prix ou pas du tout. Seule la sortie au
+    # STOP part au marché et paie le slippage. La première version le retranchait des DEUX côtés,
+    # ce qui surestimait le coût sur les gagnants et sous-estimait donc la robustesse.
     cost = slippage_ticks * tick_usd
-    gain, loss = r_usd - cost, -(r_usd + cost)
+    gain, loss = r_usd, -(r_usd + cost)
     floor = -preset.max_drawdown
     ruined = 0
 
@@ -121,7 +130,8 @@ def sensitivity_map(*, preset: Optional[ApexEodPreset] = None, trades: int = DEF
         "axes": {"slippage_ticks": list(SLIPPAGE_TICKS), "win_rate": list(WIN_RATES)},
         "cells": cells,
         "model": {
-            "description": "gain fixe +1R, perte fixe −1R, slippage retranché des deux côtés",
+            "description": ("gain fixe +1R au TP LIMITE (sans slippage), perte fixe −1R au STOP "
+                            "au marché (slippage retranché) — canon §9"),
             "r_usd": r, "tick_usd": tick_usd, "trades": trades, "sims": sims, "seed": seed,
             "ruin": "drawdown maximal atteint OU limite de perte journalière franchie",
             "day_grouping_trades": 5,
