@@ -186,7 +186,7 @@ export function CvdStratifiedPanel() {
   const threshold = cs?.value?.size_threshold ?? 10
 
   return (
-    <Panel code="CDS" title="CVD stratifié · taille" block="s1_state.cvd_stratified" accent="sony"
+    <Panel detachId="CDS" code="CDS" title="CVD stratifié · taille" block="s1_state.cvd_stratified" accent="sony"
       right={<span className="tabular-nums text-xxs text-term-faint">seuil ≥ {threshold} · {series.length} pts</span>}>
       <div className={cn('flex h-full min-h-0 flex-col', fresh === 'STALE' && 'opacity-60')}>
         {div && (

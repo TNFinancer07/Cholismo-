@@ -95,7 +95,8 @@ export function OrderFlowGatesPanel() {
   const shadow = useTerminal((s) => s.extras?.orderflow_shadow) as OrderFlowShadow | null | undefined
 
   return (
-    <Panel code="OF1·2" title="Gates order flow — décisionnelles" block="orderflow_shadow" accent="sony">
+    <Panel code="OF1·2" title="Gates order flow — décisionnelles" block="orderflow_shadow" accent="sony"
+      detachId="OFG">
       {!shadow ? (
         <p className="p-2 text-xs text-term-faint">— aucune observation publiée</p>
       ) : (
@@ -135,7 +136,8 @@ export function OrderFlowMeasuresPanel() {
   const shadow = useTerminal((s) => s.extras?.orderflow_shadow) as OrderFlowShadow | null | undefined
 
   return (
-    <Panel code="OF3·4" title="Order flow — mesures (non gatantes)" block="orderflow_shadow" accent="sony">
+    <Panel code="OF3·4" title="Order flow — mesures (non gatantes)" block="orderflow_shadow" accent="sony"
+      detachId="OFM">
       <div className="flex flex-col gap-1 p-1.5">
         <p className="text-xxs text-term-faint" data-testid="of-mesures-avertissement">
           observées, seuils NON calibrés — n'entrent dans aucune décision d'armement

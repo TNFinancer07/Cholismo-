@@ -93,7 +93,8 @@ function BiaisCard({ b }: { b: SurvivorBias }) {
   const refuse = b.status === 'NOT_ENOUGH_DATA'
   const nonMesurable = b.status === 'NO_RUIN_OBSERVED'
   return (
-    <Panel code="RES2" title="Biais du survivant · DD95" block="analyses/resilience">
+    <Panel code="RES2" title="Biais du survivant · DD95" block="analyses/resilience"
+      detachId="RESIL">
       <div className="flex flex-col gap-1 p-1.5 text-xs">
         <p className="text-xxs text-term-dim" data-testid="biais-detail">{b.detail}</p>
         {refuse ? (

@@ -254,7 +254,7 @@ export function FootprintImbalancePanel() {
   const bookLive = forming?.book_state === 'LIVE'
 
   return (
-    <Panel code="FP" title="Footprint · imbalances" block="s1_state.footprint" accent="sony"
+    <Panel detachId="FP" code="FP" title="Footprint · imbalances" block="s1_state.footprint" accent="sony"
       right={
         <span className="flex items-center gap-2 tabular-nums text-xxs">
           {hasDelta && (

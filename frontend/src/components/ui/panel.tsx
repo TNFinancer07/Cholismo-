@@ -5,6 +5,7 @@
  *  ou surchargée par `owner` pour les blocs mixtes (S1 + S2). La couleur n'est jamais
  *  seule : badge texte + liseré gauche. */
 import { cn } from '@/lib/utils'
+import { DetachButton } from '@/components/ui/detach-button'
 
 type Accent = 'sony' | 'youssef' | 'router' | 'none'
 
@@ -38,10 +39,13 @@ export function OwnerBadge({ accent = 'none', owner }: { accent?: Accent; owner?
 }
 
 export function Panel({
-  code, title, block, accent, owner, className, children, right,
+  code, title, block, accent, owner, className, children, right, detachId,
 }: {
   code: string
   title: string
+  /** Identifiant de registre — pose le bouton de détachement (D-117). Absent = pas de bouton :
+   *  un panneau qu'on ne saurait pas rendre seul ne doit pas proposer de l'ouvrir seul. */
+  detachId?: string
   block?: string
   accent?: Accent
   /** Surcharge du libellé opérateur (ex. « S1 + S2 » pour un bloc mixte). */
@@ -94,6 +98,7 @@ export function Panel({
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
           {right}
+          {detachId && <DetachButton panelId={detachId} />}
           <OwnerBadge accent={accent ?? 'none'} owner={owner} />
         </div>
       </header>

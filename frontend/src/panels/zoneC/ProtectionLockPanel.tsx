@@ -57,7 +57,7 @@ export function ProtectionLockPanel() {
 
   return (
     <Panel code="C6" title="Verrous de protection · F6 · F7" block="projection Decision Log"
-      accent="sony">
+      accent="sony" detachId="C6">
       <div className="flex flex-col gap-1 p-1.5 text-xs">
         {err || !p ? (
           // Fail-closed : on ne dit JAMAIS « déverrouillé » quand on ne sait pas.
