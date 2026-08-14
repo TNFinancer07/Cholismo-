@@ -3752,6 +3752,72 @@ Log (§2.5), pas un champ mutable. Les deux derniers sont purs et courts.
 21 tests neufs, 4 tests existants mis à jour (F2 les fait changer de verdict) → **1353 passed**,
 ruff clean.
 
+## D-093 · Le mock ne peut plus se faire passer pour un fournisseur réel
+
+Défaut que j'avais introduit en D-091 : `.env.production.example` portait `MICROSTRUCTURE_SOURCE=rithmic`,
+et cette variable **ne branche aucun connecteur**. Un opérateur suivant le template obtenait un
+terminal entièrement simulé qui affichait « source : rithmic ».
+
+### La cause racine était une ligne, pas une intention
+
+`Engine._meta` affiche `raw["source"]` — l'étiquette apposée par le **writer**, pas celle du
+registre. `FIELD_SPEC` ne sert que de repli quand le champ est ABSENT.
+
+`ReplayDataSource` s'estampille honnêtement depuis toujours (`SOURCE_NAME = "replay"`), et
+`options_worker.py` aussi (`source_vendor_name="mock"`). Seul `MockDataSource` **empruntait** le
+nom configuré : `write_raw(field, value, config.MICROSTRUCTURE_SOURCE, …)`.
+
+Reproduction avant correction — le défaut n'était pas cantonné à la microstructure :
+
+```
+étiquettes apposées : ['cboe', 'cme', 'econ_feed', 'fx_feed', 'greeks_engine',
+                       'macro_feed', 'rates_feed', 'rithmic', 'rms_engine', 'sentiment_feed']
+```
+
+**Dix noms de fournisseurs, tous usurpables.** Ne corriger que `MICROSTRUCTURE_SOURCE` aurait
+laissé neuf portes ouvertes — c'est pourquoi la correction porte sur `_emit`, pas sur un cas.
+
+### Séparer l'IDENTITÉ de l'ÉTIQUETTE
+
+Le piège de la correction évidente : renommer la source en `mock` cassait la coupure
+(`source:{name}:up` dans Redis, bascules `/sources`, clés de `SOURCES`). Deux notions vivaient
+dans une seule chaîne.
+
+- **Identité logique** (`cboe`) — pilote la coupure et les bascules. Inchangée.
+- **Étiquette de provenance** (`mock:cboe`) — ce que l'opérateur lit. Nouvelle.
+
+`_emit` garde donc `source` comme **garde** et estampille `mock_label(source)`. Une ligne, plus
+un helper idempotent. Aucun test existant cassé : rien dans le dépôt ne compare `raw["source"]`
+à un littéral (la détection de contradiction DXY compare des **valeurs**, pas des noms).
+
+### L'asymétrie faisait partie du défaut
+
+Le rejeu criait `MODE REPLAY : les prints sont REJOUÉS, pas du direct`. Le mock, lui, **se
+taisait**. Il a maintenant son avertissement symétrique au démarrage, qui dit aussi que
+`MICROSTRUCTURE_SOURCE` ne branche rien.
+
+### Essai réel, pas seulement des tests
+
+Démarrage avec `MICROSTRUCTURE_SOURCE=rithmic` :
+
+```
+WARNING  MODE SIMULÉ : aucune source live — toute lecture est estampillée « mock:* ».
+/state   svs_score  source='mock:rithmic'  FRESH
+/sources ['rithmic', 'cboe', …]   toggle rithmic → {"ok":true,"up":false}
+```
+
+La provenance est honnête **et** la coupure marche encore. Les deux comptaient.
+
+### Vérif
+6 tests neufs (dont la reproduction, qui échoue sur le code d'avant) → **1753 passed**, ruff clean,
+mypy 15 fichiers. Le garde anti-littéral de D-059 (`test_aucun_nom_de_plateforme_ne_reste_CODE_EN_DUR`)
+reste vert : `mock:` est un préfixe, pas un nom de plateforme.
+
+### Ce que ça ne corrige pas
+`MICROSTRUCTURE_SOURCE` reste une étiquette sans connecteur — c'est le chantier P2 de la feuille
+de route, pas celui-ci. La correction garantit seulement qu'aucune valeur simulée ne peut plus se
+présenter comme une mesure.
+
 ## D-092 · Verrouiller les dépendances — et trois affirmations fausses que j'ai committées
 
 Deux ajustements demandés (lock backend, typecheck frontend). En les faisant, j'ai découvert que

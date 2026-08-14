@@ -44,6 +44,27 @@ SOURCES = {
 }
 
 
+#: Marque apposée sur TOUTE lecture simulée (D-093). `Engine._meta` affiche `raw["source"]`,
+#: c'est-à-dire l'étiquette du writer : sans elle, le mock héritait du nom configuré dans
+#: `MICROSTRUCTURE_SOURCE` et une séance entièrement simulée s'affichait « source : rithmic ».
+#: `CLAUDE §3` interdit qu'une donnée inventée se présente comme réelle — la provenance fait
+#: partie de la donnée.
+MOCK_PREFIX = "mock:"
+
+
+def mock_label(source: str) -> str:
+    """Étiquette de provenance d'une lecture simulée, à partir de son identité LOGIQUE.
+
+    Les deux notions sont séparées à dessein : l'identité (`cboe`, la clé de `SOURCES` et de
+    `source:{name}:up` dans Redis) pilote la coupure et les bascules `/sources` ; l'étiquette
+    (`mock:cboe`) est ce que l'opérateur lit. On estampille la provenance sans renommer
+    l'identité — sinon corriger l'affichage casserait le mécanisme de coupure.
+
+    Idempotent : un double préfixe produirait une étiquette illisible.
+    """
+    return source if source.startswith(MOCK_PREFIX) else MOCK_PREFIX + source
+
+
 class MockDataSource(MarketDataSource):
     """Source de démonstration. `skip_fields` retire de sa production les champs qu'une source
     RÉELLE alimente (D-062) : sans cela, deux producteurs écrivent la même clé et c'est le
@@ -90,7 +111,9 @@ class MockDataSource(MarketDataSource):
             emitted_flags.append("CLOCK_DESYNC")
         if isinstance(value, float) and rng.random() < pathologies["nan_p"]:
             value = math.nan  # NaN -> ABSENT downstream, never a fabricated number
-        await state.write_raw(field, value, source, ts=ts, flags=emitted_flags)
+        # `source` a servi de GARDE (coupure) juste au-dessus ; ce qu'on ESTAMPILLE porte la
+        # marque de simulation. Une lecture du mock ne peut donc pas se lire comme une mesure.
+        await state.write_raw(field, value, mock_label(source), ts=ts, flags=emitted_flags)
 
     # -- fast channel: microstructure + bridge (sub-second) --
 

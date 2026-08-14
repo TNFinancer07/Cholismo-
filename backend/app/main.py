@@ -13,7 +13,7 @@ from . import config
 from .account_provider import MockAccountProvider, NT8FileAccountProvider
 from .ai.tasks import AITasks
 from .api import router
-from .datasource.mock import MockDataSource
+from .datasource.mock import MOCK_PREFIX, MockDataSource
 from .datasource.replay import ReplayDataSource
 from .macro_news import MacroNewsProvider
 from .risk_sizer import APEX_EOD_50K, apex_eod_account
@@ -78,6 +78,13 @@ async def lifespan(app: FastAPI):
         app.state.datasource = MockDataSource(
             skip_fields=((*EXTERNAL_FIELDS, *MACRO_FIELDS)
                          if app.state.external is not None else ()))
+        # Symétrique de l'avertissement du rejeu (D-093). Le rejeu criait « ce n'est pas du
+        # direct » ; le mock se taisait — l'asymétrie faisait partie du défaut. `%s` rappelle
+        # que `MICROSTRUCTURE_SOURCE` ne branche RIEN : c'est une étiquette d'identité, aucun
+        # connecteur live n'existe encore dans ce dépôt.
+        log.warning("MODE SIMULÉ : aucune source live — toute lecture est estampillée « %s* ». "
+                    "MICROSTRUCTURE_SOURCE=%r nomme l'identité logique, il ne branche aucun "
+                    "connecteur.", MOCK_PREFIX, config.MICROSTRUCTURE_SOURCE)
     if app.state.external is not None:
         # INFO, pas un avertissement : il n'y a plus de conflit, il y a un propriétaire. La
         # contrepartie est réelle et doit être lisible — sans source externe joignable, ces
