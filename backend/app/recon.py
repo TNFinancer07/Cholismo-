@@ -114,8 +114,12 @@ def parse_ninjatrader_csv(data: bytes, tz_offset_minutes: int = 0) -> list[dict[
 def reconcile(store: EventStore, fills: list[dict[str, Any]]) -> dict[str, Any]:
     """Match GO decisions <-> fills within RECON_MATCH_WINDOW_SECONDS on same instrument."""
     decisions = [d for d in store.events("DecisionEvent") if d.get("decision") == "GO"]
+    # PIÈGE (D-098) : n'exclure que les trades CLÔTURÉS déjà réconciliés. Un `ReconEvent`
+    # d'ENTRÉE porte sur la même décision mais ne dit rien du résultat — l'exclure ici ferait
+    # PERDRE l'issue du CSV, donc un trade réel absent de la calibration. Une entrée observée
+    # doit rendre la décision plus mesurable, jamais moins.
     already_reconciled = {r.get("decision_id") for r in store.events("ReconEvent")
-                          if r.get("decision_id")}
+                          if r.get("decision_id") and _kind(r) != ENTRY_KIND}
     candidates = [d for d in decisions if d["id"] not in already_reconciled]
 
     matched, used_fill_idx = [], set()
@@ -170,3 +174,78 @@ def reconcile(store: EventStore, fills: list[dict[str, Any]]) -> dict[str, Any]:
             summary["fill_without_go"] += 1
 
     return summary
+
+
+# ---------------------------------------------------------------------------------------------
+# Fill d'ENTRÉE observé en direct (D-098)
+# ---------------------------------------------------------------------------------------------
+#
+# Un fill d'entrée et un trade clôturé ne sont PAS le même événement. Le CSV NinjaTrader décrit
+# des trades fermés (avec P&L) ; le scraper de logs constate une ENTRÉE, sans P&L, puisque la
+# position est encore ouverte.
+#
+# Les conflater créerait un `ReconEvent matched=True` accompagné d'un `OutcomeEvent` fabriqué —
+# un résultat inventé pour un trade en cours. La grammaire du §2.5 dit exactement quoi faire :
+# l'entrée est un event, l'issue en est un AUTRE, plus tard, qui référence la même décision.
+
+ENTRY_KIND = "ENTRY"
+
+#: Un `ReconEvent` sans `kind` est ANTÉRIEUR à D-098 : il vient de l'import CSV et décrit un trade
+#: clôturé. L'append-only interdit de le réécrire — la compatibilité se fait donc à la LECTURE.
+CLOSED_KIND = "CLOSED"
+
+
+def _kind(recon: dict[str, Any]) -> str:
+    return str(recon.get("kind") or CLOSED_KIND)
+
+
+def reconcile_entry_fill(store: EventStore, fill: dict[str, Any],
+                         now: Optional[float] = None) -> dict[str, Any]:
+    """Rattache un fill d'ENTRÉE observé à la décision GO qui lui correspond.
+
+    N'écrit **jamais** d'`OutcomeEvent` : le trade est ouvert, son résultat n'existe pas encore.
+    Un `SCRATCH` posé « en attendant » serait un résultat inventé (§3), et il fausserait la
+    matrice de calibration au lieu de la remplir.
+
+    Sans décision correspondante, l'observation est **quand même** enregistrée, `matched=False` :
+    un fill sans GO est le signal comportemental le plus important du système — c'est un trade
+    pris hors processus. Le taire serait pire que de ne rien scraper.
+    """
+    ts = now if now is not None else time.time()
+    instrument = _norm_instrument(str(fill.get("instrument") or ""))
+    try:
+        fill_ts = float(fill.get("ts")) if fill.get("ts") is not None else ts
+    except (TypeError, ValueError):
+        fill_ts = ts
+
+    recons = store.events("ReconEvent")
+    # Exclusion limitée aux entrées DÉJÀ rattachées : le tailer peut relire une ligne, et une
+    # décision ne doit pas recevoir deux entrées. Les recons CLÔTURÉS ne bloquent pas — une
+    # décision peut légitimement porter son entrée puis son trade fermé.
+    deja = {r.get("decision_id") for r in recons
+            if r.get("decision_id") and _kind(r) == ENTRY_KIND}
+
+    best, best_gap = None, None
+    for d in store.events("DecisionEvent"):
+        if d.get("decision") != "GO" or d["id"] in deja:
+            continue
+        if _norm_instrument(str(d.get("instrument") or "")) != instrument:
+            continue
+        gap = abs(fill_ts - d["ts"])
+        if gap <= config.RECON_MATCH_WINDOW_SECONDS and (best_gap is None or gap < best_gap):
+            best, best_gap = d, gap
+
+    payload: dict[str, Any] = {
+        "decision_id": best["id"] if best else None,
+        "kind": ENTRY_KIND,
+        "fill_source": "ninjatrader_log",
+        "matched": best is not None,
+        "gap_seconds": round(best_gap, 1) if best_gap is not None else None,
+        "fill_entry_ts": fill_ts,
+        "instrument": instrument,
+        "side": fill.get("side"),
+        "price": fill.get("price"),
+        "quantity": fill.get("quantity"),
+    }
+    event = store.append("ReconEvent", payload, ts=ts)
+    return event

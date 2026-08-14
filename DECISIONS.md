@@ -3752,6 +3752,51 @@ Log (§2.5), pas un champ mutable. Les deux derniers sont purs et courts.
 21 tests neufs, 4 tests existants mis à jour (F2 les fait changer de verdict) → **1353 passed**,
 ruff clean.
 
+## D-098 · Le fill d'entrée devient un event — et le piège qui aurait mangé des trades
+
+Priorité 2, étape 2. En ouvrant `log_scraper.py` avant d'écrire, j'ai trouvé le connecteur NT8
+**déjà complet et branché** : tailer → `parse_execution` → fill → `capture_snapshot(fill=…)`,
+fail-closed sur fichier absent, boucle auto-cadencée. Il n'y avait rien à reconstruire.
+
+Le manque réel était ailleurs : **un fill observé en direct n'était jamais réconcilié**. Il
+écrivait un snapshot, mais aucun `ReconEvent` — la réconciliation ne partait que d'un import CSV
+manuel. Or c'est elle qui alimente `_reconciled_r_multiples`, donc la calibration.
+
+### Une entrée n'est pas un trade clôturé
+
+Le CSV NinjaTrader décrit des trades **fermés**, avec P&L. Le scraper constate une **entrée**,
+sans P&L, position ouverte. `reconcile_entry_fill()` écrit donc un `ReconEvent kind=ENTRY` et
+**jamais d'`OutcomeEvent`** : un `SCRATCH` posé « en attendant » serait un résultat inventé (§3)
+qui fausserait la matrice au lieu de la remplir. L'issue arrive plus tard, en event séparé — la
+grammaire du §2.5, appliquée telle quelle.
+
+### Le piège, trouvé en lisant `reconcile()` et non en le supposant
+
+`reconcile()` exclut les décisions déjà réconciliées. Si une entrée y comptait, **le trade
+clôturé du CSV aurait été ignoré** : un trade réel absent de la calibration, silencieusement.
+Le branchement « évident » aurait donc fait perdre des trades en croyant en gagner.
+
+L'exclusion ne porte donc que sur les recons **clôturés**. Un test nommé d'après le piège le
+verrouille : entrée observée, puis import CSV → l'issue existe et le R-multiple entre bien dans
+`_reconciled_r_multiples`. Une entrée observée doit rendre une décision **plus** mesurable,
+jamais moins.
+
+### Compatibilité à la lecture, pas par réécriture
+
+L'append-only interdit d'ajouter `kind` aux events d'avant D-098. Un `ReconEvent` sans `kind` est
+donc lu comme `CLOSED` — il vient du CSV. La compatibilité se fait à la lecture, ce qui est la
+seule façon possible dans un journal immuable.
+
+### Un fill sans GO est enregistré, pas écarté
+
+`matched=False`, décision `None`, et il apparaît dans `unmatched_fills`. Un trade pris hors
+processus est **le signal comportemental le plus important du système** : le taire serait pire
+que de ne rien scraper.
+
+### Vérif
+8 tests neufs → **1804 passed**, ruff clean, mypy 15 fichiers. La réconciliation est isolée de la
+capture dans le scraper : une réconciliation en échec ne coûte pas le snapshot.
+
 ## D-097 · La couture microstructure live — un port étroit, et un registre vide qui le dit
 
 Priorité 2, étape 1. Ce module définit **où** un flux réel se branche, pas comment tel fournisseur

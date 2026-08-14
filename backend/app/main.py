@@ -2,6 +2,7 @@
 SQLite (append-only event store). The hot path is deterministic; AI is async-only."""
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from contextlib import asynccontextmanager
@@ -20,6 +21,7 @@ from .macro_news import MacroNewsProvider
 from .risk_sizer import APEX_EOD_50K, apex_eod_account
 from .engine import Engine
 from .event_store import get_store
+from .recon import reconcile_entry_fill
 from .external import OWNED_FIELDS as EXTERNAL_FIELDS
 from .external import build_default as build_external
 from .external.macro_series import OWNED_FIELDS as MACRO_FIELDS
@@ -232,6 +234,17 @@ def _build_log_scraper(engine: Engine) -> LogTailer | None:
         now = time.time()
         fill = {"instrument": match.instrument, "side": match.side, "price": match.price,
                 "quantity": match.quantity, "ts": now, "raw": match.raw}
+        # Réconciliation d'ENTRÉE (D-098) : le fill devient un event rattaché à sa décision GO,
+        # sans OutcomeEvent — le trade est ouvert, son résultat n'existe pas encore. Supprime la
+        # dépendance à l'import CSV manuel pour la moitié « entrée » de la preuve comportementale.
+        # Isolée du snapshot : une réconciliation en échec ne doit pas coûter la capture.
+        try:
+            ev = await asyncio.to_thread(reconcile_entry_fill, get_store(), fill, now)
+            log.info("log_scraper: fill rattaché à la décision %s (matched=%s)",
+                     ev.get("decision_id") or "—", ev.get("matched"))
+        except Exception:
+            log.exception("log_scraper: réconciliation d'entrée en échec — le fill reste "
+                          "observable dans le snapshot, à rapprocher à la main")
         try:
             res = await capture_snapshot(engine, now, fill=fill)
             log.info("log_scraper: fill NT8 détecté (%s %s @ %s) → snapshot ÉCRIT : %s",
