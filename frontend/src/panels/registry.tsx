@@ -23,6 +23,7 @@ import { FootprintPanel } from '@/panels/zoneB/FootprintPanel'
 import { LiquidityHeatmapPanel } from '@/panels/zoneB/LiquidityHeatmapPanel'
 import { FootprintImbalancePanel } from '@/panels/zoneB/FootprintImbalancePanel'
 import { CvdStratifiedPanel } from '@/panels/zoneB/CvdStratifiedPanel'
+import { OrderFlowGatesPanel, OrderFlowMeasuresPanel } from '@/panels/zoneB/OrderFlowGatesPanel'
 import { VolumeProfilePanel } from '@/panels/zoneB/VolumeProfilePanel'
 import { OptionsChainPanel } from '@/panels/zoneB/OptionsChainPanel'
 import { TermStructurePanel } from '@/panels/zoneB/TermStructurePanel'
@@ -61,6 +62,9 @@ export const PANEL_REGISTRY: Record<PanelId, PanelDef> = {
   HM: { id: 'HM', label: 'Heatmap liquidité', component: LiquidityHeatmapPanel },
   FP: { id: 'FP', label: 'Footprint · imbalances', component: FootprintImbalancePanel },
   CDS: { id: 'CDS', label: 'CVD stratifié · taille', component: CvdStratifiedPanel },
+  // OF* et non B* : `B1` est déjà un code de POSITION de panneau (D-099).
+  OFG: { id: 'OFG', label: 'Gates order flow · décisionnelles', component: OrderFlowGatesPanel },
+  OFM: { id: 'OFM', label: 'Order flow · mesures (non gatantes)', component: OrderFlowMeasuresPanel },
   VP: { id: 'VP', label: 'Volume Profile · VA/POC', component: VolumeProfilePanel },
   OMON: { id: 'OMON', label: "Chaîne d'options · skew", component: OptionsChainPanel },
   VTS: { id: 'VTS', label: 'Term structure vol', component: TermStructurePanel },

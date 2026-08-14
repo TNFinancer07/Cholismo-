@@ -525,6 +525,36 @@ export interface AccountStateBlock {
   next_ticket: NextTicket
 }
 
+/** Comparaison proxy ↔ mesure maison des gates d'order flow LSR (D-056 / D-099).
+ *  Nommées `OF1`-`OF4` À L'ÉCRAN pour ne pas entrer en collision avec le code de POSITION
+ *  `B1` des panneaux React — le backend les nomme encore `b1`-`b4`, d'où le décalage assumé
+ *  entre la clé de transport et le libellé affiché.
+ *  OF1/OF2 portent un VERDICT (décisionnelles) ; OF3/OF4 sont MESURÉES et explicitement
+ *  non gatantes (seuils non calibrés) — la distinction est faite par le backend, l'écran la
+ *  garde. Absent = mesure non publiée, JAMAIS un zéro (§3). */
+export interface OrderFlowGate {
+  source: number | boolean | null
+  inhouse: number | boolean | null
+  verdict_source: boolean | null
+  verdict_inhouse: boolean | null
+  agree: boolean | null
+  /** OF2 seulement : écart absolu entre les deux mesures. */
+  delta?: number | null
+}
+
+export interface OrderFlowShadow {
+  /** Ligne lisible en tête — accord, désaccord (et sur quoi), ou non mesurable. */
+  resume: string
+  source: string
+  /** Absents sur la branche d'erreur du backend : l'observation a échoué, rien n'est mesuré. */
+  b1?: OrderFlowGate
+  b2?: OrderFlowGate
+  /** MESURÉES, jamais gatantes dans cette tranche. */
+  b3?: number | null
+  b4?: number | null
+  missing?: string[]
+}
+
 export interface Extras {
   rms: number | null
   rms_meta?: MetaField<number>
@@ -534,6 +564,7 @@ export interface Extras {
   /** Porte F0 macro (D-050) : NORMAL | WARNING | HARD_LOCK | SAFETY_UNKNOWN ;
    *  null/absent = couche news non câblée (pas de porte). */
   news_state?: string | null
+  orderflow_shadow?: OrderFlowShadow | null
 }
 
 // --- Zone D : projection du blotter (event-sourced) ---

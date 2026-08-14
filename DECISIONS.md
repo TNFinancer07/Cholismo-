@@ -3752,6 +3752,53 @@ Log (§2.5), pas un champ mutable. Les deux derniers sont purs et courts.
 21 tests neufs, 4 tests existants mis à jour (F2 les fait changer de verdict) → **1353 passed**,
 ruff clean.
 
+## D-099 · Les gates d'order flow entrent dans React — sous le nom OF, pas B
+
+Priorité 3, première tranche. L'IHM cible est l'app React (`tsc strict` + Vitest en CI) ; v17
+redevient une maquette de référence.
+
+### Une collision de noms, trouvée avant de porter
+
+Les deux interfaces utilisaient `B1`-`B4` pour **des choses différentes** : côté React c'est le
+code de POSITION d'un panneau (`B1` = « États S1 · S2 ») ; côté v17 ce sont les **gates d'order
+flow LSR** (rechargement du mur, bascule du tape, CVD normalisé, vitesse d'agression).
+
+Porter les widgets tels quels aurait mis deux `B1` de sens différents dans la même interface —
+sur un terminal où l'opérateur lit un code pour savoir quoi regarder, c'est l'ambiguïté que le
+projet refuse partout ailleurs. Les gates s'appellent donc **`OF1`-`OF4`** à l'écran. Le backend
+garde ses clés `b1`-`b4` : le décalage transport/affichage est assumé et documenté dans le type.
+
+### La donnée traversait déjà, faute de type
+
+`orderflow_shadow` est publié par le moteur (`_extras`) depuis D-056 — mais l'interface `Extras`
+du frontend ne le connaissait pas. La mesure arrivait par SSE et se perdait. Le premier geste
+était donc un type, pas un composant.
+
+### Deux panneaux, parce que le backend fait déjà la distinction
+
+`OF1`/`OF2` portent un **verdict** (décisionnelles) ; `OF3`/`OF4` sont **mesurées et
+explicitement non gatantes** (seuils non calibrés). Les afficher ensemble laisserait croire que
+les quatre pèsent pareil sur l'armement. L'écran garde la distinction que le calcul fait, et le
+panneau de mesures porte son avertissement en tête.
+
+### Ce que les tests verrouillent
+
+Pas « ça s'affiche », mais les trois façons dont l'écran mentirait : une mesure absente rendue
+comme un `0` (avec le cas symétrique — un `0` réel doit rester `0`, sinon on efface une mesure),
+un verdict absent lu comme « franchie », et `agree: null` affiché « accord » alors qu'il signifie
+indécidable. Plus la branche d'ERREUR du backend (`resume` + `source` seuls), qui doit rendre
+`—` partout sans casser le panneau.
+
+Le verdict n'est jamais encodé par la seule couleur : icône `✓`/`✕` + texte (§3, daltonisme).
+
+### Enregistrés, pas seulement écrits
+
+Les deux panneaux sont dans `PANEL_REGISTRY` et `PANEL_IDS`. Un composant absent du registre
+serait du code mort — exactement la faute relevée côté backend en D-096.
+
+### Vérif
+18 tests neufs → **143 tests frontend**, `tsc --noEmit` propre. Backend inchangé (1804).
+
 ## D-098 · Le fill d'entrée devient un event — et le piège qui aurait mangé des trades
 
 Priorité 2, étape 2. En ouvrant `log_scraper.py` avant d'écrire, j'ai trouvé le connecteur NT8
