@@ -17,12 +17,22 @@ import { cn } from '@/lib/utils'
 import { api } from '@/lib/api'
 
 interface Cell { win_rate: number; slippage_ticks: number; ruin_probability: number; status: string }
+interface SensitivityModel {
+  rr?: number; rr_source?: string; rr_note?: string
+  [k: string]: unknown
+}
 interface Sensitivity {
   kind: string; disclaimer: string
   axes: { slippage_ticks: number[]; win_rate: number[] }
   cells: Cell[][]
-  model?: Record<string, unknown>
+  model?: SensitivityModel
   account?: Record<string, unknown>
+}
+/** R:R réellement observé dans le journal des features (D-108/109). */
+interface ObservedRr {
+  status: string; n: number; min_sample: number
+  mean: number | null; min: number | null; max: number | null
+  detail: string
 }
 interface SurvivorBias {
   kind: string; status: string; n_reconciled: number; min_sample: number
@@ -41,6 +51,42 @@ export function classeRisque(p: number): { label: string; cls: string } {
 
 export function pct(v: number | null | undefined): string {
   return v === null || v === undefined || !Number.isFinite(v) ? '—' : `${(v * 100).toFixed(1)} %`
+}
+
+interface Payload {
+  sensitivity: Sensitivity
+  survivor_bias: SurvivorBias
+  observed_rr?: ObservedRr
+}
+
+/** La carte tourne à R:R CONSTANT alors que le moteur en produit un VARIABLE (D-109). Le taire à
+ *  l'écran laisserait lire la grille comme un portrait du moteur — c'est la faute corrigée en
+ *  D-104, un cran plus loin. */
+export function BaselineRr({ model, observed }: { model?: SensitivityModel; observed?: ObservedRr }) {
+  const rr = model?.rr
+  const mesure = observed && observed.status === 'OK'
+  return (
+    <p className="border border-term-border bg-term-panel p-1.5 text-xxs text-term-dim"
+      data-testid="rr-baseline">
+      <span className="font-bold text-term-text">
+        R:R de référence : {typeof rr === 'number' ? rr.toFixed(2) : '—'}
+      </span>
+      {' '}({model?.rr_source === 'override' ? 'surchargé' : 'baseline fixe'}) — le moteur en
+      produit un <b>variable</b> (TP raccourci par le VPOC, calibration par instrument).
+      {' '}
+      {mesure ? (
+        <span data-testid="rr-observe">
+          Observé sur {observed!.n} setups : moyenne {observed!.mean}, de {observed!.min} à{' '}
+          {observed!.max} — la dispersion compte plus que la moyenne, les setups les moins
+          favorables sont ceux qui tuent un compte.
+        </span>
+      ) : (
+        <span className="text-term-faint" data-testid="rr-non-mesure">
+          {observed?.detail ?? 'R:R réel non mesuré — la carte reste sur sa baseline.'}
+        </span>
+      )}
+    </p>
+  )
 }
 
 function BiaisCard({ b }: { b: SurvivorBias }) {
@@ -100,12 +146,12 @@ function BiaisCard({ b }: { b: SurvivorBias }) {
 }
 
 export function ResilienceView() {
-  const [data, setData] = useState<{ sensitivity: Sensitivity; survivor_bias: SurvivorBias } | null>(null)
+  const [data, setData] = useState<Payload | null>(null)
   const [err, setErr] = useState<string | null>(null)
 
   useEffect(() => {
     let vivant = true
-    api.analysesResilience<{ sensitivity: Sensitivity; survivor_bias: SurvivorBias }>()
+    api.analysesResilience<Payload>()
       .then((d) => { if (vivant) setData(d) })
       .catch((e) => { if (vivant) setErr(String(e)) })
     return () => { vivant = false }
@@ -120,6 +166,8 @@ export function ResilienceView() {
       {/* EN TÊTE, jamais en note de bas de tableau. */}
       <p className="border border-gold/50 bg-gold/5 p-1.5 text-xxs text-gold"
         data-testid="resilience-disclaimer">⚠ {s.disclaimer}</p>
+
+      <BaselineRr model={s.model} observed={data.observed_rr} />
 
       <Panel code="RES1" title="Sensibilité à la ruine · slippage × taux de réussite"
         block="analyses/resilience">

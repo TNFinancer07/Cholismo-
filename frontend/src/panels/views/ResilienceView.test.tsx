@@ -11,6 +11,7 @@ import { ResilienceView, classeRisque, pct } from './ResilienceView'
 const SENS = {
   kind: 'sensitivity_map',
   disclaimer: 'Carte de SENSIBILITÉ : le taux réel du LSR est INCONNU.',
+  model: { rr: 1, rr_source: 'baseline', rr_note: 'R:R FIXE de référence.' },
   axes: { slippage_ticks: [0, 1], win_rate: [0.35, 0.55] },
   cells: [
     [{ win_rate: 0.35, slippage_ticks: 0, ruin_probability: 0.25, status: 'HYPOTHESIS' },
@@ -29,9 +30,9 @@ const BIAIS_OK = {
 vi.mock('@/lib/api', () => ({ api: { analysesResilience: vi.fn() } }))
 const { api } = await import('@/lib/api')
 
-function poser(survivor_bias: unknown) {
+function poser(survivor_bias: unknown, observed_rr?: unknown) {
   ;(api.analysesResilience as unknown as ReturnType<typeof vi.fn>)
-    .mockResolvedValue({ sensitivity: SENS, survivor_bias })
+    .mockResolvedValue({ sensitivity: SENS, survivor_bias, observed_rr })
 }
 
 beforeEach(() => vi.clearAllMocks())
@@ -109,5 +110,45 @@ describe('routage', () => {
     const bar = (await import('@/components/CommandBar.tsx?raw')).default
     expect(store).toContain("'RESIL'")
     expect(bar).toMatch(/view\('RESIL', 'RESIL'/)
+  })
+})
+
+// ------------------------------------------------------------------ baseline R:R (D-110)
+
+describe('baseline R:R', () => {
+  it("dit que le R:R affiché est une BASELINE et que le moteur en produit un variable", async () => {
+    poser(BIAIS_OK)
+    render(<ResilienceView />)
+    const b = await screen.findByTestId('rr-baseline')
+    expect(b.textContent).toContain('1.00')
+    expect(b.textContent).toContain('baseline fixe')
+    expect(b.textContent).toMatch(/variable/)
+  })
+
+  it('sans R:R mesuré, affiche la raison plutôt qu\'un chiffre', async () => {
+    poser(BIAIS_OK, { status: 'INSUFFICIENT_DATA', n: 0, min_sample: 10,
+                      mean: null, min: null, max: null,
+                      detail: '0 R:R observés, 10 requis — la carte reste sur sa baseline fixe (1.0)' })
+    render(<ResilienceView />)
+    const nm = await screen.findByTestId('rr-non-mesure')
+    expect(nm.textContent).toContain('10 requis')
+    expect(screen.queryByTestId('rr-observe')).toBeNull()
+  })
+
+  it('avec un R:R mesuré, montre la DISPERSION et pas seulement la moyenne', async () => {
+    poser(BIAIS_OK, { status: 'OK', n: 24, min_sample: 10,
+                      mean: 1.42, min: 0.8, max: 2.6, detail: 'dispersion réelle' })
+    render(<ResilienceView />)
+    const o = await screen.findByTestId('rr-observe')
+    expect(o.textContent).toContain('1.42')
+    expect(o.textContent).toContain('0.8')
+    expect(o.textContent).toContain('2.6')
+    expect(o.textContent).toMatch(/dispersion/)
+  })
+
+  it("un payload SANS observed_rr ne casse pas et reste honnête", async () => {
+    poser(BIAIS_OK)
+    render(<ResilienceView />)
+    expect((await screen.findByTestId('rr-non-mesure')).textContent).toMatch(/non mesuré/)
   })
 })
