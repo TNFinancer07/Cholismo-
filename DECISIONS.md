@@ -3752,6 +3752,52 @@ Log (§2.5), pas un champ mutable. Les deux derniers sont purs et courts.
 21 tests neufs, 4 tests existants mis à jour (F2 les fait changer de verdict) → **1353 passed**,
 ruff clean.
 
+## D-096 · Les règles sont ACTIVES — et je cherchais au mauvais endroit
+
+Correction de D-095. J'y écrivais : « `LsrLiveDriver` n'est instancié nulle part en production,
+aucune boucle live n'exécute les règles ». **La conclusion était fausse**, parce que la question
+l'était : j'ai cherché où le *driver* tournait, au lieu de chercher où `evaluate_lsr` tournait.
+
+`engine.py:923` l'appelle **à chaque tick du moteur**, depuis toujours. L'évaluation LSR n'a
+jamais eu besoin du driver — celui-ci est un harnais alternatif, sans appelant. Le garde était
+donc branché sur le seul chemin qui ne sert pas.
+
+La leçon est la même qu'en D-092 : j'ai cru un constat au lieu de le vérifier. `grep LsrLiveDriver`
+répondait juste à une question sans intérêt.
+
+### Le branchement réel
+
+`screen_plan()` — point d'entrée **sans contrat de driver** — est appelé dans `_maybe_emit_lsr`,
+juste après `evaluate_lsr` et avant la couche compte. `guard_evaluator` n'en est plus qu'une
+enveloppe : un seul chemin journalise les refus, sinon deux historiques incompatibles feraient
+porter à faux le verrou de re-soumission.
+
+**Placement et budget hot path (§7).** Les règles lisent le journal (SQLite). Le chemin n'atteint
+`screen_plan` qu'après les filtres bon marché — clé d'événement, cooldown de ré-armement — donc au
+plus une fois par fenêtre, jamais à chaque tick. Le budget tient parce que l'accès est **rare**,
+pas parce qu'il est rapide ; c'est une propriété du placement, et elle est écrite à côté.
+
+À noter : le moteur portait déjà un cooldown maison commenté « F7-like » (`LSR_REARM_COOLDOWN_S`),
+approximation ad hoc de la vraie règle. Les deux coexistent — le maison borne les ré-émissions
+d'un détecteur qui bascule, F7 borne l'âge du sweep. Fusionner les deux serait un refactor à part.
+
+### Preuve, pas affirmation
+
+Un test passe par `Engine._maybe_emit_lsr` avec un compte verrouillé (deux pertes en séance) et
+vérifie qu'un `SetupRejectedEvent` est écrit avec le motif F6. C'est le chemin réel, pas un
+double.
+
+### A5b — la réponse métier est arrivée, la règle reste débranchée
+
+`secondary_reference` = **proximité immédiate (≤ 2 ticks) d'un niveau clé secondaire VAH, VAL ou
+LVN**. Consigne de l'opérateur : la formule exacte sera spécifiée formellement plus tard, la règle
+reste désactivée d'ici là.
+
+Consigné ici pour que la définition ne se perde pas — mais **rien n'est implémenté** : « ≤ 2 ticks
+d'un niveau » laisse ouvertes des questions qui changent le résultat (le niveau de quelle séance ?
+mesuré depuis le prix d'entrée ou le point de sweep ? que faire si deux niveaux qualifient ?). Le
+test qui verrouille l'absence d'A5b reste en place.
+
 ## D-095 · Brancher les règles sans toucher au driver — et A5b bute sur une donnée qui n'existe pas
 
 Suite de D-094 : les règles étaient portées mais appelées par personne.

@@ -248,6 +248,36 @@ def _protection_facts(plan: Any) -> tuple[Optional[str], Optional[float]]:
     return (str(setup_id) if setup_id else None), ts_ms
 
 
+def screen_plan(plan: Any, *, store: EventStore, now_ms: float,
+                state: Optional[LsrRuntimeState] = None) -> tuple[Any, Optional[str]]:
+    """Passe un plan APPROVED au crible de F6/F7. Rend `(plan, None)` ou `(None, motif)`.
+
+    Point d'entrée **sans contrat de driver**, appelable depuis n'importe quel chemin
+    d'évaluation. `engine.py` l'appelle directement — c'est là que `evaluate_lsr` tourne
+    réellement ; `guard_evaluator` n'en est qu'une enveloppe pour le driver.
+
+    Le refus est journalisé ici, une fois, quel que soit l'appelant : deux chemins qui
+    journaliseraient différemment donneraient deux historiques de refus incompatibles, et le
+    verrou de re-soumission porterait à faux sur l'un des deux.
+    """
+    if not isinstance(plan, dict) or plan.get("status") != "APPROVED":
+        return plan, None                    # ALERT et silence ne sont pas des entrées à garder
+
+    st = state if state is not None else project_runtime_state(store, now_ms=now_ms)
+
+    if (reason := f6_cooldown(st, now_ms)) is not None:
+        _journal_rejection(store, setup_id=None, reason=reason, now_ms=now_ms)
+        return None, reason
+
+    setup_id, sweep_ts_ms = _protection_facts(plan)
+    reason = f7_fomo(sweep_ts_ms, now_ms) or f7_resubmit(setup_id, st)
+    if reason is not None:
+        _journal_rejection(store, setup_id=setup_id, reason=reason, now_ms=now_ms)
+        return None, reason
+
+    return plan, None
+
+
 def guard_evaluator(inner: Any, *, store: EventStore,
                     now_to_ms: float = 1000.0) -> Any:
     """Enveloppe un évaluateur LSR des règles de protection F6 / F7.
@@ -267,22 +297,18 @@ def guard_evaluator(inner: Any, *, store: EventStore,
         now_ms = float(payload.now) * now_to_ms
         state = project_runtime_state(store, now_ms=now_ms)
 
-        # F6 en amont : verrouillé = on n'évalue même pas.
+        # F6 en amont : verrouillé = on n'évalue même pas. C'est le seul écart avec
+        # `screen_plan`, et il est propre au driver — épargner un cycle d'évaluation complet
+        # quand le compte est verrouillé.
         if (reason := f6_cooldown(state, now_ms)) is not None:
             _journal_rejection(store, setup_id=None, reason=reason, now_ms=now_ms)
             return None, payload.state
 
         plan, next_state = inner(payload)
-        if not isinstance(plan, dict) or plan.get("status") != "APPROVED":
-            return plan, next_state          # ALERT et silence ne sont pas des entrées à garder
-
-        setup_id, sweep_ts_ms = _protection_facts(plan)
-        reason = f7_fomo(sweep_ts_ms, now_ms) or f7_resubmit(setup_id, state)
-        if reason is not None:
-            _journal_rejection(store, setup_id=setup_id, reason=reason, now_ms=now_ms)
+        garde, refuse = screen_plan(plan, store=store, now_ms=now_ms, state=state)
+        if refuse is not None:
             return None, payload.state
-
-        return plan, next_state
+        return garde, next_state
 
     return evaluate
 

@@ -28,6 +28,7 @@ from .volume_profile import build_volume_profile
 from .graph.liquidity_sweep import SWEEP_GRAPH, build_sweep_inputs
 from .account_provider import AccountDataProvider
 from .lsr_engine import build_lsr_inputs, evaluate_lsr
+from .lsr_protection import screen_plan
 from .macro_news import MacroNewsProvider
 from .risk_sizer import AccountState, account_view, size_plan
 from .trade_manifest import manifest_from_lsr_plan
@@ -924,6 +925,15 @@ class Engine:
                                              orderflow=snapshot))
         if plan is None:
             return                                    # gates rouges / F0 → silence
+        # RÈGLES DE PROTECTION F6/F7 (D-096). Placées ICI et pas plus haut : elles lisent le
+        # journal (SQLite), et le chemin ne va jusqu'ici qu'après les filtres bon marché
+        # (clé d'événement, cooldown de ré-armement) — au plus une fois par fenêtre, jamais à
+        # chaque tick. Le budget hot path (§7) est préservé parce que l'accès est rare, pas
+        # parce qu'il est rapide.
+        plan, refus = screen_plan(plan, store=get_store(), now_ms=now * 1000.0)
+        if plan is None:
+            log.info("setup LSR refusé par une règle de protection : %s", refus)
+            return                                    # F6 verrou / F7 FOMO ou re-soumission
         # COUCHE COMPTE (D-047) : on ne trade JAMAIS à l'aveugle. Pas de source, source
         # déconnectée/périmée, ou RiskSizer en rejet (F8, corruption, plafond) → silence.
         if self.account_provider is None:

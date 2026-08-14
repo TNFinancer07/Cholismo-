@@ -402,3 +402,71 @@ def test_A5b_n_est_PAS_branche_et_la_raison_est_verrouillee():
     for fichier in ("scanner.ts", "planner.ts", "geometry.ts", "orderflow.ts"):
         assert "secondaryReference =" not in ts_engine_source(fichier), (
             f"{fichier} calcule secondaryReference — A5b devient branchable")
+
+
+# ---------------------------------------------------------------- branchement réel (D-096)
+
+def _redis_ok() -> bool:
+    import asyncio
+
+    from app.redis_state import RedisState
+
+    async def probe() -> bool:
+        st = RedisState()
+        try:
+            return await st.ping()
+        finally:
+            await st.close()
+    try:
+        return asyncio.run(probe())
+    except Exception:
+        return False
+
+
+@pytest.mark.skipif(not _redis_ok(), reason="Redis indisponible — intégration sautée")
+def test_le_MOTEUR_refuse_reellement_un_setup_sous_verrou_F6(tmp_path, monkeypatch):
+    """La preuve que le garde est BRANCHÉ, pas seulement disponible : on passe par
+    `Engine._maybe_emit_lsr`, le chemin où `evaluate_lsr` tourne pour de vrai."""
+    import asyncio
+
+    from app import engine as engine_mod
+    from app.datasource.mock import MockDataSource
+    from app.engine import Engine
+    from app.redis_state import RedisState
+    from app.schema import LiquiditySweep, LiquiditySweepAlert
+
+    journal = EventStore(str(tmp_path / "events.db"))
+    now = time.time()
+
+    # Compte verrouillé : deux pertes consécutives dans la séance.
+    d1 = _decision(journal, decision="GO", ts=now - 600)
+    d2 = _decision(journal, decision="GO", ts=now - 400)
+    _outcome(journal, d1, "LOSS", ts=now - 500)
+    _outcome(journal, d2, "LOSS", ts=now - 300)
+
+    monkeypatch.setattr(engine_mod, "get_store", lambda: journal)
+    monkeypatch.setattr(engine_mod, "evaluate_lsr",
+                        lambda i: {"status": "APPROVED", "instrument": "MES",
+                                   "direction": "LONG",
+                                   "protection": {"setup_id": "MES:BID_SWEEP:1", "sweep_ts": now}})
+    emis = []
+
+    async def scenario():
+        state = RedisState()
+        try:
+            moteur = Engine(MockDataSource(), state)
+            monkeypatch.setattr(moteur, "account_provider", None)   # au-delà du garde
+            moteur.schema.liquidity_sweep = LiquiditySweep(
+                assessable=True, triggered=True, reason="t",
+                alert=LiquiditySweepAlert(ts=now, kind="LIQUIDITY_SWEEP",
+                                          direction="BID_SWEEP", trigger="T", detail="t"))
+            moteur._maybe_emit_lsr(now)
+            emis.append(moteur._lsr_emitted_key)
+        finally:
+            await state.close()
+
+    asyncio.run(scenario())
+
+    refus = journal.events("SetupRejectedEvent")
+    assert len(refus) == 1, "le moteur n'a pas consulté les règles de protection"
+    assert refus[0]["reason"] == F6_COOLDOWN_ACTIVE
