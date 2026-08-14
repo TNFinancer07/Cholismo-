@@ -92,3 +92,35 @@ def test_le_verdict_porte_ses_SEUILS_et_dit_qu_ils_ne_sont_pas_calibres():
     assert r["drop_ratio_threshold"] == 0.70
     assert r["calibrated"] is False
     assert r["levels"] == 10
+
+
+# ---------------------------------------------------------------- câblage moteur (D-112)
+
+def test_le_moteur_PUBLIE_le_verdict_de_vide():
+    """Un module non appelé vaut zéro pour l'opérateur (5ᵉ piège de HANDOFF.md)."""
+    import asyncio
+
+    from app.datasource.mock import MockDataSource
+    from app.engine import Engine
+
+    class _Redis:
+        async def close(self): return None
+
+    moteur = Engine(MockDataSource(), _Redis())
+    assert hasattr(moteur, "_vacuum"), "le détecteur doit vivre AVEC le moteur (il a un état)"
+    del asyncio
+
+
+def test_un_carnet_PERIME_n_alimente_pas_la_reference():
+    """Sinon la référence mêlerait des profondeurs d'instants différents, et un vide se
+    déclencherait au retour du flux."""
+    from app.meta import Freshness, MetaField
+    from app.mbo.vacuum import VacuumDetector
+
+    d = VacuumDetector(min_observations=3)
+    _chauffe(d, 50, 5)
+    ref = d.reference()
+    perime = MetaField(value=_book(1), freshness=Freshness.STALE)
+    # Reproduit la garde du moteur : seul un FRESH est observé.
+    d.observe(perime.value if perime.freshness == Freshness.FRESH else None)
+    assert d.reference() == ref

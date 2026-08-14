@@ -149,3 +149,29 @@ def test_le_resume_est_LISIBLE_et_rappelle_l_absence_de_calibration():
     assert "réinjection masquée" in txt and "NON calibrés" in txt
     vide = summarise(analyse_book(MboBook(tick_size=0.25)))
     assert "aucun niveau" in vide
+
+
+# ---------------------------------------------------------------- câblage (D-112)
+
+def test_le_harnais_FIGE_le_comportement_a_l_armement():
+    """Un module non appelé vaut zéro (5ᵉ piège de HANDOFF.md). Et le figer à l'armement est la
+    même doctrine que le vecteur de features : une minute plus tard, les compteurs ont bougé."""
+    from app.replay_harness import ReplayHarness, Setup
+
+    h = ReplayHarness(tick_size=0.25)
+    # Un niveau à réinjection masquée avant l'armement.
+    seq = 0
+    for k in range(6):
+        seq += 1
+        h.book.apply(_ev(MboAction.ADD, MboSide.BID, 5000.0, 10.0, 300 + k, seq))
+        seq += 1
+        h.book.apply(_ev(MboAction.TRADE, MboSide.ASK, 5000.0, 10.0, 300 + k, seq))
+
+    h._arm(Setup(setup_id="s1", side="LONG", entry_price=5000.0, stop_loss=4999.0,
+                 take_profit=5001.25), ts_ms=1000.0)
+
+    rapport = h.behaviours.get("s1")
+    assert rapport is not None, "le comportement doit être capturé à l'armement"
+    niveaux = [lv for lv in rapport["bids"] if lv["price"] == 5000.0]
+    assert niveaux and niveaux[0]["iceberg"] is True
+    assert rapport["thresholds"]["calibrated"] is False

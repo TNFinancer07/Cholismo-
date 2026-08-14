@@ -41,6 +41,7 @@ from typing import Any, Callable, Iterable, Optional
 
 from .execution_sim import ExecutionSimulator, OrderStatus
 from .mbo.book import MboBook
+from .mbo.liquidity_behaviour import analyse_book
 from .mbo.events import MboAction, MboEvent
 
 #: Issues possibles. `NO_FILL` et `OPEN_AT_END` ne sont PAS des résultats nuls : ce sont des
@@ -123,6 +124,8 @@ class ReplayHarness:
         #: Valeur d'un TICK = valeur du point × taille du tick (MES : 5,0 × 0,25 = 1,25 $).
         self.tick_value = float(point_value) * self.tick
         self.book = MboBook(tick_size=self.tick, max_levels_per_side=max_levels_per_side)
+        #: `setup_id` → comportement des niveaux au moment de l'armement (icebergs / churn).
+        self.behaviours: dict[str, dict] = {}
         self.sim = ExecutionSimulator(tick_size=self.tick, latency_ms=latency_ms,
                                       latency_jitter_ms=latency_jitter_ms, rng_seed=rng_seed)
         self.outcomes: list[Outcome] = []
@@ -158,6 +161,10 @@ class ReplayHarness:
     # -- transitions --
 
     def _arm(self, setup: Setup, ts_ms: float) -> None:
+        # Comportement de la liquidité (D-106) figé À L'ARMEMENT — même doctrine que le vecteur
+        # de features (D-108) : c'est le seul instant où l'état est complet ET rattaché à un
+        # setup identifié. Une minute plus tard, les compteurs du carnet ont déjà bougé.
+        self.behaviours[setup.setup_id] = analyse_book(self.book)
         side = "BUY" if setup.side == "LONG" else "SELL"
         order = self.sim.place_limit(side, setup.entry_price, setup.qty, ts_ms,
                                      book=self.book.to_aggregated_book(depth=20))

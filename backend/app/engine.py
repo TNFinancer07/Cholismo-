@@ -34,6 +34,7 @@ from .risk_sizer import AccountState, account_view, size_plan
 from .trade_manifest import manifest_from_lsr_plan
 from .heatmap import latest_column
 from .macro_risk import build_macro_calendar, compute_macro_risk
+from .mbo.vacuum import VacuumDetector
 from .orderflow.bridge import book_history_push, orderflow_shadow, snapshot_for_lsr
 from .rates import build_yield_curve
 from .sentiment import build_long_short
@@ -261,6 +262,9 @@ class Engine:
         # sweep (1 Hz). Écrite directement dans `_extras`, elle n'était visible que 25 % des
         # ticks (mesuré) : un consommateur la verrait clignoter, donc « non mesurée » (/polish).
         self._orderflow_shadow: dict = {}
+        #: Détecteur de vide (D-111) — À ÉTAT : il porte la référence glissante de profondeur,
+        #: donc il vit avec le moteur et non dans une fonction pure appelée par tick.
+        self._vacuum = VacuumDetector()
         # CVD par niveau (D-029) : accumulateur prix -> [buy, sell], seq déjà traité,
         # clé de l'événement du dernier reset, bornes de la fenêtre courante.
         self._cvd_levels: dict[float, list[float]] = {}
@@ -895,6 +899,13 @@ class Engine:
             sweep_direction=alert.direction if alert else None)
         self._orderflow_shadow = orderflow_shadow(self.schema, snapshot)
         self._extras["orderflow_shadow"] = self._orderflow_shadow
+        # Vide de liquidité (D-112) : observé sur le carnet AGRÉGÉ, seul disponible en live —
+        # le carnet MBO par ordre n'existe que dans le rejeu. Seul un carnet FRESH est observé :
+        # un carnet périmé alimenterait la référence glissante avec une profondeur d'un autre
+        # instant, et un vide se déclencherait au retour du flux.
+        book_meta = self.schema.s1_state.order_book
+        self._extras["liquidity_vacuum"] = self._vacuum.observe(
+            book_meta.value if book_meta.freshness == Freshness.FRESH else None)
         if not sw.triggered:
             # Condition levée → le PROCHAIN sweep est un événement NEUF (même sémantique que
             # `_sweep_last_key`, D-028). Sans ce reset, un trigger|direction identique plus tard
