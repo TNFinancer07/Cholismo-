@@ -24,6 +24,8 @@ import { ParamsView } from '@/panels/views/ParamsView'
 import { PromptsView } from '@/panels/views/PromptsView'
 import { RecapView } from '@/panels/views/RecapView'
 import { RobustnessView } from '@/panels/views/RobustnessView'
+import { DetachedPanelWindow } from '@/panels/DetachedPanelWindow'
+import { DetachChannel, detachedPanelId } from '@/lib/detach'
 import { ResilienceView } from '@/panels/views/ResilienceView'
 
 const COLUMN_ZONES: ZoneKey[] = ['A', 'B', 'C']
@@ -86,12 +88,32 @@ function WorkspaceGrid() {
   )
 }
 
+/** Rediffuse l'instantané du store vers les fenêtres détachées (D-116).
+ *  Un SEUL abonnement SSE existe — celui de la fenêtre principale. */
+function useDetachBroadcast(actif: boolean) {
+  useEffect(() => {
+    if (!actif) return
+    const ch = new DetachChannel()
+    if (!ch.available) return
+    // Cadence alignée sur l'UI (250 ms, D-088) : rediffuser à chaque événement SSE saturerait le
+    // canal sans que l'œil y gagne quoi que ce soit.
+    const t = setInterval(() => ch.post(useTerminal.getState()), 250)
+    return () => { clearInterval(t); ch.close() }
+  }, [actif])
+}
+
 export default function App() {
+  const detache = detachedPanelId(typeof location === 'undefined' ? '' : location.search)
+  return detache ? <DetachedPanelWindow panelId={detache} /> : <MainWindow />
+}
+
+function MainWindow() {
   useKeyboardNav()
   const marker = useTerminal((s) => s.session_identity?.session_marker ?? 'HORS_SESSION')
   const view = useTerminal((s) => s.view)
 
   useEffect(() => connectSSE(), [])
+  useDetachBroadcast(true)
 
   return (
     <div className={cn('relative flex h-full flex-col', `session-${marker}`)}>
