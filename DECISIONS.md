@@ -3752,6 +3752,51 @@ Log (§2.5), pas un champ mutable. Les deux derniers sont purs et courts.
 21 tests neufs, 4 tests existants mis à jour (F2 les fait changer de verdict) → **1353 passed**,
 ruff clean.
 
+## D-097 · La couture microstructure live — un port étroit, et un registre vide qui le dit
+
+Priorité 2, étape 1. Ce module définit **où** un flux réel se branche, pas comment tel fournisseur
+parle. Rithmic, Bookmap et Sierra exigent un SDK propriétaire et des identifiants que ce dépôt n'a
+pas ; écrire un client qui *simule* une connexion serait le pire des deux mondes — l'apparence
+d'un connecteur avec le comportement d'un mock. **`CLIENTS` est vide**, et une entrée y signifiera
+« ce fournisseur est réellement joignable ».
+
+### Un port volontairement étroit
+
+Deux choses seulement : le **tape** et le **carnet**. CVD, absorption, ratio d'agression, VPOC,
+VAH/VAL/LVN sont calculés ici. Un fournisseur qui offrirait son propre « CVD » serait une seconde
+vérité sur un nombre qu'on calcule déjà — deux chiffres du même nom qui divergent, et plus
+personne pour dire lequel a raison. On prend la donnée brute, on garde le calcul.
+
+Plus le port est large, plus il est facile d'y faire passer une dérivée qu'on calcule mieux ici.
+
+### Trois refus au démarrage, plutôt qu'une panne en séance
+
+`LiveDataSource` refuse de se construire si le client n'a pas de nom, s'il s'estampille `mock:*`
+(le préfixe est réservé aux lectures simulées — D-093, dans les deux sens), ou si son nom diffère
+de `MICROSTRUCTURE_SOURCE`. Ce dernier cas est le plus sournois : `/sources`, la table de
+provenance et les bascules de coupure nommeraient une source que personne n'écrit — **la coupure
+ne couperait rien**, et on ne s'en apercevrait qu'en voulant s'en servir.
+
+### Fail-closed, sans repli
+
+Pas de client, client déconnecté, client qui lève, source coupée → **rien n'est écrit**. Le
+silence est la bonne réponse parce qu'il est *visible* : l'âge court, le champ passe STALE puis
+ABSENT, Phase 0 bloque. Un `except` qui réécrirait la dernière valeur connue rendrait la panne
+invisible. Un test vérifie explicitement qu'aucun repli sur le mock n'a lieu.
+
+Deux pièges de publication traités :
+- **Un tick sans print neuf ne republie pas le tape.** Le republier avec un horodatage frais
+  ferait passer un flux mort pour un flux calme. Un tape immobile reste immobile.
+- **Le carnet est daté de MAINTENANT, le tape de son dernier print.** Un marché sans transaction
+  a quand même un carnet vivant ; le dater d'un print ancien le ferait vieillir à tort.
+
+Et un carnet vide (`None` ou `{}`) n'est pas publié : zéro niveau se lirait « plus aucune
+liquidité », ce qui est une mesure, et elle serait fausse.
+
+### Vérif
+16 tests neufs → **1796 passed**, ruff clean, mypy 15 fichiers. Démarrage réel vérifié : le
+registre étant vide, le terminal retombe sur la source simulée **en l'annonçant** (D-093).
+
 ## D-096 · Les règles sont ACTIVES — et je cherchais au mauvais endroit
 
 Correction de D-095. J'y écrivais : « `LsrLiveDriver` n'est instancié nulle part en production,

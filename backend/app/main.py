@@ -13,6 +13,7 @@ from . import config
 from .account_provider import MockAccountProvider, NT8FileAccountProvider
 from .ai.tasks import AITasks
 from .api import router
+from .datasource.live import LiveDataSource, resolve_client
 from .datasource.mock import MOCK_PREFIX, MockDataSource
 from .datasource.replay import ReplayDataSource
 from .macro_news import MacroNewsProvider
@@ -66,7 +67,17 @@ async def lifespan(app: FastAPI):
 
     # Le mode replay se choisit au démarrage, par la couture unique (§4) : le moteur ne sait
     # pas laquelle des trois sources est branchée. `REPLAY_FILE` absent = source mock.
-    if config.REPLAY_FILE:
+    # Un connecteur RÉEL a la priorité sur tout (D-097). `CLIENTS` est vide aujourd'hui :
+    # `resolve_client` rend donc `None`, et l'on retombe sur le comportement documenté plus bas.
+    # Ce n'est pas un repli silencieux — le mock s'annonce (D-093).
+    live_client = resolve_client(config.MICROSTRUCTURE_SOURCE)
+    if live_client is not None:
+        app.state.datasource = LiveDataSource(live_client,
+                                              source_name=config.MICROSTRUCTURE_SOURCE)
+        await app.state.datasource.start()
+        log.warning("MODE LIVE : microstructure servie par « %s » — les lectures portent son nom.",
+                    config.MICROSTRUCTURE_SOURCE)
+    elif config.REPLAY_FILE:
         app.state.datasource = ReplayDataSource(config.REPLAY_FILE, speed=config.REPLAY_SPEED,
                                                 autoplay=config.REPLAY_AUTOPLAY)
         log.warning("MODE REPLAY : %s — les prints sont REJOUÉS, pas du direct (source=replay)",
