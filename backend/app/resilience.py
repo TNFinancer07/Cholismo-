@@ -22,7 +22,14 @@ perte journalière maximale (`ApexEodPreset`), et l'unité R (`R_UNIT_USD`).
 POSÉ — les deux axes de la carte, qui sont l'objet même de l'exploration : taux de réussite et
 slippage. Ils ne prétendent à rien.
 
-**Le modèle de trade est volontairement pauvre** : +1R gagné au TP, −1R perdu au stop. Un modèle
+**BASELINE DE RÉFÉRENCE, pas portrait du moteur (D-109).** Le moteur produit un R:R **variable**
+— TP raccourci par le VPOC, calibration par instrument (D-069/D-107), stop suivant l'extrême du
+sweep. La carte, elle, tourne à R:R **constant** : elle répond « à R:R égal, quel est l'effet du
+taux de réussite et du slippage ? », et **ne décrit pas la dispersion réelle**. Le R:R employé est
+publié dans `model.rr` avec sa provenance ; `observed_rr()` lit le R:R réellement constaté dans le
+journal des features et remplacera la baseline quand des setups existeront.
+
+**Le modèle de trade est volontairement pauvre** : `rr × R` gagné au TP, −1R perdu au stop. Un modèle
 riche (scale-out, stops variables, corrélation intra-journée) donnerait des nombres plus précis
 sur des hypothèses tout aussi inconnues — de la fausse précision. Le modèle est écrit dans la
 sortie (`model`), pour qu'on sache ce qu'on lit.
@@ -51,6 +58,15 @@ SLIPPAGE_TICKS = (0.0, 0.5, 1.0, 2.0)
 #: MES : 1 tick = 1.25 $ (5 $/point ÷ 4). Valeur de contrat, pas une hypothèse.
 MES_TICK_USD = 1.25
 
+#: RATIO GAIN/RISQUE de la baseline. **Une hypothèse, pas une mesure** (D-109) : le moteur
+#: produit un R:R *variable* — le TP est raccourci par le VPOC et calibré par instrument
+#: (D-069/D-107), et le stop suit l'extrême du sweep plus un tampon de bruit. Aucun nombre fixe ne
+#: le décrit.
+#: 1.0 est retenu comme **repère neutre** : ni flatteur ni pessimiste, il rend la carte lisible
+#: comme « à R:R égal, voici l'effet du taux de réussite et du slippage ». Le vrai R:R se lira
+#: dans `rr_ratio` du journal des features (D-108), quand des setups existeront.
+BASELINE_RR = 1.0
+
 DEFAULT_TRADES = 50          # l'horizon du challenge (`CLAUDE §1` : 50+ trades)
 DEFAULT_SIMS = 2000
 DEFAULT_SEED = 12345
@@ -58,7 +74,7 @@ DEFAULT_SEED = 12345
 
 def _ruin_probability(*, win_rate: float, slippage_ticks: float, preset: ApexEodPreset,
                       r_usd: float, tick_usd: float, trades: int, sims: int,
-                      rng: random.Random) -> float:
+                      rng: random.Random, rr: float = BASELINE_RR) -> float:
     """Part des trajectoires qui touchent une limite de compte avant la fin de l'horizon.
 
     « Ruine » = drawdown maximal atteint **ou** limite de perte journalière franchie — les deux
@@ -69,7 +85,9 @@ def _ruin_probability(*, win_rate: float, slippage_ticks: float, preset: ApexEod
     # STOP part au marché et paie le slippage. La première version le retranchait des DEUX côtés,
     # ce qui surestimait le coût sur les gagnants et sous-estimait donc la robustesse.
     cost = slippage_ticks * tick_usd
-    gain, loss = r_usd, -(r_usd + cost)
+    # `r_usd` est le RISQUE par trade ; le gain en est le multiple `rr`. Écrire `gain = r_usd`
+    # revenait à figer rr = 1 sans le dire — l'hypothèse existait, elle était simplement invisible.
+    gain, loss = rr * r_usd, -(r_usd + cost)
     floor = -preset.max_drawdown
     ruined = 0
 
@@ -94,7 +112,7 @@ def _ruin_probability(*, win_rate: float, slippage_ticks: float, preset: ApexEod
 
 def sensitivity_map(*, preset: Optional[ApexEodPreset] = None, trades: int = DEFAULT_TRADES,
                     sims: int = DEFAULT_SIMS, seed: Optional[int] = DEFAULT_SEED,
-                    r_usd: Optional[float] = None,
+                    r_usd: Optional[float] = None, rr: float = BASELINE_RR,
                     tick_usd: float = MES_TICK_USD) -> dict[str, Any]:
     """Carte 4×4 `slippage × taux de réussite`. Toujours calculable — elle n'a besoin d'AUCUNE
     donnée historique, puisqu'elle explore des hypothèses. C'est ce qui la distingue de la
@@ -115,7 +133,7 @@ def sensitivity_map(*, preset: Optional[ApexEodPreset] = None, trades: int = DEF
                 "slippage_ticks": slip,
                 "ruin_probability": round(_ruin_probability(
                     win_rate=wr, slippage_ticks=slip, preset=p, r_usd=r, tick_usd=tick_usd,
-                    trades=trades, sims=sims, rng=rng), 4),
+                    trades=trades, sims=sims, rng=rng, rr=rr), 4),
                 # Chaque cellule le redit : sans cela, un tableau extrait de son contexte se
                 # lirait comme une mesure.
                 "status": "HYPOTHESIS",
@@ -132,7 +150,13 @@ def sensitivity_map(*, preset: Optional[ApexEodPreset] = None, trades: int = DEF
         "model": {
             "description": ("gain fixe +1R au TP LIMITE (sans slippage), perte fixe −1R au STOP "
                             "au marché (slippage retranché) — canon §9"),
-            "r_usd": r, "tick_usd": tick_usd, "trades": trades, "sims": sims, "seed": seed,
+            "r_usd": r, "rr": rr,
+            # D'où vient ce R:R — la question que doit se poser quiconque lit la carte.
+            "rr_source": "baseline" if rr == BASELINE_RR else "override",
+            "rr_note": ("R:R FIXE de référence. Le moteur en produit un VARIABLE (TP raccourci "
+                        "par le VPOC, calibration par instrument). Cette carte compare des "
+                        "hypothèses à R:R constant ; elle ne décrit pas la dispersion réelle."),
+            "tick_usd": tick_usd, "trades": trades, "sims": sims, "seed": seed,
             "ruin": "drawdown maximal atteint OU limite de perte journalière franchie",
             "day_grouping_trades": 5,
         },
@@ -294,3 +318,42 @@ def survivor_bias(r_multiples: list[float], *, preset: Optional[ApexEodPreset] =
         "detail": ("Le DD95 des SURVIVANTES écarte les pires cas par construction. "
                    "L'écart mesure de combien on se mentirait en ne regardant qu'elles."),
     }
+
+
+def observed_rr(entries: Any, *, min_sample: int = 10) -> dict[str, Any]:
+    """R:R RÉELLEMENT observé, lu dans `rr_ratio` du journal des features (D-108).
+
+    C'est ce qui remplacera la baseline le jour où des setups existeront. Aujourd'hui le journal
+    est vide, donc la réponse est `INSUFFICIENT_DATA` — et la carte continue de tourner sur son
+    repère fixe **en le disant**.
+
+    Un R:R moyen sur trois setups décrirait ces trois setups. Et la moyenne seule ne suffira pas :
+    le moteur produit une DISPERSION (TP raccourci par le VPOC), donc min/max sont rendus avec
+    elle — une carte à R:R moyen masquerait les setups les moins favorables, qui sont justement
+    ceux qui tuent un compte.
+    """
+    ratios: list[float] = []
+    for e in (entries or []):
+        if not isinstance(e, dict):
+            continue
+        vecteur = e.get("feature_vector")
+        feats = vecteur.get("features") if isinstance(vecteur, dict) else None
+        value = feats.get("rr_ratio") if isinstance(feats, dict) else None
+        try:
+            f = float(value)
+        except (TypeError, ValueError):
+            continue
+        if f == f and f > 0:
+            ratios.append(f)
+
+    if len(ratios) < min_sample:
+        return {"status": "INSUFFICIENT_DATA", "n": len(ratios), "min_sample": min_sample,
+                "mean": None, "min": None, "max": None,
+                "detail": (f"{len(ratios)} R:R observés, {min_sample} requis — la carte reste sur "
+                           f"sa baseline fixe ({BASELINE_RR})")}
+    ratios.sort()
+    return {"status": "OK", "n": len(ratios), "min_sample": min_sample,
+            "mean": round(sum(ratios) / len(ratios), 3),
+            "min": round(ratios[0], 3), "max": round(ratios[-1], 3),
+            "detail": ("dispersion réelle du moteur — une carte au R:R MOYEN masquerait les "
+                       "setups les moins favorables, qui sont ceux qui tuent un compte")}

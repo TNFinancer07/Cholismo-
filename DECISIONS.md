@@ -3752,6 +3752,53 @@ Log (§2.5), pas un champ mutable. Les deux derniers sont purs et courts.
 21 tests neufs, 4 tests existants mis à jour (F2 les fait changer de verdict) → **1353 passed**,
 ruff clean.
 
+## D-109 · Les tables deviennent une BASELINE assumée — l'hypothèse était là, elle était invisible
+
+Suite de l'arbitrage D-107 (le moteur fait autorité). `resilience.py` modélisait `gain = r_usd`,
+c'est-à-dire un R:R **figé à 1 sans le dire**. L'hypothèse existait déjà ; le défaut n'était pas
+sa présence mais son invisibilité.
+
+### Rendre visible n'a de sens que si ça pèse
+
+`rr` est désormais un paramètre explicite, publié dans `model.rr` avec sa provenance
+(`baseline` / `override`). Et il pèse — vérifié :
+
+```
+rr = 1.00  →  ruine 0.095   (slippage 1 tick, WR 35 %)
+rr = 1.25  →  ruine 0.039
+```
+
+Un facteur deux et demi sur la même cellule. Une carte qui cachait ce levier laissait croire que
+le taux de réussite et le slippage expliquaient tout.
+
+### Ce que la carte dit, et ce qu'elle NE dit pas
+
+Le moteur produit un R:R **variable** — TP raccourci par le VPOC, calibration par instrument,
+stop suivant l'extrême du sweep. La carte tourne à R:R **constant**. Elle répond donc « à R:R égal,
+quel est l'effet du taux de réussite et du slippage ? » et **ne décrit pas la dispersion réelle**.
+
+`model.rr_note` le porte dans la réponse elle-même, pas seulement dans une docstring : un JSON
+extrait de son contexte doit rester honnête.
+
+`BASELINE_RR = 1.0` est retenu comme **repère neutre** — ni flatteur ni pessimiste. Ce n'est pas
+une estimation du moteur ; c'est un axe fixé pour que les deux autres soient lisibles.
+
+### La boucle se ferme sur le journal des features
+
+`observed_rr()` lit `rr_ratio` dans le journal (D-108) et **refuse sous 10 setups** —
+`INSUFFICIENT_DATA`, en disant que la carte reste sur sa baseline. L'endpoint le rend
+**toujours** à côté de la carte : sans lui, un lecteur ignorerait que la grille tourne sur un
+repère fixe alors que le moteur en produit un variable.
+
+Et il rend `min`/`max`, pas seulement la moyenne : une carte au R:R **moyen** masquerait les
+setups les moins favorables — précisément ceux qui tuent un compte.
+
+C'est le premier consommateur du journal des features, un commit après sa création. Il ne rend
+rien aujourd'hui, et c'est le comportement correct.
+
+### Vérif
+5 tests neufs → **1875 passed**, ruff clean, mypy 15 fichiers.
+
 ## D-108 · Journal des features — la valeur RÉELLE du moteur, et « absent » qui reste absent
 
 Optimisation #11, sa moitié constructible. **Ce module n'entraîne ni ne prédit rien** : il

@@ -207,3 +207,47 @@ def test_le_slippage_ne_frappe_QUE_la_perte_canon_9():
 
     m = sensitivity_map(sims=100)["model"]
     assert "LIMITE" in m["description"] and "sans slippage" in m["description"]
+
+
+# ---------------------------------------------------------------- baseline R:R (D-109)
+
+def test_le_RR_est_EXPLICITE_et_change_materiellement_le_resultat():
+    """Il était figé à 1 sans le dire — l'hypothèse existait, elle était invisible. La rendre
+    visible n'a de sens que si elle pèse : ce test le vérifie."""
+    prudent = sensitivity_map(sims=1500, rr=1.0)["cells"][2][0]["ruin_probability"]
+    genereux = sensitivity_map(sims=1500, rr=1.5)["cells"][2][0]["ruin_probability"]
+    assert genereux < prudent, "un meilleur R:R doit réduire la ruine"
+
+
+def test_la_carte_DIT_que_son_RR_est_une_baseline():
+    m = sensitivity_map(sims=100)["model"]
+    assert m["rr_source"] == "baseline"
+    assert "VARIABLE" in m["rr_note"] and "ne décrit pas la dispersion" in m["rr_note"]
+    assert sensitivity_map(sims=100, rr=1.4)["model"]["rr_source"] == "override"
+
+
+def test_le_RR_observe_REFUSE_sous_echantillon_insuffisant():
+    from app.resilience import observed_rr
+    r = observed_rr([])
+    assert r["status"] == "INSUFFICIENT_DATA" and r["mean"] is None
+    assert "baseline" in r["detail"]
+
+
+def test_le_RR_observe_rend_la_DISPERSION_pas_seulement_la_moyenne():
+    """Une carte au R:R moyen masquerait les setups les moins favorables — ceux qui tuent."""
+    from app.resilience import observed_rr
+    entries = [{"feature_vector": {"features": {"rr_ratio": v}}}
+               for v in (0.8, 1.0, 1.2, 1.4, 1.6, 1.8, 2.0, 2.2, 2.4, 2.6)]
+    r = observed_rr(entries)
+    assert r["status"] == "OK" and r["n"] == 10
+    assert r["min"] == 0.8 and r["max"] == 2.6
+    assert r["min"] < r["mean"] < r["max"]
+
+
+def test_un_rr_ratio_ABSENT_ou_ABSURDE_est_ecarte_pas_compte_comme_zero():
+    from app.resilience import observed_rr
+    entries = [{"feature_vector": {"features": {"rr_ratio": None}}},
+               {"feature_vector": {"features": {}}},
+               {"feature_vector": None}, {}, "pas un dict",
+               {"feature_vector": {"features": {"rr_ratio": -1.0}}}]
+    assert observed_rr(entries)["n"] == 0

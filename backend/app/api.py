@@ -107,7 +107,11 @@ async def analyses_resilience() -> dict[str, Any]:
     """
     def _compute() -> dict[str, Any]:
         store = get_store()
+        journal = SetupJournal()
         return {"sensitivity": resilience.sensitivity_map(),
+                # Le R:R observé accompagne TOUJOURS la carte : sans lui, un lecteur ignore que
+                # la grille tourne sur un repère fixe alors que le moteur en produit un variable.
+                "observed_rr": resilience.observed_rr(journal.projection()),
                 "survivor_bias": resilience.survivor_bias(
                     projections._reconciled_r_multiples(store))}
 
