@@ -85,6 +85,7 @@ export const api = {
   analysesTrades: () => request<unknown>('/analyses/trades'),
   analysesRobustness: () => request<unknown>('/analyses/robustness'),
   analysesResilience: <T>() => request<T>('/analyses/resilience'),
+  protection: <T>() => request<T>('/protection'),
   snapshotsList: () => request<unknown>('/snapshots/list'),
   snapshot: (id: string) => request<unknown>(`/snapshots/${encodeURIComponent(id)}`),
   captureSnapshot: () => request<unknown>('/snapshot', { method: 'POST' }),

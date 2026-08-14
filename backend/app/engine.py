@@ -941,9 +941,20 @@ class Engine:
         # (clé d'événement, cooldown de ré-armement) — au plus une fois par fenêtre, jamais à
         # chaque tick. Le budget hot path (§7) est préservé parce que l'accès est rare, pas
         # parce qu'il est rapide.
+        plan_refuse = plan
         plan, refus = screen_plan(plan, store=get_store(), now_ms=now * 1000.0)
         if plan is None:
             log.info("setup LSR refusé par une règle de protection : %s", refus)
+            # DIRE le refus (D-113). Sans cet événement, l'opérateur voit un setup ne pas
+            # apparaître et ne peut pas distinguer « aucun signal » de « signal ÉCARTÉ par un
+            # verrou » — deux situations qui appellent des conduites opposées.
+            # `replay=False` : un refus est un ÉVÉNEMENT daté ; le rejouer pour un abonné neuf
+            # lui présenterait un refus d'avant sa connexion comme s'il venait d'avoir lieu.
+            broadcaster.publish("fast", "protection_reject",
+                                {"reason": refus, "ts": now,
+                                 "instrument": plan_refuse.get("instrument")
+                                 if isinstance(plan_refuse, dict) else None},
+                                replay=False)
             return                                    # F6 verrou / F7 FOMO ou re-soumission
         # COUCHE COMPTE (D-047) : on ne trade JAMAIS à l'aveugle. Pas de source, source
         # déconnectée/périmée, ou RiskSizer en rejet (F8, corruption, plafond) → silence.

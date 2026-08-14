@@ -470,3 +470,54 @@ def test_le_MOTEUR_refuse_reellement_un_setup_sous_verrou_F6(tmp_path, monkeypat
     refus = journal.events("SetupRejectedEvent")
     assert len(refus) == 1, "le moteur n'a pas consulté les règles de protection"
     assert refus[0]["reason"] == F6_COOLDOWN_ACTIVE
+
+
+# ---------------------------------------------------------------- endpoint verrou (D-113)
+
+def test_l_endpoint_DIT_pourquoi_un_setup_est_ecarte(tmp_path, monkeypatch):
+    """Sans lui, l'opérateur ne distingue pas « aucun signal » de « signal ÉCARTÉ par un verrou »
+    — deux situations qui appellent des conduites opposées."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from app import api as api_mod
+
+    journal = EventStore(str(tmp_path / "events.db"))
+    now = time.time()
+    d1 = _decision(journal, decision="GO", ts=now - 600)
+    d2 = _decision(journal, decision="GO", ts=now - 400)
+    _outcome(journal, d1, "LOSS", ts=now - 500)
+    _outcome(journal, d2, "LOSS", ts=now - 300)
+    journal.append("SetupRejectedEvent", {"setup_id": None, "reason": F6_COOLDOWN_ACTIVE},
+                   ts=now - 100)
+    monkeypatch.setattr(api_mod, "get_store", lambda: journal)
+
+    app = FastAPI()
+    app.include_router(api_mod.router)
+    with TestClient(app) as client:
+        corps = client.get("/protection").json()
+
+    assert corps["locked"] is True
+    assert corps["lock_reason"] == F6_COOLDOWN_ACTIVE
+    assert corps["consecutive_losses"] == 2
+    assert corps["seconds_remaining"] > 0
+    assert corps["recent_rejections"][0]["reason"] == F6_COOLDOWN_ACTIVE
+
+
+def test_sans_verrou_l_endpoint_le_dit_AUSSI(tmp_path, monkeypatch):
+    """Un endpoint qui ne répondrait que sous verrou laisserait l'écran incapable de distinguer
+    « pas verrouillé » de « endpoint muet »."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from app import api as api_mod
+
+    monkeypatch.setattr(api_mod, "get_store", lambda: EventStore(str(tmp_path / "vide.db")))
+    app = FastAPI()
+    app.include_router(api_mod.router)
+    with TestClient(app) as client:
+        corps = client.get("/protection").json()
+
+    assert corps["locked"] is False and corps["lock_reason"] is None
+    assert corps["seconds_remaining"] is None
+    assert corps["consecutive_losses"] == 0

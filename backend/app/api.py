@@ -14,7 +14,7 @@ from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from pydantic import BaseModel, Field, model_validator
 from sse_starlette.sse import EventSourceResponse
 
-from . import config, journal, live_mode, projections, recap, resilience, settings
+from . import config, journal, live_mode, lsr_protection, projections, recap, resilience, settings
 from .datasource import scenarios
 from .datasource.mock import SOURCES
 from .datasource.replay import ReplayDataSource
@@ -89,6 +89,37 @@ async def analyses_trades() -> dict[str, Any]:
 
 
 # ---------- Robustesse — Walk-Forward + Monte Carlo sur trades réconciliés (D-043) ----------
+
+@router.get("/protection")
+async def protection_state() -> dict[str, Any]:
+    """État des verrous de protection F6/F7 — la PROJECTION, pas un champ (§2.5, D-094).
+
+    Existe pour que l'écran puisse dire POURQUOI un setup n'apparaît pas. Sans cela, l'opérateur
+    ne distingue pas « aucun signal » de « signal écarté par un verrou » — deux situations qui
+    appellent des conduites opposées : attendre, ou comprendre qu'on est en pause forcée.
+    """
+    def _compute() -> dict[str, Any]:
+        store = get_store()
+        now_ms = time.time() * 1000.0
+        state = lsr_protection.project_runtime_state(store, now_ms=now_ms)
+        locked = lsr_protection.f6_cooldown(state, now_ms)
+        recents = [e for e in store.events(lsr_protection.SETUP_REJECTED_EVENT)][-10:]
+        return {
+            "session_date": state.session_date,
+            "consecutive_losses": state.consecutive_losses,
+            "trades_today": state.trades_today,
+            "lockout_until_ms": state.lockout_until_ms,
+            "locked": locked is not None,
+            "lock_reason": locked,
+            "seconds_remaining": (round((state.lockout_until_ms - now_ms) / 1000.0, 1)
+                                  if state.lockout_until_ms and locked else None),
+            "rejected_setup_ids": list(state.rejected_setup_ids),
+            "recent_rejections": [{"reason": e.get("reason"), "ts": e.get("ts"),
+                                   "setup_id": e.get("setup_id")} for e in reversed(recents)],
+        }
+
+    return await asyncio.to_thread(_compute)
+
 
 @router.get("/analyses/resilience")
 async def analyses_resilience() -> dict[str, Any]:

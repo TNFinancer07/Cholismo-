@@ -7,7 +7,7 @@ import { useTerminal } from './terminal'
 
 /** Identifiants canoniques des panneaux disponibles (couverts par panels/registry). */
 export const PANEL_IDS = ['A1', 'A2', 'A3', 'EC', 'MCAL', 'S2P', 'SENT', 'YLD', 'MOCK', 'REPLAY', 'B1', 'B2', 'B3', 'B4',
-  'S1S', 'OB', 'TP', 'CVD', 'HM', 'FP', 'CDS', 'OFG', 'OFM', 'VP', 'OMON', 'VTS', 'IA', 'C1', 'C2', 'C4', 'C5',
+  'S1S', 'OB', 'TP', 'CVD', 'HM', 'FP', 'CDS', 'OFG', 'OFM', 'VP', 'OMON', 'VTS', 'IA', 'C1', 'C2', 'C4', 'C5', 'C6',
   'MODE'] as const
 export type PanelId = (typeof PANEL_IDS)[number]
 

@@ -34,6 +34,7 @@ import { Phase0DetailPanel } from '@/panels/zoneC/Phase0DetailPanel'
 import { StreakPanel } from '@/panels/zoneC/StreakPanel'
 import { CalibrationPanel } from '@/panels/zoneC/CalibrationPanel'
 import { AccountBufferPanel } from '@/panels/zoneC/AccountBufferPanel'
+import { ProtectionLockPanel } from '@/panels/zoneC/ProtectionLockPanel'
 import { ModePanel } from '@/panels/modes/ModePanel'
 
 export interface PanelDef {
@@ -75,6 +76,7 @@ export const PANEL_REGISTRY: Record<PanelId, PanelDef> = {
   C2: { id: 'C2', label: 'Streak pertes', component: StreakPanel },
   C4: { id: 'C4', label: 'Calibration', component: CalibrationPanel },
   C5: { id: 'C5', label: 'Compte · distance vers la mort', component: AccountBufferPanel },
+  C6: { id: 'C6', label: 'Verrous F6 · F7', component: ProtectionLockPanel },
   MODE: { id: 'MODE', label: 'Vue par mode', component: ModePanel },
 }
 
