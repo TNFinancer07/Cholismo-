@@ -100,3 +100,63 @@ def test_une_carte_SANS_seuil_sous_50pc_le_dit():
     vide = {"cells": [], "axes": {"win_rate": list(WIN_RATES)}}
     res = slippage_cost_in_win_rate_points(vide)
     assert res["status"] == "NOT_MEASURABLE" and res["points"] is None
+
+
+# ---------------------------------------------------------------- biais du survivant (D-103)
+
+from app.resilience import survivor_bias  # noqa: E402
+
+RUINEUX = [-4.0] * 14 + [6.0] * 6          # pertes lourdes → la ruine devient atteignable
+
+
+def test_sous_echantillon_INSUFFISANT_aucun_nombre_n_est_rendu():
+    """Un DD95 sur trois trades décrirait ces trois trades, pas un risque (§3)."""
+    res = survivor_bias([1.0, -1.0], sims=100, min_sample=4)
+    assert res["status"] == "NOT_ENOUGH_DATA"
+    for cle in ("dd95_all", "dd95_survivors", "bias_r"):
+        assert res[cle] is None, cle
+
+
+def test_le_biais_est_MESURE_quand_des_trajectoires_perissent():
+    """Le cœur de la tranche : regarder les seules survivantes sous-estime le drawdown."""
+    res = survivor_bias(RUINEUX, sims=800)
+    assert res["status"] == "OK"
+    assert res["dd95_survivors"] < res["dd95_all"], "les survivantes DOIVENT flatter"
+    assert res["bias_r"] > 0
+    assert 0.0 < res["survival_rate"] < 1.0
+
+
+def test_les_DEUX_chiffres_sont_toujours_publies_jamais_le_seul_flatteur():
+    res = survivor_bias(RUINEUX, sims=400)
+    assert res["dd95_all"] is not None and res["dd95_survivors"] is not None
+
+
+def test_AUCUNE_ruine_observee_n_est_PAS_un_biais_nul():
+    """`bias_r: 0.0` se lirait « pas de biais » alors qu'il faut lire « rien n'a été exclu ».
+    Même leçon que BELOW_GRID_RESOLUTION (D-102)."""
+    res = survivor_bias([0.5, -1, 2, -1, 1.5, -1, -1, 3, 0.8, -1], sims=400)
+    assert res["status"] == "NO_RUIN_OBSERVED"
+    assert res["bias_r"] is None, "un biais non mesurable n'est pas un biais nul"
+    assert res["survival_rate"] == 1.0
+    assert "et non" in res["detail"]
+
+
+def test_le_calcul_est_reproductible_et_la_graine_compte():
+    a = survivor_bias(RUINEUX, sims=300, seed=7)
+    b = survivor_bias(RUINEUX, sims=300, seed=7)
+    c = survivor_bias(RUINEUX, sims=300, seed=8)
+    assert a["dd95_all"] == b["dd95_all"]
+    assert a["dd95_all"] != c["dd95_all"] or a["survival_rate"] != c["survival_rate"]
+
+
+def test_un_drawdown_maximal_se_mesure_depuis_le_PIC_pas_depuis_zero():
+    from app.resilience import _max_drawdown_r
+    # Monte à +5, redescend à +1 → drawdown de 4, même si l'équité reste positive.
+    assert _max_drawdown_r([5.0, -4.0]) == 4.0
+    assert _max_drawdown_r([1.0, 1.0, 1.0]) == 0.0
+    assert _max_drawdown_r([-2.0, -3.0]) == 5.0
+
+
+def test_un_percentile_sur_liste_VIDE_rend_None_et_non_zero():
+    from app.resilience import _percentile
+    assert _percentile([], 0.95) is None, "0 se lirait « aucun drawdown »"

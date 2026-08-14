@@ -167,3 +167,120 @@ def slippage_cost_in_win_rate_points(carte: dict[str, Any]) -> dict[str, Any]:
                            f"({pas} points) — non nul, non résolu")}
     return {"status": "MEASURED", "points": ecart, "grid_step_points": pas,
             "detail": "écart mesuré entre les seuils de ruine à 0 et 1 tick"}
+
+
+# ---------------------------------------------------------------------------------------------
+# Biais du survivant (D-103)
+# ---------------------------------------------------------------------------------------------
+#
+# Calculer le DD95 sur les seules trajectoires **survivantes** écarte les pires cas **par
+# construction** : celles qui ont explosé ne sont plus dans l'échantillon dont on tire le
+# quantile. Le nombre obtenu est plus flatteur, et il ne dit pas qu'il l'est.
+#
+# Le terminal publie donc TOUJOURS le chiffre toutes trajectoires, le chiffre survivantes, et
+# l'ÉCART entre les deux. C'est l'écart qui est l'information : il mesure de combien on se
+# mentirait en ne regardant que les survivants.
+#
+# Contrairement à la carte de sensibilité, ce calcul part de données RÉELLES — les R-multiples
+# réconciliés. Il refuse donc de chiffrer sous échantillon insuffisant (§3), là où la carte,
+# qui n'explore que des hypothèses, est toujours calculable.
+
+def _max_drawdown_r(path: list[float]) -> float:
+    """Drawdown maximal d'une trajectoire, en R. Positif par convention (0 = jamais en perte)."""
+    pic = 0.0
+    equity = 0.0
+    pire = 0.0
+    for r in path:
+        equity += r
+        pic = max(pic, equity)
+        pire = max(pire, pic - equity)
+    return pire
+
+
+def _percentile(values: list[float], q: float) -> Optional[float]:
+    """Percentile par interpolation linéaire. `None` sur liste vide — jamais 0, qui se lirait
+    « aucun drawdown »."""
+    if not values:
+        return None
+    ordered = sorted(values)
+    if len(ordered) == 1:
+        return ordered[0]
+    pos = q * (len(ordered) - 1)
+    bas = int(pos)
+    haut = min(bas + 1, len(ordered) - 1)
+    frac = pos - bas
+    return ordered[bas] + (ordered[haut] - ordered[bas]) * frac
+
+
+def survivor_bias(r_multiples: list[float], *, preset: Optional[ApexEodPreset] = None,
+                  r_usd: Optional[float] = None, sims: int = DEFAULT_SIMS,
+                  seed: Optional[int] = DEFAULT_SEED,
+                  min_sample: Optional[int] = None) -> dict[str, Any]:
+    """DD95 toutes trajectoires vs survivantes, et l'écart entre les deux.
+
+    Rééchantillonnage bootstrap des R-multiples RÉCONCILIÉS. « Survivante » = trajectoire dont le
+    drawdown maximal n'a jamais atteint la limite du compte, convertie en R.
+
+    Sous `min_sample` observations → `NOT_ENOUGH_DATA` et **aucun nombre** : un DD95 sur trois
+    trades décrirait ces trois trades, pas un risque.
+    """
+    p = preset or APEX_EOD_50K
+    r = r_usd if r_usd is not None else config.R_UNIT_USD
+    seuil_n = min_sample if min_sample is not None else config.MC_MIN_TRADES
+    echantillon = [float(x) for x in r_multiples if isinstance(x, (int, float))]
+
+    ruine_r = p.max_drawdown / r if r else None
+    base = {"kind": "survivor_bias", "n_reconciled": len(echantillon),
+            "min_sample": seuil_n, "ruin_threshold_r": ruine_r}
+
+    if len(echantillon) < seuil_n or not ruine_r:
+        return {**base, "status": "NOT_ENOUGH_DATA", "dd95_all": None,
+                "dd95_survivors": None, "bias_r": None, "survival_rate": None,
+                "detail": (f"{len(echantillon)} R-multiples réconciliés, {seuil_n} requis — "
+                           "un DD95 sous ce seuil décrirait l'échantillon, pas un risque")}
+
+    rng = random.Random(seed)
+    n = len(echantillon)
+    tous: list[float] = []
+    survivants: list[float] = []
+    for _ in range(sims):
+        path = [echantillon[rng.randrange(n)] for _ in range(n)]
+        dd = _max_drawdown_r(path)
+        tous.append(dd)
+        if dd < ruine_r:
+            survivants.append(dd)
+
+    dd_all = _percentile(tous, 0.95)
+    dd_surv = _percentile(survivants, 0.95)
+    taux = len(survivants) / sims if sims else None
+    # AUCUNE trajectoire n'a péri → l'ensemble des survivantes EST l'ensemble complet, et l'écart
+    # vaut structurellement zéro. Le publier comme « biais mesuré à 0 » ferait lire « pas de biais »
+    # là où il faut lire « rien n'a été exclu, donc rien à biaiser ». Même leçon que
+    # BELOW_GRID_RESOLUTION (D-102) : une absence de mesure n'est pas une mesure nulle.
+    if taux is not None and taux >= 1.0:
+        return {
+            **base, "status": "NO_RUIN_OBSERVED",
+            "dd95_all": round(dd_all, 3) if dd_all is not None else None,
+            "dd95_survivors": round(dd_surv, 3) if dd_surv is not None else None,
+            "bias_r": None, "survival_rate": taux,
+            "model": {"resample": "bootstrap", "sims": sims, "seed": seed, "path_length": n,
+                      "survivor": "drawdown maximal resté sous la limite du compte"},
+            "detail": ("aucune trajectoire n'atteint la limite du compte sur cet horizon : "
+                       "l'ensemble survivant est l'ensemble complet, il n'y a pas de biais à "
+                       "mesurer (et non : un biais nul)"),
+        }
+    return {
+        **base,
+        "status": "OK",
+        "dd95_all": round(dd_all, 3) if dd_all is not None else None,
+        "dd95_survivors": round(dd_surv, 3) if dd_surv is not None else None,
+        # L'information n'est pas le DD95, c'est l'ÉCART : de combien on se mentirait en ne
+        # regardant que les survivants.
+        "bias_r": (round(dd_all - dd_surv, 3)
+                   if dd_all is not None and dd_surv is not None else None),
+        "survival_rate": round(taux, 4) if taux is not None else None,
+        "model": {"resample": "bootstrap", "sims": sims, "seed": seed, "path_length": n,
+                  "survivor": "drawdown maximal resté sous la limite du compte"},
+        "detail": ("Le DD95 des SURVIVANTES écarte les pires cas par construction. "
+                   "L'écart mesure de combien on se mentirait en ne regardant qu'elles."),
+    }

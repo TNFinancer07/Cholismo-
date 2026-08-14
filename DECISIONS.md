@@ -3752,6 +3752,53 @@ Log (§2.5), pas un champ mutable. Les deux derniers sont purs et courts.
 21 tests neufs, 4 tests existants mis à jour (F2 les fait changer de verdict) → **1353 passed**,
 ruff clean.
 
+## D-103 · Biais du survivant — et « aucune ruine » n'est pas « aucun biais »
+
+Tranche 3, la seule des trois qui puisse changer une conclusion. Calculer le DD95 sur les seules
+trajectoires **survivantes** écarte les pires cas **par construction** : celles qui ont explosé ne
+sont plus dans l'échantillon dont on tire le quantile. Le nombre obtenu est plus flatteur, et il
+ne dit pas qu'il l'est.
+
+Le terminal publie donc **toujours les deux** — toutes trajectoires et survivantes — plus l'écart.
+C'est l'écart qui est l'information : de combien on se mentirait en ne regardant que les survivants.
+
+### Fail-closed, contrairement à la carte de sensibilité
+
+La carte (D-102) n'explore que des hypothèses : elle est toujours calculable. Celui-ci part de
+données **réelles** — les R-multiples réconciliés — donc il refuse. Sous `MC_MIN_TRADES`,
+`NOT_ENOUGH_DATA` et **aucun nombre** : un DD95 sur trois trades décrirait ces trois trades, pas
+un risque.
+
+### Le piège, encore une fois sur un zéro
+
+Sur un échantillon plausible, le premier résultat donnait `bias_r: 0.0` — qui se lit « pas de
+biais du survivant ». Faux : **aucune trajectoire n'avait péri**, donc l'ensemble survivant ÉTAIT
+l'ensemble complet. Il n'y avait rien à exclure, donc rien à biaiser.
+
+D'où `status: NO_RUIN_OBSERVED` avec `bias_r: None`. C'est la même leçon qu'à la tranche
+précédente (`BELOW_GRID_RESOLUTION`) : **une absence de mesure n'est pas une mesure nulle**. Deux
+fois de suite le défaut s'est logé dans un zéro d'apparence anodine.
+
+### Le biais, une fois qu'il est mesurable
+
+Sur un échantillon où la ruine devient atteignable (pertes lourdes, horizon long) :
+
+```
+DD95 toutes trajectoires : 58.0 R
+DD95 survivantes         : 24.0 R
+biais                    : 34.0 R      (taux de survie 29.5 %)
+```
+
+Regarder les seules survivantes sous-estimerait le drawdown de **plus de la moitié**. C'est
+exactement le contrôle méthodologique que la maquette annonce en note — sauf qu'ici il est
+calculé.
+
+### Vérif
+7 tests neufs → **1843 passed**, ruff clean, mypy 15 fichiers. Dont deux gardes sur les
+primitives : un drawdown se mesure depuis le PIC et non depuis zéro (une trajectoire qui monte à
++5 puis redescend à +1 a bien un drawdown de 4), et un percentile sur liste vide rend `None` —
+`0` se lirait « aucun drawdown ».
+
 ## D-102 · Carte de sensibilité à la ruine — et la « falaise » de la maquette ne se reproduit pas
 
 Tranche 2. Arbitrage validé : **carte de sensibilité**, pas prédiction. Le taux de réussite réel
