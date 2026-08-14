@@ -90,3 +90,24 @@ describe('biais du survivant', () => {
     expect(screen.getByTestId('biais-non-mesurable').textContent).toContain('et non')
   })
 })
+
+// ------------------------------------------------------------------ routage (D-105)
+
+describe('routage', () => {
+  /* Rendre l'App entière tirerait tout le terminal (SSE, 48 panneaux) et casserait sur le mock
+     partiel d'`api` — un test lourd qui prouverait surtout que le reste marche. On vérifie donc
+     le CÂBLAGE à la source, comme le garde §2.1 de Tradovate : la vue est-elle atteignable ?
+     Une vue non routée est du code mort, la faute relevée en D-096. */
+  it('la vue est routée dans App.tsx', async () => {
+    const src = (await import('@/App.tsx?raw')).default
+    expect(src).toContain('ResilienceView')
+    expect(src).toMatch(/view === 'RESIL'/)
+  })
+
+  it("l'identifiant de vue existe et la barre de commandes y mène", async () => {
+    const store = (await import('@/store/terminal.ts?raw')).default
+    const bar = (await import('@/components/CommandBar.tsx?raw')).default
+    expect(store).toContain("'RESIL'")
+    expect(bar).toMatch(/view\('RESIL', 'RESIL'/)
+  })
+})

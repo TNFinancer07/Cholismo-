@@ -92,6 +92,7 @@ function useStaticCommands(): Command[] {
       view('BORD', 'JBORD', ['JOURNALBORD', 'SNAPSHOTS', 'SNAP', 'JB']),
       view('PNL', 'PNL', ['PL', 'ANALYSE', 'ANALYSES', 'TRADES']),
       view('ROBUST', 'ROBUST', ['ROBUSTESSE', 'WFE', 'WALKFORWARD', 'MONTECARLO', 'MC']),
+      view('RESIL', 'RESIL', ['RESILIENCE', 'RUINE', 'SENSIBILITE', 'SURVIVANT', 'DD95']),
       scenario('CALME', 'calme'), scenario('NEWS', 'news_eur_tier1', ['EUR']),
       scenario('STREAK', 'streak_loss'), scenario('VIX', 'vix_spike', ['SPIKE']),
       scenario('CUSTOM', 'custom'),
@@ -109,7 +110,7 @@ function useStaticCommands(): Command[] {
       },
       {
         mnemonic: 'HELP', aliases: ['?'], label: 'liste des mnémoniques',
-        run: () => 'A·B·C·D / A1…C4 focus · SENT positionnement L/S · YLD taux · LIVE/PRE/POST mode · TERM/RECAP/MODELIVE/JOURNAL/BORD/PNL/ROBUST/ORCH/PROMPTS/PARAMS vue · CALME/NEWS/STREAK/VIX/CUSTOM scénario · GO/NOGO · SC · DEFAUT/MICRO/MACRO/DISCIPLINE ou WS1…9 espaces · WS suivant · WSRESET',
+        run: () => 'A·B·C·D / A1…C4 focus · SENT positionnement L/S · YLD taux · LIVE/PRE/POST mode · TERM/RECAP/MODELIVE/JOURNAL/BORD/PNL/ROBUST/RESIL/ORCH/PROMPTS/PARAMS vue · CALME/NEWS/STREAK/VIX/CUSTOM scénario · GO/NOGO · SC · DEFAUT/MICRO/MACRO/DISCIPLINE ou WS1…9 espaces · WS suivant · WSRESET',
       },
     ]
   }, [])

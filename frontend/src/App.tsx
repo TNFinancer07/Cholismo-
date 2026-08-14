@@ -24,6 +24,7 @@ import { ParamsView } from '@/panels/views/ParamsView'
 import { PromptsView } from '@/panels/views/PromptsView'
 import { RecapView } from '@/panels/views/RecapView'
 import { RobustnessView } from '@/panels/views/RobustnessView'
+import { ResilienceView } from '@/panels/views/ResilienceView'
 
 const COLUMN_ZONES: ZoneKey[] = ['A', 'B', 'C']
 
@@ -107,6 +108,9 @@ export default function App() {
       {view === 'JBORD' && <main className="flex min-h-0 flex-1 flex-col"><JournalDeBordView /></main>}
       {view === 'PNL' && <main className="flex min-h-0 flex-1 flex-col"><AnalysePnlView /></main>}
       {view === 'ROBUST' && <main className="flex min-h-0 flex-1 flex-col"><RobustnessView /></main>}
+      {/* Voisine de ROBUST sous « Journal & analytics » : les deux analysent le même
+          matériau (R-multiples réconciliés), l'une en robustesse, l'autre en ruine. */}
+      {view === 'RESIL' && <main className="flex min-h-0 flex-1 flex-col overflow-auto"><ResilienceView /></main>}
       {view === 'TERMINAL' && <WorkspaceGrid />}
 
       <FunctionKeyBar />

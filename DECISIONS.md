@@ -3752,6 +3752,32 @@ Log (§2.5), pas un champ mutable. Les deux derniers sont purs et courts.
 21 tests neufs, 4 tests existants mis à jour (F2 les fait changer de verdict) → **1353 passed**,
 ruff clean.
 
+## D-105 · `ResilienceView` routée — et un test de routage qui ne rend pas l'App
+
+La vue existait, testée, et **aucun onglet n'y menait**. C'est le même défaut qu'en D-096 (le
+garde branché sur un chemin sans appelant) et qu'en D-099 (un composant hors registre) : du code
+mort qui a l'air livré.
+
+Routée sous « Journal & analytics », voisine de `RobustnessView` — les deux analysent le même
+matériau (R-multiples réconciliés), l'une en robustesse, l'autre en ruine. Trois points de
+câblage : l'union `ViewKey`, la branche de rendu dans `App.tsx`, et l'entrée de la barre de
+commandes (`RESIL`, alias `RESILIENCE`/`RUINE`/`SENSIBILITE`/`SURVIVANT`/`DD95`).
+
+### Le test de routage a coûté trois essais, et le troisième est le bon
+
+1. **Rendre l'`App` entière** — tire les 48 panneaux et le SSE, casse sur le mock partiel
+   d'`api`. Un test lourd qui aurait surtout prouvé que le reste fonctionne.
+2. **Lire les fichiers avec `node:fs`** — vert sous vitest, mais `tsc` refuse : pas de
+   `@types/node` au projet. Un test qui passe et casse le typecheck n'est pas un test.
+3. **`import '@/App.tsx?raw'`** — l'import brut de Vite, typé nativement par `vite/client`. Vert
+   des deux côtés.
+
+La leçon n'est pas « `?raw` est pratique » : c'est qu'un test doit passer **la même porte** que le
+code qu'il garde. Les deux premières tentatives contournaient la chaîne de build du projet.
+
+### Vérif
+2 tests neufs → **158 frontend**, `tsc` propre, backend inchangé (1844).
+
 ## D-104 · `/analyses/resilience` et son écran — trois choix pour qu'on n'y lise pas une prédiction
 
 L'endpoint rend les deux calculs **ensemble**, parce qu'ils se lisent ensemble — mais leur nature
