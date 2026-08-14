@@ -80,6 +80,7 @@ def build_o5_tick(read_tape: Callable[[], Any], aggregator: EsBarAggregator, bro
 
 def build_gates_tick(read_snapshot: Callable[[], Any], read_bars: Callable[[], Any],
                      read_book: Callable[[], Any], broadcaster: Any, *,
+                     read_schema: Optional[Callable[[], Any]] = None,
                      append: Optional[Callable[[dict], Any]] = None,
                      clock: Optional[Callable[[], float]] = None,
                      tick_size: float = 0.25) -> Callable[[Any], Any]:
@@ -96,7 +97,8 @@ def build_gates_tick(read_snapshot: Callable[[], Any], read_bars: Callable[[], A
     async def tick(manifest: Any) -> None:
         entry = evaluate_at_arming(manifest, options_snapshot=read_snapshot(),
                                    es_bars=read_bars(), book=read_book(),
-                                   now_ms=now() * 1000.0, tick_size=tick_size)
+                                   now_ms=now() * 1000.0, tick_size=tick_size,
+                                   schema=read_schema() if read_schema is not None else None)
         if entry is None:
             return                                    # manifeste illisible : rien de mesuré
         if append is not None:
@@ -110,6 +112,7 @@ def build_gates_tick(read_snapshot: Callable[[], Any], read_bars: Callable[[], A
 
 
 def build_supervisor(reader: Any, broadcaster: Any, *,
+                     read_schema: Optional[Callable[[], Any]] = None,
                      read_tape: Optional[Callable[[], Any]] = None,
                      read_book: Optional[Callable[[], Any]] = None,
                      journal_append: Optional[Callable[[dict], Any]] = None,
@@ -154,7 +157,7 @@ def build_supervisor(reader: Any, broadcaster: Any, *,
     gates_tick = build_gates_tick(
         lambda: reader.snapshot(now()), lambda: list(o5_agg.bars),
         read_book if read_book is not None else (lambda: None),
-        broadcaster, append=journal_append, clock=now)
+        broadcaster, append=journal_append, clock=now, read_schema=read_schema)
 
     sup.register(CORE_TICK)                       # déjà assurée par engine.py — migration = refactor
     sup.register(OPTIONS_SYNC, options_tick)

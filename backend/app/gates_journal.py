@@ -36,6 +36,7 @@ import logging
 from typing import Any, Optional
 
 from .execution_sim import Book, ExecutionSimulator
+from .features import build_feature_vector
 from .options_gates import evaluate_options_gates, to_csv_columns
 
 log = logging.getLogger("cholismo.gates_journal")
@@ -71,7 +72,8 @@ def _entry_execution(book: Optional[Book], side: str, entry_price: Any, qty: Any
 
 def evaluate_at_arming(manifest: Any, *, options_snapshot: Any, es_bars: Any,
                        book: Optional[Book], now_ms: float,
-                       tick_size: float = 0.25) -> Optional[dict[str, Any]]:
+                       tick_size: float = 0.25,
+                       schema: Any = None) -> Optional[dict[str, Any]]:
     """Évalue O1-O5 sur un manifeste armé et rend l'entrée de journal. Rend `None` si le
     manifeste est inexploitable — jamais une entrée à moitié remplie qui se lirait comme un
     setup mesuré. Ne lève jamais (mode G2)."""
@@ -104,6 +106,11 @@ def evaluate_at_arming(manifest: Any, *, options_snapshot: Any, es_bars: Any,
             "entry_reject_reason": entry["reject_reason"],
             # Le PnL n'existe pas encore — voir docstring. `PENDING`, jamais un 0 qui se lirait
             # comme un resultat nul (§3).
+            # Vecteur de features (D-108) : l'état qui a produit CE setup, figé à l'armement.
+            # Attaché ici parce que c'est le seul instant où il est complet ET rattaché à un
+            # setup identifié — plus tard, le contexte a déjà bougé.
+            "feature_vector": build_feature_vector(
+                setup=setup, schema=schema, now_ms=now_ms, tick_size=tick_size),
             "pnl_source": "PENDING",
             "realized_pnl": None,
             "realized_slip_ticks": None,

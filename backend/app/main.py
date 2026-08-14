@@ -150,6 +150,10 @@ async def lifespan(app: FastAPI):
     app.state.loops = build_supervisor(app.state.options_context, broadcaster,
                                        read_tape=lambda: _tape_field(app.state.engine),
                                        read_book=lambda: _order_book_field(app.state.engine),
+                                       # Le vecteur de features (D-108) a besoin du schéma
+                                       # COMPLET : VIX, CVD, news, session. La boucle L4 ne lisait
+                                       # que le contexte options.
+                                       read_schema=lambda: _schema_of(app.state.engine),
                                        journal_append=SetupJournal().record_armed)
     # L4 : la boucle événementielle qui journalise O1-O5 à chaque armement. Elle hérite des
     # garde-fous du contrat (drop-if-busy, plafond de durée, filet d'exception) — un gate
@@ -185,6 +189,16 @@ def _on_arm(app: FastAPI, manifest) -> None:
         return
     import asyncio
     asyncio.get_running_loop().create_task(loop.run_once(manifest))
+
+
+def _schema_of(engine: Engine):
+    """Schéma courant pour le vecteur de features. `None` si illisible — un vecteur avec ses
+    absences déclarées vaut mieux qu'une exception dans la boucle d'armement."""
+    try:
+        return engine.snapshot().get("schema")
+    except Exception:
+        log.exception("schéma illisible pour le vecteur de features")
+        return None
 
 
 def _order_book_field(engine: Engine):

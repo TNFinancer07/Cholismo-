@@ -3752,6 +3752,46 @@ Log (§2.5), pas un champ mutable. Les deux derniers sont purs et courts.
 21 tests neufs, 4 tests existants mis à jour (F2 les fait changer de verdict) → **1353 passed**,
 ruff clean.
 
+## D-108 · Journal des features — la valeur RÉELLE du moteur, et « absent » qui reste absent
+
+Optimisation #11, sa moitié constructible. **Ce module n'entraîne ni ne prédit rien** : il
+enregistre, à l'armement, l'état qui a produit le setup. La raison de le faire maintenant est
+qu'une séance passée sans lui est une séance de données **définitivement perdues**.
+
+### La géométrie enregistrée est celle du moteur, pas une théorie
+
+Arbitrage D-107 tranché en faveur du moteur : le TP reste dynamique, ancré au VPOC et calibré par
+instrument. Le vecteur enregistre donc `tp_target_ticks` **tel qu'il sort** — 5 ticks, ou 3 quand
+le VPOC raccourcit la cible, ou 8 sur MNQ. Y écrire une valeur canonique décrirait un moteur
+imaginaire et n'entraînerait rien d'utile.
+
+`distance_to_vpoc_ticks` accompagne le TP pour une raison précise : c'est la variable qui explique
+**pourquoi** la cible a été raccourcie. Sans elle, un modèle verrait un TP variable sans cause et
+apprendrait du bruit.
+
+### Trois façons de corrompre le jeu, fermées
+
+1. **Absent ≠ zéro.** Chaque champ manquant vaut `None` **et** entre dans `missing` — car un
+   `None` sérialisé puis relu redevient indiscernable d'un champ que le producteur n'a pas
+   renseigné. Le pendant est testé aussi : **un vrai zéro n'est pas déclaré manquant**, sinon on
+   commettrait la même faute dans l'autre sens.
+2. **Périmé = absent.** Une valeur `STALE` est *pire* qu'absente : elle a l'air d'une mesure et
+   décrit un autre instant. `_meta_value` ne rend que du `FRESH`.
+3. **Booléen ≠ nombre.** `absorption: True` passé par `float()` deviendrait `1.0` et se
+   confondrait avec une mesure continue. Il reste booléen, ou `None`.
+
+Les `NaN` sont écartés à l'entrée : journalisés, ils se propageraient silencieusement dans un
+entraînement.
+
+### Où, et pourquoi là
+
+Dans `setup_armed`, à l'armement — seul instant où l'état est complet **et** rattaché à un setup
+identifié ; plus tard, le contexte a déjà bougé. La boucle L4 ne lisait que le contexte options :
+elle reçoit désormais un lecteur de schéma (`read_schema`), passé depuis `main.py`.
+
+### Vérif
+13 tests neufs → **1870 passed**, ruff clean, mypy 15 fichiers.
+
 ## D-107 · Canon d'exécution — une correction faite, trois divergences SIGNALÉES et non corrigées
 
 Rappel du canon : entrée **LIMITE + bracket OCO** (le marché est l'exception §04), **TP fixe à
