@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { api } from '@/lib/api'
 import { fmtClock } from '@/lib/format'
+import { AudioStatusIndicator } from '@/lib/audioAlerts'
 import { cn } from '@/lib/utils'
 import { effectivePhase0, MODES, serverNow, useTerminal } from '@/store/terminal'
 
@@ -154,6 +155,8 @@ export function Zone0StatusBar() {
       </span>
 
       <div className="ml-auto flex items-center gap-3">
+        {/* Permanent : un silence ambigu annulerait toute la garde de fraîcheur (D-114/115). */}
+        <AudioStatusIndicator />
         {lastError && <span className="max-w-72 truncate text-xxs text-risk-red" title={lastError}>⚠ {lastError}</span>}
         <span className={cn('inline-flex items-center gap-1 text-xxs', fastLive ? 'text-risk-green' : 'text-risk-red')}
           title="Canal SSE rapide">
