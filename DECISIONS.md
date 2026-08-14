@@ -3752,6 +3752,265 @@ Log (§2.5), pas un champ mutable. Les deux derniers sont purs et courts.
 21 tests neufs, 4 tests existants mis à jour (F2 les fait changer de verdict) → **1353 passed**,
 ruff clean.
 
+## D-120 · La suite frontend ne dépend plus du shell qui l'appelle
+
+Constaté en reprenant le dépôt dans un conteneur neuf : **151 tests sur 215 rouges**, sans qu'une
+ligne du dépôt ait changé. Cause réelle : l'image exporte `NODE_ENV=production`. Vitest ne pose
+`NODE_ENV=test` que s'il est **absent** — il a donc gardé `production`, React s'est résolu sur son
+build de production, où `act()` n'existe pas.
+
+Un rouge doit désigner le code. Celui-ci désignait le shell — même famille que le verrou de
+dépendances (D-092) : ce qui rend un run reproductible appartient au dépôt, pas à l'environnement.
+
+`vitest.config.ts` pose `process.env.NODE_ENV = 'test'` avant toute résolution de module. Vérifié
+dans les deux sens : `NODE_ENV=production npx vitest run` → **215 verts**.
+
+La CI n'était pas rouge (les runners GitHub n'exportent pas `NODE_ENV`), ce qui rend ce défaut
+exactement du type qui attend un poste précis pour se manifester.
+
+### Ce qui a été écrit APRÈS coup, et le dit
+Les entrées **D-110 → D-119 manquaient dans ce fichier** : dix décisions prises en commit, avec
+leur raison dans le message, mais absentes du registre que `HANDOFF.md` désigne comme la réponse à
+« pourquoi c'est comme ça ». Elles sont rédigées ici a posteriori, à partir des commits — leur
+contenu est d'époque, leur écriture ne l'est pas.
+
+## D-119 · Pont Stream Deck — il montre et confirme, il ne décide pas
+
+Optimisation #12. Daemon local autonome (`workers/streamdeck_bridge.py`) + projection pure
+(`app/streamdeck.py`). Le terminal ne connaît pas le pont et ne ralentit jamais à cause de lui.
+
+### Le bouton que je n'ai pas fait
+La demande incluait « armer / désarmer le terminal ». Vérifié dans le code : un `GO` exige Phase 0
+`OPEN` **et** un self-check cognitif à quatre réponses (`sleep_ok`, `focus_ok`, `no_tilt`,
+`plan_written`). Une touche physique ne peut attester aucune des quatre ; lui faire poster un
+self-check pré-rempli **automatiserait le mensonge que la gate existe pour empêcher**. Et
+l'armement est *produit* par le moteur déterministe — le déclencher à la main contournerait les
+contrôles amont. §6 : la discipline est dans l'infra, pas dans la volonté.
+
+`REFUSED` nomme les quatre actions refusées (`decision_go`, `decision_no_go`, `place_order`,
+`arm_setup`) plutôt que de les omettre : un refus tacite se lit comme un oubli.
+
+### Trois gardes structurelles
+Liste blanche (`ACTIONS` : son, détachement, espace de travail, premier plan — **toutes
+réversibles**) ; **127.0.0.1 seulement**, un test refuse la forme littérale d'un bind `0.0.0.0` ;
+lecture seule sur l'API, un test refuse `client.post/.put/.delete` dans la source.
+
+`UNKNOWN` n'est pas `OK` : une touche se lit d'un coup d'œil, sans infobulle pour nuancer. Un état
+vide allume sept tuiles `UNKNOWN`, et le statut est un **nom**, pas une couleur.
+
+**NON vérifié** : aucun matériel branché, le protocole du plugin Elgato n'est pas confronté au réel.
+
+### Vérif
+19 tests neufs → **1925 passed**, ruff clean, mypy 15 fichiers.
+
+## D-118 · Export Notion — worker autonome, opt-in strict, fail-safe
+
+Optimisation #15. Même forme que le worker options : le moteur ne le connaît pas, ne l'attend pas.
+Le mappage (`app/notion_export.py`) est **pur et sans réseau** — c'est la seule chose qui puisse
+être fausse hors ligne, donc la seule qu'on puisse tester.
+
+**Opt-in strict, parce que c'est de la donnée qui SORT.** Sans `NOTION_API_KEY` **et**
+`NOTION_DATABASE_ID`, le worker le dit et s'arrête. Une clé sans base est une configuration à
+moitié faite : il se tait plutôt que d'échouer en boucle.
+
+**La règle de D-108 tenue jusque dans la base.** Une propriété `number` à 0 serait indiscernable
+d'une mesure nulle et corromprait le jeu que le journal protège en amont. Un champ absent est
+**omis**, et une colonne « Non mesuré » dit lequel. Le pendant est testé : un **vrai** zéro part
+bien. Une gate non mesurable est omise et non marquée « refusée » — l'écrire ainsi apprendrait au
+futur modèle qu'une absence de mesure prédit un refus.
+
+**Fail-safe** : coupure réseau, clé invalide, base mal configurée, journal verrouillé → journalisé
+en local, aucune exception qui remonte, aucune donnée perdue. Le journal reste la source de vérité,
+la ligne repartira. Anti-doublon **persistant** : sans lui, chaque redémarrage recréerait tout ; un
+état illisible rend un ensemble vide, car un doublon visible vaut mieux qu'un trou silencieux.
+
+**NON vérifié** : le format d'API n'a été confronté à aucun service réel.
+
+### Vérif
+17 tests neufs → **1906 passed**, ruff clean, mypy 15 fichiers.
+
+## D-117 · Boutons de détachement — `detachId` est une prop, pas une recopie
+
+Finition de #14. Un seul endroit pose le bouton (`Panel`), plutôt qu'un bouton recopié dans chaque
+panneau. Posé sur les gates order flow (OFG/OFM), les verrous C6, le footprint, le CVD stratifié et
+le biais du survivant. **Absent = pas de bouton**, volontairement : un panneau qu'on ne saurait pas
+rendre seul ne doit pas proposer de l'ouvrir seul.
+
+Deux refus font la valeur du bouton : une **popup bloquée est DITE** (`window.open` rend `null` ;
+rester muet enverrait l'opérateur chercher des yeux, sur un poste multi-écran, une fenêtre qui
+n'existe pas) ; et il **ne s'affiche pas dans une fenêtre déjà détachée** — détacher un détaché
+ferait douter de ce qu'on regarde.
+
+**NON vérifié** : aucune vraie seconde fenêtre n'a été ouverte, `window.open` est simulé en test.
+Même statut que `/v17/`.
+
+### Vérif
+4 tests neufs → **215 frontend**, tsc propre.
+
+## D-116 · Fenêtres détachées — le danger n'est pas technique, il est perceptif
+
+Optimisation #14. Une fenêtre désynchronisée affiche des chiffres **lisibles qui ne bougent plus**,
+et sur un second moniteur rien ne la distingue d'un marché calme. C'est D-073 — « une boucle morte
+ressemble à une boucle calme » — transposé à l'écran.
+
+Toute fenêtre détachée porte l'âge de sa dernière synchronisation, **en tête** et non en pied.
+Quatre états, jamais deux : `LIVE`, `STALE`, `LOST` (« ces chiffres ne décrivent PLUS le marché »),
+`UNKNOWN` — une fenêtre qui vient de s'ouvrir n'a rien reçu, l'annoncer « synchronisée » serait un
+mensonge.
+
+**Un seul flux SSE par conception** : la fenêtre principale reste seule abonnée et rediffuse par
+`BroadcastChannel`. Deux abonnements laisseraient deux vérités côte à côte sur le même bureau. Un
+test **relit la source** de la fenêtre détachée et échoue si `connectSSE` / `EventSource` / `fetch`
+y apparaissent. L'instantané est appliqué tel quel : elle ne recalcule rien.
+
+Le message est daté **à l'émission** — dater à la réception ferait qu'une fenêtre se croie à jour
+sur un message vieux.
+
+### Un vrai bug trouvé par le test
+L'horloge locale n'étant rafraîchie qu'à la seconde, un message légitime pouvait porter un `sentAt`
+postérieur au dernier `now`, et la garde « horodatage futur » (destinée aux horloges désaccordées)
+le rejetait : la fenêtre restait « en attente » **alors qu'elle recevait**. L'horloge se rafraîchit
+désormais avec la réception.
+
+### Vérif
+17 tests neufs → **211 frontend**, tsc propre.
+
+## D-115 · Le son branché — et le silence qui cesse d'être ambigu
+
+Finition de #7. Trois pièces, et l'**indicateur** est celle qui rend les deux autres utiles.
+
+« Pas de son » a trois causes : rien ne s'est produit, le son est coupé, l'audio est indisponible.
+Sans indicateur, un opérateur qui s'appuie sur l'oreille croirait un marché calme alors qu'il a
+coupé le volume. Toute la garde de fraîcheur de D-114 ne servirait à rien si le silence restait
+ambigu : on peut garantir qu'un son ne ment jamais, **pas qu'une absence de son veuille dire
+quelque chose**. État affiché en permanence, icône **et** texte.
+
+**Muet par défaut**, choix persisté ; un stockage refusé (navigation privée) retombe sur muet,
+jamais sur actif. Le contexte audio est amorcé **au clic** et jamais au chargement : un
+`AudioContext` créé sans geste utilisateur reste suspendu — il ne jouerait rien tout en affichant
+« son actif ».
+
+Deux refus dans la projection : un vide non mesurable reste `null` et non `false` (le convertir
+produirait un faux franchissement au tick suivant) ; les **deux** gates décisionnelles doivent être
+connues, un « franchi » déduit d'une seule mesure décrirait la moitié de la porte.
+
+Couper **oublie** l'état précédent : sinon, en réactivant, la première comparaison porterait sur un
+instant révolu et sonnerait un franchissement déjà survenu.
+
+### Vérif
+12 tests neufs → **194 frontend**, tsc propre.
+
+## D-114 · Alertes sonores — un son est une AFFIRMATION
+
+Optimisation #7. La décision est séparée du son : `decideCues()` est pure et testable, `SoundPlayer`
+touche l'`AudioContext`. Les mêler aurait rendu la règle invérifiable, et c'est la règle qui compte.
+
+**La garde de fraîcheur prime ici plus qu'ailleurs.** Un son affirme « ceci vient de se produire ».
+Le déclencher sur une valeur `STALE` affirmerait un événement à partir d'une mesure d'un autre
+instant — et l'opérateur, qui écoute précisément pour ne pas regarder l'écran, n'a aucun moyen de
+s'en apercevoir. Un graphique périmé se remarque ; un son périmé, jamais.
+
+**Un franchissement demande DEUX états connus.** Sans état précédent frais, il n'y a pas de
+franchissement observable, seulement une valeur. Traiter « inconnu → au-dessus » comme un
+franchissement ferait sonner le terminal à chaque reconnexion, au pire moment. C'est le
+`None ≠ False` de D-106 appliqué au temps.
+
+**Le silence n'a pas une seule cause.** Première version : `play()` rendait un booléen, et un test
+a montré qu'il rendait `false` en jsdom — « étouffé » et « pas d'audio » étaient indiscernables. Or
+celui qui écoute au lieu de regarder doit savoir si son canal d'alerte est **muet**. Trois issues
+désormais : `PLAYED`, `THROTTLED`, `UNAVAILABLE`.
+
+Mappage psycho-acoustique et non code arbitraire : grave = lourd (refus 160 Hz, vide 220 Hz),
+aigu = rapide (gate franchie 660 Hz). Un test verrouille **l'ordre** des fréquences, pas leurs
+valeurs. Volume 0.06 — un terminal n'est pas une alarme.
+
+### Vérif
+12 tests neufs → **182 frontend**, tsc propre.
+
+## D-113 · Le verrou F6/F7 se voit à l'écran
+
+Optimisation #10. Les règles sont actives depuis D-096, mais l'écran était muet : l'opérateur voyait
+un setup ne pas apparaître **sans distinguer « aucun signal » de « signal ÉCARTÉ par un verrou »** —
+deux situations qui appellent des conduites opposées. Classe de défaut la plus fréquente du dépôt :
+le calcul est honnête, l'écran est muet.
+
+Trois canaux pour trois questions : un event SSE `protection_reject` au moment du refus
+(`replay=False`, un refus est un **événement daté**) ; `GET /protection`, qui est la **projection**
+du Decision Log et non un champ ; un panneau **C6** rafraîchi toutes les 5 s.
+
+**Ce que le panneau refuse de dire** : jamais « déverrouillé » quand il ne sait pas — endpoint
+injoignable affiche « ne signifie pas déverrouillé », parce qu'un panneau de sécurité qui rassure
+sur une erreur réseau est pire que pas de panneau. Et **aucun bouton de déblocage** : un panneau qui
+expliquerait *et* permettrait de contourner annulerait sa raison d'être.
+
+Un motif inconnu est rendu tel quel plutôt qu'effacé : le jour où F8 ajoutera un code, l'écran
+l'affichera. Et l'endpoint répond **aussi** quand rien n'est verrouillé — sinon l'écran ne
+distinguerait pas « pas verrouillé » de « endpoint muet ».
+
+### Vérif
+2 tests backend + 8 frontend → **1889 backend**, **170 frontend**, ruff + mypy + tsc propres.
+
+## D-112 · Câbler avant d'ajouter — et chacun là où sa donnée existe
+
+D-106 et D-111 étaient justes et **appelés par personne** : le cinquième piège de `HANDOFF.md`, deux
+fois d'affilée. Câblés avant toute nouvelle fonctionnalité, parce que deux modules non appelés
+valent zéro pour l'opérateur.
+
+**Vérifié avant de câbler**, et ce n'est pas le même endroit : `MboBook` (compteurs par ordre
+A/C/M/T) n'existe **que dans le rejeu** — une seule instanciation, dans `replay_harness`. Le moteur
+live ne voit qu'un carnet agrégé. Donc : vide de liquidité → **moteur** (travaille sur
+`{bids, asks}`, disponible en live) ; icebergs / churn → **harnais de rejeu**. Les brancher au même
+endroit aurait produit un module silencieux faute de données — la panne la plus discrète du dépôt.
+
+Deux gardes de fraîcheur pour la même raison : le détecteur de vide n'observe qu'un carnet `FRESH`
+(un carnet périmé alimenterait la référence avec une profondeur d'un autre instant, et un **faux
+vide se déclencherait au RETOUR du flux**) ; le comportement de liquidité est figé à l'armement,
+indexé par `setup_id`, même doctrine que le vecteur de features.
+
+Le détecteur de vide vit **avec** le moteur et non dans une fonction pure appelée par tick : il
+porte la référence glissante, donc il a un état.
+
+### Vérif
+3 tests de câblage → **1887 passed**, ruff clean, mypy 15 fichiers. Une erreur au passage :
+`ReplayHarness(tick=…)` alors que le paramètre est `tick_size` — corrigée dans le test.
+
+## D-111 · Détecteur de vide de liquidité — relatif, jamais absolu
+
+Optimisation #8. Mesure la densité du carnet sur les N niveaux les plus proches et signale son
+effondrement : un carnet qui se vide annonce un élargissement du spread, donc un slippage que la
+carte de résilience chiffre en points de taux de réussite. **Ce module n'empêche rien** (mode G2).
+
+**Densité par rapport à QUOI.** Une profondeur « faible » n'a de sens que comparée à ce que *ce*
+carnet montre habituellement : référence **glissante** (fenêtre 200), chute mesurée en relatif. Un
+seuil absolu ne voudrait rien dire entre MES et MNQ, ni entre 09h30 et 14h.
+
+**Fail-closed** : sous `MIN_OBSERVATIONS` (20), le verdict est `None` — « non mesurable », jamais
+« carnet sain ». Un détecteur qui répond « tout va bien » parce qu'il vient de démarrer serait pire
+que pas de détecteur. Même refus un cran plus bas : `_side_depth` rend `None` si un côté est
+illisible, car une profondeur calculée sur un seul côté sous-estimerait de moitié et **se lirait
+comme un vide**.
+
+`VACUUM_DROP_RATIO = 0.70` est un **PLACEHOLDER** non calibré, et le dit dans la source.
+
+## D-110 · L'écran de résilience dit sa baseline R:R
+
+Le JSON était honnête depuis D-109, l'écran ne l'était pas encore : la grille s'affichait sans dire
+qu'elle tourne à R:R **constant** alors que le moteur en produit un **variable**. C'est la faute
+corrigée en D-104 un cran plus loin — un calcul honnête dont l'affichage aplatit la nuance.
+
+Le bandeau (`BaselineRr`) porte le R:R employé, sa provenance (`baseline` / `surchargé`), et le
+rappel que le moteur en produit un variable (TP raccourci par le VPOC, calibration par instrument).
+
+Le R:R **observé** y figure quand il existe, avec sa **dispersion** — min et max, pas seulement la
+moyenne : les setups les moins favorables sont ceux qui tuent un compte, et une moyenne les masque.
+Sans mesure, c'est la raison du refus qui s'affiche (« 10 requis »), jamais un chiffre.
+
+Un payload sans `observed_rr` ne casse pas et reste honnête — testé, parce que le backend peut
+évoluer plus vite que l'écran.
+
+### Vérif
+4 tests neufs → **162 frontend**, tsc propre.
+
 ## D-109 · Les tables deviennent une BASELINE assumée — l'hypothèse était là, elle était invisible
 
 Suite de l'arbitrage D-107 (le moteur fait autorité). `resilience.py` modélisait `gain = r_usd`,

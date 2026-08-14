@@ -1,9 +1,13 @@
 # CI — le vert cesse d'être une parole et devient une preuve.
 #
 # Avant ce fichier, le dépôt n'avait AUCUN lanceur de tests : `check_runs` valait 0 et le seul
-# workflow listé était le graphe de dépendances Dependabot. Les 1747 tests backend et les 125
-# tests frontend ne tournaient que sur un poste de développement — « suite verte » était une
-# affirmation invérifiable par un relecteur.
+# workflow listé était le graphe de dépendances Dependabot. Les tests backend et frontend ne
+# tournaient que sur un poste de développement — « suite verte » était une affirmation
+# invérifiable par un relecteur.
+#
+# Les compteurs ne sont volontairement PAS écrits ici : un nombre figé dans un commentaire
+# devient faux au commit suivant, et un commentaire faux est pire qu'absent. L'état courant est
+# dans `HANDOFF.md` §1, et la seule preuve qui compte est le run lui-même.
 #
 # Les deux jobs installent depuis un VERROU (`requirements.lock`, `package-lock.json`) et non
 # depuis les bornes larges : un run ne doit pas pouvoir casser sur une release amont publiée
@@ -11,8 +15,8 @@
 #
 # ── Ce que la CI ne couvre PAS ───────────────────────────────────────────────────────────────
 # `frontend/public/v17/` — la maquette vendue (`index.html` + `live.js`). Vérifié : elle n'est
-# atteinte ni par `tsc` (hors de `include: ["src"]`) ni par aucun des 9 fichiers de test. C'est
-# du HTML/JS statique, et seule une ouverture réelle dans un navigateur la valide
+# atteinte ni par `tsc` (hors de `include: ["src"]`) ni par aucun fichier de test. C'est du
+# HTML/JS statique, et seule une ouverture réelle dans un navigateur la valide
 # (`docs/p4-verification.md`). Aucun job ici ne prétend le contraire.
 
 name: CI
@@ -100,9 +104,12 @@ jobs:
         run: npm ci --no-audit --no-fund
 
       - name: tsc --noEmit
-        # `strict: true`, et vérifié : les 81 fichiers de `src/` sont réellement traversés.
-        # Un typecheck qui compile zéro fichier passe aussi — il fallait le compter.
+        # `strict: true`, et vérifié via `--listFiles` : les fichiers de `src/` sont réellement
+        # traversés. Un typecheck qui compile zéro fichier passe aussi — il fallait le compter.
         run: npx tsc --noEmit
 
       - name: vitest
+        # `vitest.config.ts` force `NODE_ENV=test` (D-120) : une image qui exporte
+        # `NODE_ENV=production` résolvait React sur son build de production, où `act()` n'existe
+        # pas — 151 tests rouges pour une raison absente du dépôt.
         run: npx vitest run
