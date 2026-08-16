@@ -1,5 +1,40 @@
 """Pont ContextSchema → OrderFlowSnapshot (D-056).
+def normalize_order_flow_schema(df: pd.DataFrame, source_type: str = "auto") -> pd.DataFrame:
+    """
+    Harmonise les exports Databento, Tradovate ou Rithmic vers le schéma MBO/Orderflow interne.
+    """
+    df = df.copy()
 
+    # Détection et mapping Tradovate
+    if source_type == "tradovate" or ("timestamp" in df.columns and "orderId" in df.columns):
+        rename_map = {
+            "timestamp": "ts_event",
+            "orderId": "order_id",
+            "action": "action",
+            "side": "side",
+            "price": "price",
+            "qty": "size"
+        }
+        df = df.rename(columns=rename_map)
+        df["side"] = df["side"].map({"Buy": "B", "Sell": "A", "B": "B", "A": "A"})
+        
+    # Détection et mapping Rithmic
+    elif source_type == "rithmic" or ("Date Time" in df.columns and "Order ID" in df.columns):
+        rename_map = {
+            "Date Time": "ts_event",
+            "Order ID": "order_id",
+            "Type": "action",
+            "BS": "side",
+            "Price": "price",
+            "Volume": "size"
+        }
+        df = df.rename(columns=rename_map)
+        df["side"] = df["side"].map({"B": "B", "S": "A", "BUY": "B", "SELL": "A"})
+
+    if "ts_event" in df.columns:
+        df["ts_event"] = pd.to_datetime(df["ts_event"])
+
+    return df
 Le calculateur (D-055) prend des **ticks bruts** ; le moteur, lui, vit sur le **ContextSchema**.
 Ce module fait la jonction, et rien d'autre : il n'évalue aucune porte, n'applique aucun seuil.
 
