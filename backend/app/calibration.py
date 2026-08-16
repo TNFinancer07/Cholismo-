@@ -41,12 +41,16 @@ def run_calibration(parquet_path: str, *,
                     tick_size: float = 0.25, point_value: float = 5.0,
                     latency_ms: float = 35.0, latency_jitter_ms: float = 15.0,
                     rng_seed: int = 0,
-                    min_cell_sample: int = 10) -> dict[str, Any]:
+                    min_cell_sample: int = 10,
+                    source_type: Optional[str] = None) -> dict[str, Any]:
     """Rejoue une séance, journalise armements et issues, rend le bilan + la matrice.
 
     Les armements sont écrits AVANT les issues, dans l'ordre du flux : le journal doit pouvoir
-    se relire comme l'histoire de la séance, pas comme son résumé."""
-    events, ingest_stats = ingest_parquet(parquet_path)
+    se relire comme l'histoire de la séance, pas comme son résumé.
+
+    `source_type` traduit un export Tradovate / Rithmic avant ingestion (D-121). `None` = le
+    fichier est déjà au schéma Databento."""
+    events, ingest_stats = ingest_parquet(parquet_path, source_type=source_type)
     harness = ReplayHarness(tick_size=tick_size, point_value=point_value,
                             latency_ms=latency_ms, latency_jitter_ms=latency_jitter_ms,
                             rng_seed=rng_seed)
@@ -135,6 +139,10 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--news-state", default=None,
                         help="état de la porte F0 (défaut : inconnu → fail-closed, D-050)")
     parser.add_argument("--json", action="store_true", help="rapport brut en JSON")
+    parser.add_argument("--source", default=None, choices=("databento", "tradovate", "rithmic",
+                                                           "auto"),
+                        help="format de l'export (D-121). Omis = déjà au schéma Databento ; "
+                             "« auto » détecte, et REFUSE si la signature est ambiguë")
     args = parser.parse_args(argv)
 
     journal = SetupJournal(EventStore(args.db) if args.db else None)
@@ -144,7 +152,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     context = SessionContext.from_json_file(args.context) if args.context else None
     detector = MboLsrDetector(tick_size=args.tick, news_state=args.news_state, context=context)
     report = run_calibration(args.parquet, arm=detector, journal=journal,
-                             tick_size=args.tick, min_cell_sample=args.min_sample)
+                             tick_size=args.tick, min_cell_sample=args.min_sample,
+                             source_type=args.source)
     report["detector"] = detector.diagnostics()
     print(json.dumps(report, indent=2, ensure_ascii=False) if args.json else _format(report))
     if args.csv:

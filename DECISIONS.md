@@ -3752,6 +3752,75 @@ Log (§2.5), pas un champ mutable. Les deux derniers sont purs et courts.
 21 tests neufs, 4 tests existants mis à jour (F2 les fait changer de verdict) → **1353 passed**,
 ruff clean.
 
+## D-121 · Normalisation des exports fournisseur — et la fusion que j'ai refusée
+
+Demande : ajouter `normalize_order_flow_schema` (détection/normalisation Tradovate et Rithmic),
+soit en l'écrivant, soit en fusionnant la version posée sur `claude/finance-software-inspiration-88gdl9`.
+
+### Pourquoi la fusion était impossible
+
+Ouvert avant de décider. La version de cette branche **ne compile pas** : la fonction a été collée
+**à l'intérieur de la docstring de module**, ligne 2. Le `"""` de sa propre docstring ferme celle du
+module, et la ligne suivante devient du code indenté au niveau module — `IndentationError` ligne 4.
+`app/orderflow/bridge.py` étant importé par le moteur, **tout le backend cesse de démarrer**.
+
+Et le diff ne s'arrête pas là : la branche est antérieure à D-101, donc la fusionner **supprimerait**
+`_thresholds` et la clé `"thresholds"` d'`orderflow_shadow`. La colonne « seuil » des panneaux OF1-OF4
+passerait à `—` partout, sans erreur — une régression silencieuse par-dessus une panne bruyante.
+
+### Quatre défauts du brouillon, que le schéma réel révèle
+
+Le contrat interne n'est pas une convention : `ingest.normalize_row` fait autorité, et je l'ai lu
+avant d'écrire.
+
+1. **`pd.to_datetime(df["ts_event"])`** produit un `datetime64`. `normalize_row` exige un `int` et
+   rejette tout le reste en `MISSING_TIMESTAMP` : **le fichier entier serait parti**, sans exception.
+   La conversion se fait ici en **arithmétique entière** — `datetime.timestamp()` en flottant coûte
+   ~200 ns de précision à l'époque actuelle, exactement le collapsus que le port `bigint` a évité.
+2. **Aucun mappage d'action.** Les valeurs Tradovate passaient telles quelles ; chaque ligne serait
+   tombée en `UNKNOWN_ACTION`. Un export « normalisé » qui revient vide.
+3. **Aucune mise à l'échelle du prix.** `ingest` divise par 1e-9 : un 5012.25 brut devient 5×10⁻⁶ —
+   fini, donc **accepté sans rejet**, et faux partout en aval. Le défaut le plus discret des quatre,
+   et le seul qui ne se voit sur aucun compteur.
+4. **`.map()` rend `NaN`** sur une clé absente : la ligne survit et paraît complète. Ici une valeur
+   non mappée **rejette la ligne et la compte** — doctrine d'`ingest.py`.
+
+Deux ajouts que le brouillon ne prévoyait pas : `MboSide.NONE` est conservé (un `TRADE` sans côté
+attribué est légitime en MBO ; le rejeter jetterait des impressions réelles), et `sequence` —
+absente des deux formats, exigée par `ingest_parquet` — est **fabriquée depuis l'ordre des lignes**
+avec `sequence_synthesised: True` dans le rapport. Une séquence fabriquée ne peut pas détecter un
+trou de capture : la taire ferait lire une continuité qui n'a jamais été observée.
+
+### Trois refus structurels
+
+Source **indétectable** ou **ambiguë** → exception, jamais un passe-plat : rendre l'entrée inchangée
+laisserait croire qu'elle était déjà au bon format, et l'échec sortirait trois couches plus loin sur
+un message sans rapport. Colonne requise absente → fatale au **fichier**, comme dans `ingest.py`.
+
+### Placement : pas dans `bridge.py`
+
+Demandé dans `app/orderflow/bridge.py`, écrit dans `app/mbo/vendor_schema.py`. Deux raisons de
+fond : `bridge.py` est le pont **ContextSchema → snapshot**, il ne voit jamais de fichier
+fournisseur ; et `requirements-dev.txt` écrit noir sur blanc que pandas est « commodité
+d'exploration, **JAMAIS le chemin d'exécution** » — y poser une fonction pandas contredirait une
+règle déjà tranchée. Le cœur travaille donc sur les `list[dict]` que `read_parquet_rows` produit
+déjà ; un DataFrame reste accepté en entrée sans que pandas entre dans le graphe d'import.
+
+### Câblé, pas seulement écrit
+`ingest_parquet(source_type=…)` et `--source` sur la CLI de calibration, avec les rejets de
+traduction versés dans les **mêmes** statistiques — un rapport qui n'additionnerait pas les deux
+étapes afficherait un taux de rejet flatteur. Le défaut reste `None` : sans `--source`, le
+comportement est celui d'hier à l'octet près, et un test le verrouille.
+
+### Ce qui N'EST PAS vérifié
+Les vocabulaires Tradovate et Rithmic viennent de la **documentation publique** et n'ont été
+confrontés à **aucun export réel** — même statut que le codec Tradovate (D-100), et marqués
+`PLACEHOLDER` dans la source. Ce qui est garanti : la cohérence interne, le fail-closed, et qu'un
+test confronte la sortie à `normalize_row` plutôt qu'à l'idée que je me fais de son contrat.
+
+### Vérif
+28 tests neufs → **1953 passed**, ruff clean, mypy 15 fichiers.
+
 ## D-120 · La suite frontend ne dépend plus du shell qui l'appelle
 
 Constaté en reprenant le dépôt dans un conteneur neuf : **151 tests sur 215 rouges**, sans qu'une

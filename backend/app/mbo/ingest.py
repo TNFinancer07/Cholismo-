@@ -110,16 +110,30 @@ def normalize_row(row: dict[str, Any], stats: IngestStats,
 
 
 def ingest_parquet(path: str, *, gap_threshold_ns: int = GAP_THRESHOLD_NS,
-                   drop_out_of_order: bool = False) -> tuple[list[MboEvent], IngestStats]:
+                   drop_out_of_order: bool = False,
+                   source_type: Optional[str] = None) -> tuple[list[MboEvent], IngestStats]:
     """Lit un Parquet MBO et rend `(événements, statistiques)`.
 
     `drop_out_of_order=False` par défaut : un recul temporel est **signalé et conservé**. Trier
     ou jeter en silence ferait disparaître le symptôme d'un problème de capture que l'opérateur
     doit connaître avant d'en tirer la moindre conclusion. Le passer à `True` est un choix
     explicite, et les lignes jetées sont comptées comme les autres.
+
+    `source_type` branche la normalisation fournisseur (D-121) pour un export Tradovate ou
+    Rithmic. **`None` par défaut, et c'est délibéré** : appliquer une détection automatique à
+    tout fichier ferait renommer des colonnes sans que personne l'ait demandé, et un export
+    Databento légèrement atypique pourrait se faire prendre pour autre chose. Traduire est un
+    choix explicite ; ne rien faire reste le comportement d'hier, à l'octet près.
     """
     rows, columns = read_parquet_rows(path)
     stats = IngestStats()
+
+    if source_type is not None:
+        from .vendor_schema import normalize_order_flow_schema
+        # Les lignes écartées à la traduction sont comptées dans les MÊMES statistiques : un
+        # rapport qui n'additionnerait pas les deux étapes afficherait un taux de rejet flatteur.
+        rows, _ = normalize_order_flow_schema(rows, source_type, stats=stats)
+        columns = list(rows[0].keys()) if rows else list(REQUIRED_COLUMNS)
 
     missing = [col for col in REQUIRED_COLUMNS if col not in columns]
     if missing:
